@@ -1,0 +1,48 @@
+[package]
+name = "legere"
+version.workspace = true
+edition.workspace = true
+description = "Legere: a local-first article reading and storage app"
+
+[lib]
+name = "legere_lib"
+crate-type = ["staticlib", "cdylib", "lib"]
+
+[[bin]]
+name = "legere"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+chrono = { version = "0.4.45", features = ["serde"] }
+dom_smoothie = "0.18.0"
+feed-rs = "2.4.0"
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "webp"] }
+r2d2 = "0.8.10"
+r2d2_sqlite = { version = "0.35.0", features = ["bundled"] }
+reqwest = { version = "0.13.4", default-features = false, features = ["rustls", "http2", "json"] }
+rusqlite = { version = "0.40.1", features = ["bundled"] }
+rusqlite_migration = "2.6.0"
+# TODO: switch to a git dependency pinned to a commit SHA once SSH auth to
+# github.com/RitvijSrivastava/scraper1 is available non-interactively (the
+# passphrase-protected key here needs a GUI prompt this session can't answer).
+scraper1-assets = { version = "0.1.0", path = "../../scraper1/crates/assets" }
+scraper1-sanitize = { version = "0.1.0", path = "../../scraper1/crates/sanitize" }
+scraper1-urlx = { version = "0.1.0", path = "../../scraper1/crates/urlx" }
+scraper1-zim = { version = "0.1.0", path = "../../scraper1/crates/zim" }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+tauri = { version = "2.11.5", features = ["protocol-asset"] }
+tauri-plugin-opener = "2.5.4"
+thiserror = "2.0.18"
+tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "time", "fs", "sync"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+url = "2.5.8"
+uuid = { version = "1.24.0", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3.27.0"
+tokio = { version = "1.52.3", features = ["test-util", "rt-multi-thread", "macros"] }
