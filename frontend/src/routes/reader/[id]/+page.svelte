@@ -8,6 +8,7 @@
 	import HeroImage from '$lib/components/HeroImage.svelte';
 	import SegmentedControl from '$lib/components/SegmentedControl.svelte';
 	import ReaderControls from '$lib/components/ReaderControls.svelte';
+	import ArticleOverflowMenu from '$lib/components/ArticleOverflowMenu.svelte';
 	import ChevronLeft from '$lib/icons/ChevronLeft.svelte';
 	import Heart from '$lib/icons/Heart.svelte';
 	import ExternalLink from '$lib/icons/ExternalLink.svelte';
@@ -128,6 +129,28 @@
 		const storeItem = articlesStore.items.find((a) => a.id === article!.id);
 		if (storeItem) storeItem.favorited = favorited;
 	}
+
+	let recapturing = $state(false);
+
+	async function recapture() {
+		if (!article) return;
+		recapturing = true;
+		try {
+			article = await api.recaptureArticle(article.id);
+			view = article.extraction_confident ? 'readable' : 'original';
+		} finally {
+			recapturing = false;
+		}
+	}
+
+	async function deleteArticle() {
+		if (!article) return;
+		if (!confirm(`Delete "${article.title}"? This can't be undone.`)) return;
+		const id = article.id;
+		await api.deleteArticle(id);
+		articlesStore.items = articlesStore.items.filter((a) => a.id !== id);
+		goto('/');
+	}
 </script>
 
 <div bind:this={containerEl}>
@@ -171,6 +194,7 @@
 					>
 						<Heart filled={article.favorited} />
 					</button>
+					<ArticleOverflowMenu {recapturing} onRecapture={recapture} onDelete={deleteArticle} />
 				</div>
 			{/if}
 		</div>

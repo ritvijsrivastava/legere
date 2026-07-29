@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use chrono::Utc;
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use uuid::Uuid;
@@ -92,6 +94,46 @@ pub fn insert_captured_article(
     Ok(inserted)
 }
 
+/// Overwrites an existing article's captured content in place, for
+/// `recapture_article` — re-running the capture pipeline against the same
+/// id (and thus the same on-disk ZIM/hero-image paths, which the caller
+/// has already overwritten by this point). `unread`/`favorited`/
+/// `reading_progress` are deliberately left untouched: a re-capture
+/// refreshes the *content*, not the reader's relationship to it. `link`
+/// is updated too — if that collides with another article's
+/// `UNIQUE(link)`, this fails with a constraint error rather than
+/// silently corrupting either row, which is the right outcome for a
+/// manual, occasional action.
+pub fn update_captured_article(
+    conn: &Connection,
+    id: &str,
+    output: &CaptureOutput,
+) -> rusqlite::Result<()> {
+    conn.execute(
+        "UPDATE articles SET
+            title = ?2, link = ?3, excerpt = ?4, content_html = ?5,
+            hero_image_path = ?6, published_at = ?7, read_time_min = ?8,
+            zim_path = ?9, zim_main_path = ?10, extraction_confident = ?11,
+            updated_at = ?12
+         WHERE id = ?1",
+        params![
+            id,
+            output.title,
+            output.link,
+            output.excerpt,
+            output.content_html,
+            output.hero_image_path,
+            output.published_at,
+            output.read_time_min,
+            output.zim_path,
+            output.zim_main_path,
+            output.extraction_confident,
+            Utc::now().to_rfc3339(),
+        ],
+    )?;
+    Ok(())
+}
+
 pub fn list_articles(conn: &Connection) -> rusqlite::Result<Vec<ArticleSummary>> {
     let mut stmt = conn.prepare(
         "SELECT id, title, source_name, source_type, excerpt, hero_image_path,
@@ -175,6 +217,78 @@ pub fn save_reading_progress(conn: &Connection, id: &str, progress: f64) -> rusq
     Ok(())
 }
 
+/// On-disk file paths (relative to `data_dir`) an about-to-be-deleted
+/// article owns, so the caller can remove them after the row itself is
+/// gone.
+pub struct DeletedArticleFiles {
+    pub zim_path: String,
+    pub hero_image_path: Option<String>,
+}
+
+/// Deletes an article and decrements its source's `article_count` (floored
+/// at 0). Returns `None` if `id` didn't match any row — deleting an
+/// already-gone article is treated as a no-op success by the caller, not
+/// an error. `remove_source` deliberately does *not* cascade to articles
+/// (`ON DELETE SET NULL` — read-later semantics: removing a feed doesn't
+/// discard what you already saved from it), so this is the only path that
+/// ever deletes an article row.
+pub fn delete_article(conn: &Connection, id: &str) -> rusqlite::Result<Option<DeletedArticleFiles>> {
+    let row = conn
+        .query_row(
+            "SELECT source_id, zim_path, hero_image_path FROM articles WHERE id = ?1",
+            params![id],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>("source_id")?,
+                    row.get::<_, String>("zim_path")?,
+                    row.get::<_, Option<String>>("hero_image_path")?,
+                ))
+            },
+        )
+        .optional()?;
+
+    let Some((source_id, zim_path, hero_image_path)) = row else {
+        return Ok(None);
+    };
+
+    conn.execute("DELETE FROM articles WHERE id = ?1", params![id])?;
+
+    if let Some(sid) = source_id {
+        conn.execute(
+            "UPDATE sources SET article_count = MAX(0, article_count - 1), updated_at = ?2 WHERE id = ?1",
+            params![sid, Utc::now().to_rfc3339()],
+        )?;
+    }
+
+    Ok(Some(DeletedArticleFiles {
+        zim_path,
+        hero_image_path,
+    }))
+}
+
+/// Every `zim_path`/`hero_image_path` currently referenced by a live
+/// article row — the startup orphan sweep (`gc::sweep_orphaned_files`)
+/// diffs this against what's actually on disk under `archives/`/`media/`
+/// and removes whatever isn't in this set.
+pub fn list_referenced_files(conn: &Connection) -> rusqlite::Result<HashSet<String>> {
+    let mut stmt = conn.prepare("SELECT zim_path, hero_image_path FROM articles")?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, Option<String>>(1)?,
+        ))
+    })?;
+    let mut referenced = HashSet::new();
+    for row in rows {
+        let (zim_path, hero_image_path) = row?;
+        referenced.insert(zim_path);
+        if let Some(hero) = hero_image_path {
+            referenced.insert(hero);
+        }
+    }
+    Ok(referenced)
+}
+
 pub fn mark_read(conn: &Connection, id: &str) -> rusqlite::Result<()> {
     conn.execute(
         "UPDATE articles SET unread = 0, updated_at = ?2 WHERE id = ?1",
@@ -250,11 +364,36 @@ pub fn insert_rss_source(conn: &Connection, name: &str, feed_url: &str) -> rusql
     })
 }
 
+/// Replaces a source's placeholder name (the raw feed URL, set at add-time
+/// before the feed's own title was known) with its real title — but only
+/// the first time: the `WHERE name = feed_url` guard means this becomes a
+/// no-op on every later sync once the rename has happened once, and would
+/// never overwrite a name the user has since customized (no rename UI
+/// exists yet, but this guard is what makes adding one safe later).
+pub fn set_source_name_if_default(
+    conn: &Connection,
+    id: &str,
+    title: &str,
+    feed_url: &str,
+) -> rusqlite::Result<()> {
+    conn.execute(
+        "UPDATE sources SET name = ?1, updated_at = ?4 WHERE id = ?2 AND name = ?3",
+        params![title, id, feed_url, Utc::now().to_rfc3339()],
+    )?;
+    Ok(())
+}
+
+/// Toggles a source between `active` and `paused`. Deliberately has no
+/// `status != 'error'` guard (an earlier version did): an errored source
+/// must be pausable (stop retrying a feed that's broken) and resumable
+/// (try again) just like any other, and this is the only UI path back to
+/// `active` from `error` short of a successful sync — without it, an
+/// errored source was stuck until removed and re-added.
 pub fn toggle_source_pause(conn: &Connection, id: &str) -> rusqlite::Result<Source> {
     conn.execute(
         "UPDATE sources SET status = CASE status WHEN 'paused' THEN 'active' ELSE 'paused' END,
                             updated_at = ?2
-         WHERE id = ?1 AND status != 'error'",
+         WHERE id = ?1",
         params![id, Utc::now().to_rfc3339()],
     )?;
     get_source(conn, id)?.ok_or(rusqlite::Error::QueryReturnedNoRows)
@@ -340,4 +479,100 @@ pub fn update_settings(conn: &Connection, settings: &Settings) -> rusqlite::Resu
         params![settings.reader_leading],
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::capture::CaptureOutput;
+
+    fn migrated_conn() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("open in-memory db");
+        crate::db::schema::migrate(&mut conn).expect("migrate");
+        conn
+    }
+
+    fn sample_capture_output(link: &str) -> CaptureOutput {
+        CaptureOutput {
+            title: "Title".to_string(),
+            link: link.to_string(),
+            excerpt: "excerpt".to_string(),
+            content_html: "<p>content</p>".to_string(),
+            published_at: None,
+            read_time_min: 3,
+            hero_image_path: None,
+            zim_path: "archives/x.zim".to_string(),
+            zim_main_path: "index.html".to_string(),
+            extraction_confident: true,
+        }
+    }
+
+    #[test]
+    fn toggle_source_pause_recovers_a_source_from_error_status() {
+        let conn = migrated_conn();
+        let source = insert_rss_source(&conn, "Feed", "https://example.com/feed.xml").unwrap();
+        mark_source_error(&conn, &source.id, "boom").unwrap();
+        assert_eq!(get_source(&conn, &source.id).unwrap().unwrap().status, "error");
+
+        // Errored source must be pausable...
+        let paused = toggle_source_pause(&conn, &source.id).unwrap();
+        assert_eq!(paused.status, "paused");
+
+        // ...and resumable back to active, the only UI path out of `error`
+        // short of a successful sync.
+        let resumed = toggle_source_pause(&conn, &source.id).unwrap();
+        assert_eq!(resumed.status, "active");
+    }
+
+    #[test]
+    fn mark_source_synced_clears_error_status_and_message() {
+        let conn = migrated_conn();
+        let source = insert_rss_source(&conn, "Feed", "https://example.com/feed.xml").unwrap();
+        mark_source_error(&conn, &source.id, "boom").unwrap();
+
+        mark_source_synced(&conn, &source.id).unwrap();
+
+        let refreshed = get_source(&conn, &source.id).unwrap().unwrap();
+        assert_eq!(refreshed.status, "active");
+        assert_eq!(refreshed.last_error, None);
+    }
+
+    #[test]
+    fn delete_article_removes_row_decrements_source_count_and_returns_file_paths() {
+        let conn = migrated_conn();
+        let source = insert_rss_source(&conn, "Feed", "https://example.com/feed.xml").unwrap();
+        let output = sample_capture_output("https://example.com/article");
+        insert_captured_article(&conn, "art-1", Some(&source.id), &source.name, "rss", &output).unwrap();
+        assert_eq!(get_source(&conn, &source.id).unwrap().unwrap().article_count, 1);
+
+        let deleted = delete_article(&conn, "art-1").unwrap().expect("row existed");
+        assert_eq!(deleted.zim_path, "archives/x.zim");
+        assert_eq!(deleted.hero_image_path, None);
+
+        assert!(get_article(&conn, "art-1").unwrap().is_none());
+        assert_eq!(get_source(&conn, &source.id).unwrap().unwrap().article_count, 0);
+    }
+
+    #[test]
+    fn delete_article_is_a_no_op_for_an_unknown_id() {
+        let conn = migrated_conn();
+        assert!(delete_article(&conn, "does-not-exist").unwrap().is_none());
+    }
+
+    #[test]
+    fn set_source_name_if_default_only_replaces_the_placeholder_once() {
+        let conn = migrated_conn();
+        let feed_url = "https://example.com/feed.xml";
+        let source = insert_rss_source(&conn, feed_url, feed_url).unwrap();
+        assert_eq!(source.name, feed_url);
+
+        set_source_name_if_default(&conn, &source.id, "Real Feed Title", feed_url).unwrap();
+        assert_eq!(get_source(&conn, &source.id).unwrap().unwrap().name, "Real Feed Title");
+
+        // A later call — even with a *different* title — must not
+        // overwrite a name that's no longer the placeholder (this is also
+        // what protects a future user-set custom name).
+        set_source_name_if_default(&conn, &source.id, "Some Other Title", feed_url).unwrap();
+        assert_eq!(get_source(&conn, &source.id).unwrap().unwrap().name, "Real Feed Title");
+    }
 }

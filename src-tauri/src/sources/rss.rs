@@ -36,6 +36,16 @@ pub async fn sync_rss_source(state: &AppState, source: &Source) -> Result<u32, R
         .await?;
     let feed = feed_rs::parser::parse(&bytes[..])?;
 
+    if let Some(title) = feed
+        .title
+        .as_ref()
+        .map(|t| t.content.trim())
+        .filter(|t| !t.is_empty())
+    {
+        let conn = state.pool.get()?;
+        queries::set_source_name_if_default(&conn, &source.id, title, feed_url)?;
+    }
+
     let mut new_count = 0u32;
     for entry in feed.entries.into_iter().take(MAX_ENTRIES_PER_SYNC) {
         let Some(link) = entry.links.first().map(|l| l.href.clone()) else {
@@ -128,5 +138,45 @@ mod tests {
         let articles = queries::list_articles(&conn).expect("list articles");
         assert_eq!(articles.len(), 1);
         assert!(articles.iter().all(|a| a.source_type == "rss"));
+    }
+
+    /// `add_source` seeds a new source's `name` with its raw feed URL as a
+    /// placeholder (the real title isn't known until the feed is actually
+    /// fetched) — the first sync must replace it with the feed's own
+    /// title, matching real `add_source` usage rather than the other test
+    /// above's fixture, which passes a friendly name up front.
+    #[tokio::test]
+    async fn first_sync_replaces_the_placeholder_name_with_the_feeds_title() {
+        let data_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = data_dir.path().join("legere.db");
+        let pool = db::build_pool(&db_path).expect("build pool");
+        {
+            let mut conn = pool.get().expect("get conn");
+            db::schema::migrate(&mut conn).expect("migrate");
+        }
+
+        let base_url = test_support::spawn().await;
+        let state = AppState {
+            pool: pool.clone(),
+            http_client: test_support::plain_client(),
+            data_dir: data_dir.path().to_path_buf(),
+            autosync_handle: Mutex::new(None),
+            zim_cache: crate::zim_server::ZimCache::new(),
+        };
+
+        let feed_url = format!("{base_url}/feed.xml");
+        let source = {
+            let conn = pool.get().expect("get conn");
+            // Matches how `commands::sources::add_source` actually seeds a
+            // new source: name == feed_url until the first sync learns better.
+            queries::insert_rss_source(&conn, &feed_url, &feed_url).expect("insert source")
+        };
+        assert_eq!(source.name, feed_url);
+
+        sync_rss_source(&state, &source).await.expect("sync should succeed");
+
+        let conn = pool.get().expect("get conn");
+        let renamed = queries::get_source(&conn, &source.id).unwrap().unwrap();
+        assert_eq!(renamed.name, "Fixture Feed");
     }
 }

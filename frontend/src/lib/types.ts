@@ -1,4 +1,4 @@
-export type SourceType = 'rss' | 'mail' | 'direct';
+export type SourceType = 'rss' | 'direct';
 export type SourceStatus = 'active' | 'paused' | 'error';
 export type FontSize = 'small' | 'medium' | 'large';
 export type LibraryView = 'cards' | 'list';

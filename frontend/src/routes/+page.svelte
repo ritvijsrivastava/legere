@@ -2,11 +2,15 @@
 	import { goto } from '$app/navigation';
 	import { articlesStore } from '$lib/stores/articles.svelte';
 	import { settingsStore } from '$lib/stores/settings.svelte';
+	import { sourcesStore } from '$lib/stores/sources.svelte';
+	import { uiStore } from '$lib/stores/ui.svelte';
 	import SegmentedControl from '$lib/components/SegmentedControl.svelte';
 	import ArticleCard from '$lib/components/ArticleCard.svelte';
 	import ArticleListRow from '$lib/components/ArticleListRow.svelte';
 	import Grid from '$lib/icons/Grid.svelte';
 	import ListIcon from '$lib/icons/ListIcon.svelte';
+	import Refresh from '$lib/icons/Refresh.svelte';
+	import * as api from '$lib/api';
 	import type { LibraryView } from '$lib/types';
 
 	let libraryView = $state<LibraryView>('cards');
@@ -29,6 +33,12 @@
 	function openArticle(id: string) {
 		goto(`/reader/${id}`);
 	}
+
+	async function deleteArticle(article: { id: string; title: string }) {
+		if (!confirm(`Delete "${article.title}"? This can't be undone.`)) return;
+		await api.deleteArticle(article.id);
+		articlesStore.items = articlesStore.items.filter((a) => a.id !== article.id);
+	}
 </script>
 
 <div class="library-page">
@@ -37,25 +47,35 @@
 			<h1>Library</h1>
 			<span class="unread-sub">{articlesStore.unreadCount} unread</span>
 		</div>
-		<div class="seg view-toggle">
-			<label class="seg-opt">
-				<input
-					type="radio"
-					name="libview"
-					checked={libraryView === 'cards'}
-					onchange={() => setView('cards')}
-				/>
-				<Grid />
-			</label>
-			<label class="seg-opt">
-				<input
-					type="radio"
-					name="libview"
-					checked={libraryView === 'list'}
-					onchange={() => setView('list')}
-				/>
-				<ListIcon />
-			</label>
+		<div class="header-controls">
+			<button
+				class="btn btn-icon btn-secondary"
+				onclick={() => sourcesStore.syncAll()}
+				disabled={uiStore.syncing}
+				aria-label="Refresh"
+			>
+				<Refresh spinning={uiStore.syncing} />
+			</button>
+			<div class="seg view-toggle">
+				<label class="seg-opt">
+					<input
+						type="radio"
+						name="libview"
+						checked={libraryView === 'cards'}
+						onchange={() => setView('cards')}
+					/>
+					<Grid />
+				</label>
+				<label class="seg-opt">
+					<input
+						type="radio"
+						name="libview"
+						checked={libraryView === 'list'}
+						onchange={() => setView('list')}
+					/>
+					<ListIcon />
+				</label>
+			</div>
 		</div>
 	</div>
 
@@ -66,13 +86,21 @@
 	{:else if libraryView === 'cards'}
 		<div class="cards-grid">
 			{#each articlesStore.items as article (article.id)}
-				<ArticleCard {article} onclick={() => openArticle(article.id)} />
+				<ArticleCard
+					{article}
+					onclick={() => openArticle(article.id)}
+					ondelete={() => deleteArticle(article)}
+				/>
 			{/each}
 		</div>
 	{:else}
 		<div class="list-rows">
 			{#each articlesStore.items as article (article.id)}
-				<ArticleListRow {article} onclick={() => openArticle(article.id)} />
+				<ArticleListRow
+					{article}
+					onclick={() => openArticle(article.id)}
+					ondelete={() => deleteArticle(article)}
+				/>
 			{/each}
 		</div>
 	{/if}
@@ -100,6 +128,11 @@
 	.unread-sub {
 		font-size: 12px;
 		color: var(--color-neutral-500);
+	}
+	.header-controls {
+		display: flex;
+		align-items: center;
+		gap: 8px;
 	}
 	.view-toggle :global(svg) {
 		display: block;

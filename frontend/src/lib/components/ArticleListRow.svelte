@@ -2,37 +2,59 @@
 	import type { ArticleSummary } from '$lib/types';
 	import { formatDate, formatReadTime } from '$lib/format';
 	import HeroImage from './HeroImage.svelte';
+	import Trash from '$lib/icons/Trash.svelte';
 
-	let { article, onclick }: { article: ArticleSummary; onclick: () => void } = $props();
+	let {
+		article,
+		onclick,
+		ondelete
+	}: { article: ArticleSummary; onclick: () => void; ondelete: () => void } = $props();
 </script>
 
-<button {onclick} class="article-row">
-	<div class="thumb">
-		<HeroImage path={article.hero_image_path} alt={article.title} />
-		{#if article.reading_progress > 0.02 && article.reading_progress < 0.98}
-			<div class="progress-track">
-				<div class="progress-fill" style:width="{Math.round(article.reading_progress * 100)}%"></div>
-			</div>
-		{/if}
-	</div>
-	<div class="body">
-		<div class="title-row">
-			<h4 class="title">{article.title}</h4>
-			{#if article.unread}
-				<span class="unread-dot"></span>
+<div class="row-wrapper">
+	<button {onclick} class="article-row">
+		<div class="thumb">
+			<HeroImage path={article.hero_image_path} alt={article.title} />
+			{#if article.reading_progress > 0.02 && article.reading_progress < 0.98}
+				<div class="progress-track">
+					<div class="progress-fill" style:width="{Math.round(article.reading_progress * 100)}%"></div>
+				</div>
 			{/if}
 		</div>
-		<div class="card-meta">
-			<span>{article.source_name}</span>
-			<span>·</span>
-			<span>{formatDate(article.published_at)}</span>
-			<span>·</span>
-			<span>{formatReadTime(article.read_time_min)}</span>
+		<div class="body">
+			<div class="title-row">
+				<h4 class="title">{article.title}</h4>
+				{#if article.unread}
+					<span class="unread-dot"></span>
+				{/if}
+			</div>
+			<div class="card-meta">
+				<span>{article.source_name}</span>
+				<span>·</span>
+				<span>{formatDate(article.published_at)}</span>
+				<span>·</span>
+				<span>{formatReadTime(article.read_time_min)}</span>
+			</div>
 		</div>
-	</div>
-</button>
+	</button>
+	<button class="delete-btn" onclick={ondelete} aria-label="Delete article">
+		<Trash size={14} />
+	</button>
+</div>
 
 <style>
+	.row-wrapper {
+		display: flex;
+		align-items: center;
+		gap: 2px;
+		border-radius: var(--radius-md);
+	}
+	.row-wrapper:hover {
+		background: color-mix(in srgb, var(--color-text) 5%, transparent);
+	}
+	.row-wrapper:not(:hover):not(:focus-within) .delete-btn {
+		opacity: 0;
+	}
 	.article-row {
 		display: flex;
 		align-items: center;
@@ -45,10 +67,27 @@
 		padding: 10px 8px;
 		font-family: var(--font-body);
 		color: var(--color-text);
-		width: 100%;
+		flex: 1;
+		min-width: 0;
 	}
-	.article-row:hover {
-		background: color-mix(in srgb, var(--color-text) 5%, transparent);
+	.delete-btn {
+		flex: none;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 30px;
+		height: 30px;
+		margin-right: 8px;
+		border: none;
+		border-radius: var(--radius-sm);
+		background: none;
+		color: var(--color-neutral-500);
+		cursor: pointer;
+		transition: opacity 0.1s;
+	}
+	.delete-btn:hover {
+		color: var(--color-accent-200);
+		background: color-mix(in srgb, var(--color-text) 8%, transparent);
 	}
 	.thumb {
 		position: relative;

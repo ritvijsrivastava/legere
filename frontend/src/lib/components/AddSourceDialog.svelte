@@ -13,17 +13,14 @@
 
 	const typeLabelMap: Record<SourceType, string> = {
 		rss: 'RSS feed URL',
-		mail: 'Forwarding address',
 		direct: 'Article URL'
 	};
 	const placeholderMap: Record<SourceType, string> = {
 		rss: 'https://example.com/feed.xml',
-		mail: 'you@company.com',
 		direct: 'https://example.com/article'
 	};
 	const helpMap: Record<SourceType, string> = {
 		rss: 'Legere checks this feed periodically and stores new entries for offline reading.',
-		mail: 'Forward emails to this address and Legere will scrape and store them as articles.',
 		direct: 'Paste a link and Legere scrapes the page once and saves a clean copy.'
 	};
 
@@ -42,7 +39,7 @@
 			if (newSourceType === 'rss') {
 				await sourcesStore.add('rss', newSourceValue.trim());
 				close();
-			} else if (newSourceType === 'direct') {
+			} else {
 				const article = await api.addDirectLinkArticle(newSourceValue.trim());
 				close();
 				await goto(`/reader/${article.id}`);
@@ -77,9 +74,8 @@
 				name="newtype"
 				bind:value={newSourceType as unknown as string}
 				options={[
-					{ value: 'rss', label: 'RSS' },
-					{ value: 'mail', label: 'Mail' },
-					{ value: 'direct', label: 'Direct link' }
+					{ value: 'rss', label: 'RSS feed' },
+					{ value: 'direct', label: 'Article URL' }
 				]}
 			/>
 			<div class="field">
@@ -94,20 +90,13 @@
 			</div>
 			<div class="dialog-body">
 				{helpMap[newSourceType]}
-				{#if newSourceType === 'mail'}
-					<br /><strong>Mail sources are coming in a future release.</strong>
-				{/if}
 			</div>
 			{#if error}
 				<div class="dialog-body">{error}</div>
 			{/if}
 			<div class="dialog-actions">
 				<button class="btn btn-secondary" onclick={close}>Cancel</button>
-				<button
-					class="btn btn-primary"
-					onclick={submit}
-					disabled={newSourceType === 'mail' || submitting || !newSourceValue.trim()}
-				>
+				<button class="btn btn-primary" onclick={submit} disabled={submitting || !newSourceValue.trim()}>
 					Add source
 				</button>
 			</div>

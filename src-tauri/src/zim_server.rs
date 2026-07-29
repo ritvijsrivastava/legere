@@ -38,11 +38,9 @@ impl ZimCache {
 
     /// Drops any cached reader for `article_id`, so a subsequent request
     /// (if the file still exists) re-opens it from disk rather than
-    /// serving stale in-memory content.
-    ///
-    /// Not yet called from production code — wired to the article-delete
-    /// command in Phase 3 (PLAN.md), covered by tests in the meantime.
-    #[allow(dead_code)]
+    /// serving stale in-memory content. Called on article delete and
+    /// re-capture — both replace or remove the underlying ZIM file out
+    /// from under whatever's cached.
     pub fn evict(&self, article_id: &str) {
         self.inner.lock().unwrap().pop(article_id);
     }

@@ -32,6 +32,14 @@ export function addDirectLinkArticle(url: string): Promise<ArticleSummary> {
 	return invoke<ArticleSummary>('add_direct_link_article', { url });
 }
 
+export function deleteArticle(id: string): Promise<void> {
+	return invoke<void>('delete_article', { id });
+}
+
+export function recaptureArticle(id: string): Promise<ArticleDetail> {
+	return invoke<ArticleDetail>('recapture_article', { id });
+}
+
 export function listSources(): Promise<Source[]> {
 	return invoke<Source[]>('list_sources');
 }

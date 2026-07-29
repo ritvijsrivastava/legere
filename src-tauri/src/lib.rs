@@ -1,6 +1,8 @@
 mod capture;
 mod commands;
 mod db;
+mod events;
+mod gc;
 mod models;
 mod sources;
 mod state;
@@ -72,6 +74,16 @@ pub fn run() {
                 });
             }
 
+            // One-shot cleanup of files orphaned by crashes or removal
+            // paths that predate `delete_article`'s own GC. Spawned
+            // rather than awaited so it never delays startup — see
+            // `gc`'s module docs.
+            let app_handle_for_gc = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let state = app_handle_for_gc.state::<AppState>();
+                gc::sweep_orphaned_files(&state).await;
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -80,6 +92,8 @@ pub fn run() {
             commands::articles::mark_read,
             commands::articles::toggle_favorite,
             commands::articles::save_reading_progress,
+            commands::articles::delete_article,
+            commands::articles::recapture_article,
             commands::articles::add_direct_link_article,
             commands::sources::list_sources,
             commands::sources::add_source,
