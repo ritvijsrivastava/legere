@@ -19,11 +19,8 @@ pub async fn list_sources(state: State<'_, AppState>) -> Result<Vec<Source>, Str
 
 /// Registers a recurring RSS source and triggers its first sync immediately
 /// (rather than leaving it empty until the next autosync interval, up to 15
-/// minutes away). `mail` is rejected here as a defense-in-depth guard — the
-/// frontend already disables the Add button for it, this is the backend's
-/// own refusal in case that's ever bypassed. Direct-link "sources" are a
-/// distinct one-shot capture, not a recurring source — see
-/// `commands::articles::add_direct_link_article`.
+/// minutes away). Direct-link "sources" are a distinct one-shot capture,
+/// not a recurring source — see `commands::articles::add_direct_link_article`.
 #[tauri::command]
 pub async fn add_source(
     state: State<'_, AppState>,
@@ -57,7 +54,6 @@ pub async fn add_source(
             .await
             .map_err(|e| e.to_string())?
         }
-        "mail" => Err("mail sources are not yet supported".to_string()),
         other => Err(format!("unknown source type: {other}")),
     }
 }

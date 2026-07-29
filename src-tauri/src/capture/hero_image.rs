@@ -5,13 +5,12 @@ use image::imageops::FilterType;
 
 const MAX_WIDTH: u32 = 1200;
 
-/// Downloads the image at `url` and re-encodes it as a bounded-width JPEG,
+/// Re-encodes already-fetched image `bytes` as a bounded-width JPEG,
 /// normalizing whatever format the source served and keeping stored hero
-/// images small. Returns `None` on any fetch/decode failure — a missing hero
+/// images small. Returns `None` on any decode failure — a missing hero
 /// image is not a capture failure.
-pub async fn fetch_and_resize(client: &reqwest::Client, url: &str) -> Option<Vec<u8>> {
-    let bytes = client.get(url).send().await.ok()?.bytes().await.ok()?;
-    let img = image::load_from_memory(&bytes).ok()?;
+pub fn resize_bytes(bytes: &[u8]) -> Option<Vec<u8>> {
+    let img = image::load_from_memory(bytes).ok()?;
 
     let resized = if img.width() > MAX_WIDTH {
         let ratio = MAX_WIDTH as f64 / img.width() as f64;
@@ -27,4 +26,15 @@ pub async fn fetch_and_resize(client: &reqwest::Client, url: &str) -> Option<Vec
         .write_to(&mut out, ImageFormat::Jpeg)
         .ok()?;
     Some(out.into_inner())
+}
+
+/// Downloads the image at `url` and hands it to [`resize_bytes`]. Used when
+/// the hero image wasn't among the assets already localized for the ZIM
+/// (e.g. it lives outside `sanitized_page_html`'s own asset references, or
+/// its fetch was skipped by the size cap) — see
+/// `crate::capture::capture_article`, which prefers reusing already-fetched
+/// bytes over this second network round-trip.
+pub async fn fetch_and_resize(client: &reqwest::Client, url: &str) -> Option<Vec<u8>> {
+    let bytes = client.get(url).send().await.ok()?.bytes().await.ok()?;
+    resize_bytes(&bytes)
 }

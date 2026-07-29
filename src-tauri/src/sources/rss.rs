@@ -54,7 +54,7 @@ pub async fn sync_rss_source(state: &AppState, source: &Source) -> Result<u32, R
         match capture::capture_article(&state.http_client, &state.data_dir, &id, &link).await {
             Ok(output) => {
                 let conn = state.pool.get()?;
-                queries::insert_captured_article(
+                let inserted = queries::insert_captured_article(
                     &conn,
                     &id,
                     Some(&source.id),
@@ -62,7 +62,9 @@ pub async fn sync_rss_source(state: &AppState, source: &Source) -> Result<u32, R
                     "rss",
                     &output,
                 )?;
-                new_count += 1;
+                if inserted {
+                    new_count += 1;
+                }
             }
             Err(err) => {
                 tracing::warn!(source_id = %source.id, %link, error = %err, "failed to capture RSS entry");
@@ -79,14 +81,16 @@ mod tests {
 
     use super::*;
     use crate::db;
+    use crate::test_support;
 
-    /// Exercises a real RSS sync end-to-end against a live, stable feed:
-    /// fetch feed -> parse -> capture each new entry -> insert into SQLite,
-    /// then a second sync of the same feed should find every entry already
-    /// captured (by link) and add nothing new — the dedup path that keeps
-    /// autosync from re-fetching a feed's entire backlog every interval.
+    /// Exercises an RSS sync end-to-end against a local fixture feed (no
+    /// live network): fetch feed -> parse -> capture the entry -> insert
+    /// into SQLite, then a second sync of the same feed should find the
+    /// entry already captured (by link) and add nothing new — the dedup
+    /// path that keeps autosync from re-fetching a feed's entire backlog
+    /// every interval.
     #[tokio::test]
-    async fn syncs_a_real_feed_and_dedupes_on_second_sync() {
+    async fn syncs_a_fixture_feed_and_dedupes_on_second_sync() {
         let data_dir = tempfile::tempdir().expect("tempdir");
         let db_path = data_dir.path().join("legere.db");
         let pool = db::build_pool(&db_path).expect("build pool");
@@ -95,23 +99,24 @@ mod tests {
             db::schema::migrate(&mut conn).expect("migrate");
         }
 
+        let base_url = test_support::spawn().await;
         let state = AppState {
             pool: pool.clone(),
-            http_client: capture::fetch::build_client(),
+            http_client: test_support::plain_client(),
             data_dir: data_dir.path().to_path_buf(),
             autosync_handle: Mutex::new(None),
         };
 
         let source = {
             let conn = pool.get().expect("get conn");
-            queries::insert_rss_source(&conn, "Rust Blog", "https://blog.rust-lang.org/feed.xml")
+            queries::insert_rss_source(&conn, "Fixture Feed", &format!("{base_url}/feed.xml"))
                 .expect("insert source")
         };
 
         let first_sync_count = sync_rss_source(&state, &source)
             .await
-            .expect("first sync should succeed against a real feed");
-        assert!(first_sync_count > 0, "expected at least one article captured");
+            .expect("first sync should succeed against the fixture feed");
+        assert_eq!(first_sync_count, 1, "fixture feed has exactly one entry");
 
         let second_sync_count = sync_rss_source(&state, &source)
             .await
@@ -120,7 +125,7 @@ mod tests {
 
         let conn = pool.get().expect("get conn");
         let articles = queries::list_articles(&conn).expect("list articles");
-        assert_eq!(articles.len() as u32, first_sync_count);
+        assert_eq!(articles.len(), 1);
         assert!(articles.iter().all(|a| a.source_type == "rss"));
     }
 }

@@ -20,6 +20,13 @@ fn article_summary_from_row(row: &Row) -> rusqlite::Result<ArticleSummary> {
     })
 }
 
+/// A cheap pre-check used to skip capturing (fetching + localizing +
+/// archiving) an article whose link is already known, before doing any of
+/// that work. This is an optimization only, not the dedup guarantee — two
+/// concurrent syncs racing on the same brand-new link can both pass this
+/// check and both attempt to insert; [`insert_captured_article`]'s
+/// `UNIQUE(link)` index plus `INSERT OR IGNORE` is what actually makes
+/// that safe.
 pub fn article_link_exists(conn: &Connection, link: &str) -> rusqlite::Result<bool> {
     conn.query_row(
         "SELECT 1 FROM articles WHERE link = ?1 LIMIT 1",
@@ -34,6 +41,12 @@ pub fn article_link_exists(conn: &Connection, link: &str) -> rusqlite::Result<bo
 /// `capture_article` was called with, since that's what its ZIM/hero-image
 /// file paths are named after). `source_id` is `None` for direct-link
 /// captures (they aren't tied to a recurring source).
+///
+/// Returns `true` if the row was actually inserted, `false` if
+/// `output.link` already existed and the `UNIQUE(link)` index silently
+/// absorbed the insert via `OR IGNORE` — the authoritative dedup signal
+/// (atomic, unlike the best-effort [`article_link_exists`] pre-check a
+/// caller may have already used to skip the capture work entirely).
 pub fn insert_captured_article(
     conn: &Connection,
     id: &str,
@@ -41,14 +54,15 @@ pub fn insert_captured_article(
     source_name: &str,
     source_type: &str,
     output: &CaptureOutput,
-) -> rusqlite::Result<()> {
-    let fetched_at = Utc::now().to_rfc3339();
-    conn.execute(
-        "INSERT INTO articles (
+) -> rusqlite::Result<bool> {
+    let now = Utc::now().to_rfc3339();
+    let inserted = conn.execute(
+        "INSERT OR IGNORE INTO articles (
             id, source_id, source_name, source_type, title, link, excerpt,
             content_html, hero_image_path, published_at, fetched_at,
-            read_time_min, unread, favorited, zim_path
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 1, 0, ?13)",
+            read_time_min, unread, favorited, zim_path, zim_main_path,
+            extraction_confident, updated_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 1, 0, ?13, ?14, ?15, ?16)",
         params![
             id,
             source_id,
@@ -60,18 +74,21 @@ pub fn insert_captured_article(
             output.content_html,
             output.hero_image_path,
             output.published_at,
-            fetched_at,
+            now,
             output.read_time_min,
             output.zim_path,
+            output.zim_main_path,
+            output.extraction_confident,
+            now,
         ],
-    )?;
-    if let Some(sid) = source_id {
+    )? > 0;
+    if inserted && let Some(sid) = source_id {
         conn.execute(
-            "UPDATE sources SET article_count = article_count + 1 WHERE id = ?1",
-            params![sid],
+            "UPDATE sources SET article_count = article_count + 1, updated_at = ?2 WHERE id = ?1",
+            params![sid, now],
         )?;
     }
-    Ok(())
+    Ok(inserted)
 }
 
 pub fn list_articles(conn: &Connection) -> rusqlite::Result<Vec<ArticleSummary>> {
@@ -110,18 +127,37 @@ pub fn get_article(conn: &Connection, id: &str) -> rusqlite::Result<Option<Artic
     .optional()
 }
 
+/// Looks up an article's summary by its (cleaned) link — used when
+/// [`insert_captured_article`] reports a duplicate, so a caller like
+/// `direct_link::capture_direct_link` can return the article that's
+/// actually stored under that link instead of one describing a row that
+/// was never inserted.
+pub fn get_article_summary_by_link(
+    conn: &Connection,
+    link: &str,
+) -> rusqlite::Result<Option<ArticleSummary>> {
+    conn.query_row(
+        "SELECT id, title, source_name, source_type, excerpt, hero_image_path,
+                published_at, read_time_min, unread, favorited
+         FROM articles WHERE link = ?1",
+        params![link],
+        article_summary_from_row,
+    )
+    .optional()
+}
+
 pub fn mark_read(conn: &Connection, id: &str) -> rusqlite::Result<()> {
     conn.execute(
-        "UPDATE articles SET unread = 0 WHERE id = ?1",
-        params![id],
+        "UPDATE articles SET unread = 0, updated_at = ?2 WHERE id = ?1",
+        params![id, Utc::now().to_rfc3339()],
     )?;
     Ok(())
 }
 
 pub fn toggle_favorite(conn: &Connection, id: &str) -> rusqlite::Result<bool> {
     conn.execute(
-        "UPDATE articles SET favorited = 1 - favorited WHERE id = ?1",
-        params![id],
+        "UPDATE articles SET favorited = 1 - favorited, updated_at = ?2 WHERE id = ?1",
+        params![id, Utc::now().to_rfc3339()],
     )?;
     conn.query_row(
         "SELECT favorited FROM articles WHERE id = ?1",
@@ -168,8 +204,8 @@ pub fn insert_rss_source(conn: &Connection, name: &str, feed_url: &str) -> rusql
     let id = Uuid::new_v4().to_string();
     let created_at = Utc::now().to_rfc3339();
     conn.execute(
-        "INSERT INTO sources (id, name, type, feed_url, status, article_count, created_at)
-         VALUES (?1, ?2, 'rss', ?3, 'active', 0, ?4)",
+        "INSERT INTO sources (id, name, type, feed_url, status, article_count, created_at, updated_at)
+         VALUES (?1, ?2, 'rss', ?3, 'active', 0, ?4, ?4)",
         params![id, name, feed_url, created_at],
     )?;
     Ok(Source {
@@ -187,9 +223,10 @@ pub fn insert_rss_source(conn: &Connection, name: &str, feed_url: &str) -> rusql
 
 pub fn toggle_source_pause(conn: &Connection, id: &str) -> rusqlite::Result<Source> {
     conn.execute(
-        "UPDATE sources SET status = CASE status WHEN 'paused' THEN 'active' ELSE 'paused' END
+        "UPDATE sources SET status = CASE status WHEN 'paused' THEN 'active' ELSE 'paused' END,
+                            updated_at = ?2
          WHERE id = ?1 AND status != 'error'",
-        params![id],
+        params![id, Utc::now().to_rfc3339()],
     )?;
     get_source(conn, id)?.ok_or(rusqlite::Error::QueryReturnedNoRows)
 }
@@ -202,7 +239,8 @@ pub fn remove_source(conn: &Connection, id: &str) -> rusqlite::Result<()> {
 pub fn mark_source_synced(conn: &Connection, id: &str) -> rusqlite::Result<()> {
     let now = Utc::now().to_rfc3339();
     conn.execute(
-        "UPDATE sources SET last_synced_at = ?1, status = 'active', last_error = NULL WHERE id = ?2",
+        "UPDATE sources SET last_synced_at = ?1, status = 'active', last_error = NULL, updated_at = ?1
+         WHERE id = ?2",
         params![now, id],
     )?;
     Ok(())
@@ -210,8 +248,8 @@ pub fn mark_source_synced(conn: &Connection, id: &str) -> rusqlite::Result<()> {
 
 pub fn mark_source_error(conn: &Connection, id: &str, error: &str) -> rusqlite::Result<()> {
     conn.execute(
-        "UPDATE sources SET status = 'error', last_error = ?1 WHERE id = ?2",
-        params![error, id],
+        "UPDATE sources SET status = 'error', last_error = ?1, updated_at = ?3 WHERE id = ?2",
+        params![error, id, Utc::now().to_rfc3339()],
     )?;
     Ok(())
 }

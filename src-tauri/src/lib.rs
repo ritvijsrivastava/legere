@@ -5,6 +5,8 @@ mod models;
 mod sources;
 mod state;
 mod sync;
+#[cfg(test)]
+mod test_support;
 
 use std::time::Duration;
 

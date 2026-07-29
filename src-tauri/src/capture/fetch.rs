@@ -9,7 +9,11 @@ pub enum FetchError {
 }
 
 pub struct FetchedPage {
-    pub final_url: String,
+    /// The final URL after following redirects — used as the base for
+    /// resolving every relative reference on the page (both asset
+    /// localization and readability extraction) and as the source of the
+    /// article's canonical/cleaned link.
+    pub final_url: url::Url,
     pub html: String,
 }
 
@@ -18,7 +22,7 @@ pub struct FetchedPage {
 /// HTML body.
 pub async fn fetch_page(client: &reqwest::Client, url: &str) -> Result<FetchedPage, FetchError> {
     let response = client.get(url).send().await?;
-    let final_url = response.url().to_string();
+    let final_url = response.url().clone();
     let status = response.status();
     if !status.is_success() {
         return Err(FetchError::Status(status));

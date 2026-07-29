@@ -25,7 +25,18 @@ pub async fn capture_direct_link(
     let output = capture::capture_article(&state.http_client, &state.data_dir, &id, url).await?;
 
     let conn = state.pool.get()?;
-    queries::insert_captured_article(&conn, &id, None, "Direct link", "direct", &output)?;
+    let inserted =
+        queries::insert_captured_article(&conn, &id, None, "Direct link", "direct", &output)?;
+
+    // `output.link`'s cleaned form was already saved under a different id
+    // (the user re-submitted a URL they already have) — the fresh `id`
+    // below was never actually inserted, so return the article that's
+    // really stored under that link instead of a summary describing a
+    // row that doesn't exist.
+    if !inserted && let Some(existing) = queries::get_article_summary_by_link(&conn, &output.link)?
+    {
+        return Ok(existing);
+    }
 
     Ok(ArticleSummary {
         id,
