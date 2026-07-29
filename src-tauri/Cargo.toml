@@ -26,12 +26,12 @@ reqwest = { version = "0.13.4", default-features = false, features = ["rustls", 
 rusqlite = { version = "0.40.1", features = ["bundled"] }
 rusqlite_migration = "2.6.0"
 # TODO: switch to a git dependency pinned to a commit SHA once SSH auth to
-# github.com/RitvijSrivastava/scraper1 is available non-interactively (the
+# github.com/ritvijsrivastava/wraith is available non-interactively (the
 # passphrase-protected key here needs a GUI prompt this session can't answer).
-scraper1-assets = { version = "0.1.0", path = "../../scraper1/crates/assets" }
-scraper1-sanitize = { version = "0.1.0", path = "../../scraper1/crates/sanitize" }
-scraper1-urlx = { version = "0.1.0", path = "../../scraper1/crates/urlx" }
-scraper1-zim = { version = "0.1.0", path = "../../scraper1/crates/zim" }
+wraith-assets = { version = "0.1.0", path = "../../wraith/crates/assets" }
+wraith-sanitize = { version = "0.1.0", path = "../../wraith/crates/sanitize" }
+wraith-urlx = { version = "0.1.0", path = "../../wraith/crates/urlx" }
+wraith-zim = { version = "0.1.0", path = "../../wraith/crates/zim" }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
 tauri = { version = "2.11.5", features = ["protocol-asset"] }

@@ -2297,10 +2297,6 @@ dependencies = [
  "reqwest",
  "rusqlite",
  "rusqlite_migration",
- "scraper1-assets",
- "scraper1-sanitize",
- "scraper1-urlx",
- "scraper1-zim",
  "serde",
  "serde_json",
  "tauri",
@@ -2313,6 +2309,10 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "uuid",
+ "wraith-assets",
+ "wraith-sanitize",
+ "wraith-urlx",
+ "wraith-zim",
 ]
 
 [[package]]
@@ -3785,52 +3785,6 @@ name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
-
-[[package]]
-name = "scraper1-assets"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "futures",
- "html-escape",
- "lightningcss",
- "lol_html",
- "reqwest",
- "scraper1-urlx",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "url",
-]
-
-[[package]]
-name = "scraper1-sanitize"
-version = "0.1.0"
-dependencies = [
- "html-escape",
- "lol_html",
- "thiserror 2.0.18",
- "tracing",
-]
-
-[[package]]
-name = "scraper1-urlx"
-version = "0.1.0"
-dependencies = [
- "percent-encoding",
- "url",
-]
-
-[[package]]
-name = "scraper1-zim"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "md-5",
- "thiserror 2.0.18",
- "uuid",
- "zstd",
-]
 
 [[package]]
 name = "security-framework"
@@ -5864,6 +5818,52 @@ name = "wit-bindgen"
 version = "0.57.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
+
+[[package]]
+name = "wraith-assets"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "futures",
+ "html-escape",
+ "lightningcss",
+ "lol_html",
+ "reqwest",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "url",
+ "wraith-urlx",
+]
+
+[[package]]
+name = "wraith-sanitize"
+version = "0.1.0"
+dependencies = [
+ "html-escape",
+ "lol_html",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
+name = "wraith-urlx"
+version = "0.1.0"
+dependencies = [
+ "percent-encoding",
+ "url",
+]
+
+[[package]]
+name = "wraith-zim"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "md-5",
+ "thiserror 2.0.18",
+ "uuid",
+ "zstd",
+]
 
 [[package]]
 name = "writeable"

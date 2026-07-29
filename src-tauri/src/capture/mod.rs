@@ -14,9 +14,9 @@ pub enum CaptureError {
     #[error(transparent)]
     Fetch(#[from] FetchError),
     #[error("failed to sanitize captured HTML: {0}")]
-    Sanitize(#[from] scraper1_sanitize::SanitizeError),
+    Sanitize(#[from] wraith_sanitize::SanitizeError),
     #[error("failed to write ZIM archive: {0}")]
-    Zim(#[from] scraper1_zim::ZimError),
+    Zim(#[from] wraith_zim::ZimError),
     #[error("filesystem error: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -51,7 +51,7 @@ pub async fn capture_article(
 ) -> Result<CaptureOutput, CaptureError> {
     let page = fetch::fetch_page(client, url).await?;
     let extracted = extract::extract(&page.html, &page.final_url);
-    let sanitized_content = scraper1_sanitize::sanitize(&extracted.content_html)?;
+    let sanitized_content = wraith_sanitize::sanitize(&extracted.content_html)?;
 
     let media_dir = data_dir.join("media");
     let archives_dir = data_dir.join("archives");
@@ -116,7 +116,7 @@ mod tests {
         let zim_path = data_dir.path().join(&output.zim_path);
         assert!(zim_path.exists(), "ZIM file should exist on disk");
 
-        let reader = scraper1_zim::ZimReader::open(&zim_path).expect("ZIM should be readable back");
+        let reader = wraith_zim::ZimReader::open(&zim_path).expect("ZIM should be readable back");
         let main_page = reader
             .main_page()
             .expect("reading main page should not error")

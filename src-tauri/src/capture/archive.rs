@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use scraper1_zim::{WriteReport, ZimError, ZimWriter, today_iso8601};
+use wraith_zim::{WriteReport, ZimError, ZimWriter, today_iso8601};
 
 /// Archives the raw (pre-extraction) HTML for one article as a single-page
 /// ZIM file. MVP scope deliberately omits recursive asset localization (see
