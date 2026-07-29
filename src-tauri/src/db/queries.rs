@@ -17,6 +17,7 @@ fn article_summary_from_row(row: &Row) -> rusqlite::Result<ArticleSummary> {
         read_time_min: row.get("read_time_min")?,
         unread: row.get::<_, i64>("unread")? != 0,
         favorited: row.get::<_, i64>("favorited")? != 0,
+        reading_progress: row.get("reading_progress")?,
     })
 }
 
@@ -94,7 +95,7 @@ pub fn insert_captured_article(
 pub fn list_articles(conn: &Connection) -> rusqlite::Result<Vec<ArticleSummary>> {
     let mut stmt = conn.prepare(
         "SELECT id, title, source_name, source_type, excerpt, hero_image_path,
-                published_at, read_time_min, unread, favorited
+                published_at, read_time_min, unread, favorited, reading_progress
          FROM articles ORDER BY fetched_at DESC",
     )?;
     let rows = stmt.query_map([], article_summary_from_row)?;
@@ -104,7 +105,8 @@ pub fn list_articles(conn: &Connection) -> rusqlite::Result<Vec<ArticleSummary>>
 pub fn get_article(conn: &Connection, id: &str) -> rusqlite::Result<Option<ArticleDetail>> {
     conn.query_row(
         "SELECT id, title, source_name, source_type, excerpt, hero_image_path,
-                published_at, read_time_min, unread, favorited, link, content_html
+                published_at, read_time_min, unread, favorited, link, content_html,
+                zim_main_path, extraction_confident, reading_progress
          FROM articles WHERE id = ?1",
         params![id],
         |row| {
@@ -121,6 +123,9 @@ pub fn get_article(conn: &Connection, id: &str) -> rusqlite::Result<Option<Artic
                 favorited: row.get::<_, i64>("favorited")? != 0,
                 link: row.get("link")?,
                 content_html: row.get("content_html")?,
+                zim_main_path: row.get("zim_main_path")?,
+                extraction_confident: row.get::<_, i64>("extraction_confident")? != 0,
+                reading_progress: row.get("reading_progress")?,
             })
         },
     )
@@ -138,12 +143,36 @@ pub fn get_article_summary_by_link(
 ) -> rusqlite::Result<Option<ArticleSummary>> {
     conn.query_row(
         "SELECT id, title, source_name, source_type, excerpt, hero_image_path,
-                published_at, read_time_min, unread, favorited
+                published_at, read_time_min, unread, favorited, reading_progress
          FROM articles WHERE link = ?1",
         params![link],
         article_summary_from_row,
     )
     .optional()
+}
+
+/// The archived-page's on-disk ZIM path (relative to `data_dir`), for the
+/// `zim://` protocol handler — looking this up by id doubles as the
+/// traversal guard: only an id that's actually a stored article's row
+/// resolves to a real file, so an arbitrary/forged id in a `zim://`
+/// request can't reach any other file under `archives/`.
+pub fn get_article_zim_path(conn: &Connection, id: &str) -> rusqlite::Result<Option<String>> {
+    conn.query_row(
+        "SELECT zim_path FROM articles WHERE id = ?1",
+        params![id],
+        |row| row.get(0),
+    )
+    .optional()
+}
+
+/// Persists the reader's scroll-fraction progress for an article, called
+/// on a debounce from the reader's scroll handler.
+pub fn save_reading_progress(conn: &Connection, id: &str, progress: f64) -> rusqlite::Result<()> {
+    conn.execute(
+        "UPDATE articles SET reading_progress = ?2, updated_at = ?3 WHERE id = ?1",
+        params![id, progress.clamp(0.0, 1.0), Utc::now().to_rfc3339()],
+    )?;
+    Ok(())
 }
 
 pub fn mark_read(conn: &Connection, id: &str) -> rusqlite::Result<()> {
@@ -266,6 +295,13 @@ pub fn get_settings(conn: &Connection) -> rusqlite::Result<Settings> {
             "default_font_size" => settings.default_font_size = value,
             "default_library_view" => settings.default_library_view = value,
             "autosync" => settings.autosync = value == "true",
+            "reader_font_size" => {
+                if let Ok(size) = value.parse() {
+                    settings.reader_font_size = size;
+                }
+            }
+            "reader_measure" => settings.reader_measure = value,
+            "reader_leading" => settings.reader_leading = value,
             _ => {}
         }
     }
@@ -287,6 +323,21 @@ pub fn update_settings(conn: &Connection, settings: &Settings) -> rusqlite::Resu
         "INSERT INTO settings (key, value) VALUES ('autosync', ?1)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value",
         params![if settings.autosync { "true" } else { "false" }],
+    )?;
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES ('reader_font_size', ?1)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![settings.reader_font_size.to_string()],
+    )?;
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES ('reader_measure', ?1)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![settings.reader_measure],
+    )?;
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES ('reader_leading', ?1)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![settings.reader_leading],
     )?;
     Ok(())
 }

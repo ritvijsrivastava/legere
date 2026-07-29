@@ -2,6 +2,9 @@
 @import '@fontsource/inter/500.css';
 @import '@fontsource/inter/600.css';
 @import '@fontsource/inter/700.css';
+@import '@fontsource-variable/source-serif-4/wght.css';
+@import '@fontsource-variable/source-serif-4/wght-italic.css';
 
 @import './lib/styles/tokens.css';
 @import './lib/styles/components.css';
+@import './lib/styles/reader.css';

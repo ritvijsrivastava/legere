@@ -1,0 +1,104 @@
+/* Matter-style reading typography for `.reader-body` — the extracted
+   article content rendered via {@html}. Font size, measure, and line
+   height are user-tunable via the reader's "Aa" popover and applied as
+   inline custom properties on `.reader-body` itself (see
+   reader/[id]/+page.svelte); this file covers everything else: element
+   spacing, weights, and the serif voice for prose. */
+
+.reader-body {
+  font-family: var(--font-reading);
+  font-variation-settings: 'wght' 400;
+  color: var(--color-neutral-100);
+}
+
+.reader-body :global(p) {
+  margin: 0 0 1.3em;
+}
+
+.reader-body :global(a) {
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--color-accent) 55%, transparent);
+  text-underline-offset: 3px;
+}
+
+.reader-body :global(strong) {
+  font-variation-settings: 'wght' 600;
+}
+
+.reader-body :global(h2),
+.reader-body :global(h3),
+.reader-body :global(h4) {
+  font-family: var(--font-heading);
+  font-weight: 600;
+  color: var(--color-text);
+  letter-spacing: -0.01em;
+  margin: 1.6em 0 0.6em;
+}
+.reader-body :global(h2) { font-size: 1.5em; }
+.reader-body :global(h3) { font-size: 1.25em; }
+.reader-body :global(h4) { font-size: 1.1em; }
+
+.reader-body :global(blockquote) {
+  margin: 1.6em 0;
+  padding-left: 1.1em;
+  border-left: 2px solid var(--color-accent);
+  color: color-mix(in srgb, var(--color-neutral-100) 82%, transparent);
+  font-style: italic;
+}
+
+.reader-body :global(figure) {
+  margin: 1.8em 0;
+}
+.reader-body :global(figure img) {
+  border-radius: var(--radius-md);
+}
+.reader-body :global(figcaption) {
+  margin-top: 8px;
+  font-family: var(--font-body);
+  font-size: 0.72em;
+  color: var(--color-neutral-500);
+  text-align: center;
+}
+
+.reader-body :global(img) {
+  border-radius: var(--radius-md);
+  margin: 0.4em 0 1.6em;
+}
+
+.reader-body :global(pre) {
+  margin: 1.6em 0;
+  padding: var(--space-4);
+  overflow-x: auto;
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  border: 1px solid var(--color-divider);
+}
+.reader-body :global(code) {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.85em;
+}
+.reader-body :global(p code),
+.reader-body :global(li code) {
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  background: var(--color-surface);
+}
+.reader-body :global(pre code) {
+  padding: 0;
+  background: none;
+}
+
+.reader-body :global(ul),
+.reader-body :global(ol) {
+  margin: 0 0 1.3em;
+  padding-left: 1.4em;
+}
+.reader-body :global(li) {
+  margin-bottom: 0.4em;
+}
+
+.reader-body :global(hr) {
+  margin: 2.2em 0;
+  border: none;
+  border-top: 1px solid var(--color-divider);
+}

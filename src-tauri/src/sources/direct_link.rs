@@ -49,5 +49,6 @@ pub async fn capture_direct_link(
         read_time_min: output.read_time_min,
         unread: true,
         favorited: false,
+        reading_progress: 0.0,
     })
 }

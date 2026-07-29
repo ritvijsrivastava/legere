@@ -105,6 +105,7 @@ mod tests {
             http_client: test_support::plain_client(),
             data_dir: data_dir.path().to_path_buf(),
             autosync_handle: Mutex::new(None),
+            zim_cache: crate::zim_server::ZimCache::new(),
         };
 
         let source = {

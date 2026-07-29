@@ -4,7 +4,10 @@ import type { Settings } from '../types';
 const DEFAULT_SETTINGS: Settings = {
 	default_font_size: 'medium',
 	default_library_view: 'cards',
-	autosync: true
+	autosync: true,
+	reader_font_size: 19,
+	reader_measure: 'default',
+	reader_leading: 'default'
 };
 
 class SettingsStore {

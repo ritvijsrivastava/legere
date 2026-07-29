@@ -9,6 +9,11 @@
 <button {onclick} class="article-card elev-sm">
 	<div class="hero">
 		<HeroImage path={article.hero_image_path} alt={article.title} />
+		{#if article.reading_progress > 0.02 && article.reading_progress < 0.98}
+			<div class="progress-track">
+				<div class="progress-fill" style:width="{Math.round(article.reading_progress * 100)}%"></div>
+			</div>
+		{/if}
 	</div>
 	<div class="body">
 		<div class="title-row">
@@ -43,9 +48,22 @@
 		color: var(--color-text);
 	}
 	.hero {
+		position: relative;
 		width: 100%;
 		aspect-ratio: 16 / 9;
 		border-bottom: 1px solid var(--color-divider);
+	}
+	.progress-track {
+		position: absolute;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		height: 3px;
+		background: color-mix(in srgb, black 45%, transparent);
+	}
+	.progress-fill {
+		height: 100%;
+		background: var(--color-accent);
 	}
 	.body {
 		display: flex;

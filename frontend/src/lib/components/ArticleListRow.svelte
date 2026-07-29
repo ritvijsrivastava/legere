@@ -9,6 +9,11 @@
 <button {onclick} class="article-row">
 	<div class="thumb">
 		<HeroImage path={article.hero_image_path} alt={article.title} />
+		{#if article.reading_progress > 0.02 && article.reading_progress < 0.98}
+			<div class="progress-track">
+				<div class="progress-fill" style:width="{Math.round(article.reading_progress * 100)}%"></div>
+			</div>
+		{/if}
 	</div>
 	<div class="body">
 		<div class="title-row">
@@ -46,6 +51,7 @@
 		background: color-mix(in srgb, var(--color-text) 5%, transparent);
 	}
 	.thumb {
+		position: relative;
 		width: 56px;
 		height: 56px;
 		flex: none;
@@ -53,6 +59,18 @@
 		overflow: hidden;
 		background: var(--color-surface);
 		border: 1px solid var(--color-divider);
+	}
+	.progress-track {
+		position: absolute;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		height: 2px;
+		background: color-mix(in srgb, black 45%, transparent);
+	}
+	.progress-fill {
+		height: 100%;
+		background: var(--color-accent);
 	}
 	.body {
 		flex: 1;

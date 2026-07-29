@@ -24,6 +24,10 @@ export function toggleFavorite(id: string): Promise<boolean> {
 	return invoke<boolean>('toggle_favorite', { id });
 }
 
+export function saveReadingProgress(id: string, progress: number): Promise<void> {
+	return invoke<void>('save_reading_progress', { id, progress });
+}
+
 export function addDirectLinkArticle(url: string): Promise<ArticleSummary> {
 	return invoke<ArticleSummary>('add_direct_link_article', { url });
 }
@@ -75,4 +79,24 @@ export async function assetUrl(relativePath: string | null): Promise<string | nu
 	const dataDir = await getDataDir();
 	const separator = dataDir.endsWith('/') || dataDir.endsWith('\\') ? '' : '/';
 	return convertFileSrc(`${dataDir}${separator}${relativePath}`);
+}
+
+/** Builds a webview-loadable URL for `path` inside an article's own ZIM
+ *  archive, served by the `zim://` protocol handler registered in `lib.rs`. */
+export function zimUrl(articleId: string, path: string): string {
+	return convertFileSrc(`${articleId}/${path}`, 'zim');
+}
+
+/** The `legere-zim:/` token prefix capture writes into readable-view
+ *  `content_html` (see `capture::rewrite` on the Rust side) — a
+ *  platform-neutral placeholder since the real `zim://` URL shape differs
+ *  across desktop and Android. */
+const ZIM_TOKEN_PREFIX = 'legere-zim:/';
+
+/** Rewrites every `legere-zim:/<id>/<path>` token in `html` into a real,
+ *  platform-correct `zim://` URL. Call once on an article's `content_html`
+ *  before rendering it with `{@html}`. */
+export function resolveZimTokens(html: string): string {
+	const base = convertFileSrc('', 'zim');
+	return html.replaceAll(ZIM_TOKEN_PREFIX, base);
 }

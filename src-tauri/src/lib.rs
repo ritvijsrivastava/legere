@@ -7,6 +7,7 @@ mod state;
 mod sync;
 #[cfg(test)]
 mod test_support;
+mod zim_server;
 
 use std::time::Duration;
 
@@ -25,6 +26,20 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        // Serves archived pages out of an article's own ZIM file — see
+        // `zim_server`'s module docs. Runs the actual read on a plain OS
+        // thread, matching Tauri's own documented pattern for this API: a
+        // protocol handler can be invoked from a webview thread with no
+        // Tokio runtime entered on it, so `tokio::spawn`/`spawn_blocking`
+        // aren't safe to call here the way they are from inside a command.
+        .register_asynchronous_uri_scheme_protocol("zim", |ctx, request, responder| {
+            let app_handle = ctx.app_handle().clone();
+            let path = request.uri().path().to_string();
+            std::thread::spawn(move || {
+                let state = app_handle.state::<AppState>();
+                responder.respond(zim_server::serve(state.inner(), &path));
+            });
+        })
         .setup(|app| {
             let data_dir = app.path().app_local_data_dir()?.join("legere");
             std::fs::create_dir_all(&data_dir)?;
@@ -45,6 +60,7 @@ pub fn run() {
                 http_client: capture::fetch::build_client(),
                 data_dir,
                 autosync_handle: Mutex::new(None),
+                zim_cache: zim_server::ZimCache::new(),
             };
             app.manage(state);
 
@@ -63,6 +79,7 @@ pub fn run() {
             commands::articles::get_article,
             commands::articles::mark_read,
             commands::articles::toggle_favorite,
+            commands::articles::save_reading_progress,
             commands::articles::add_direct_link_article,
             commands::sources::list_sources,
             commands::sources::add_source,

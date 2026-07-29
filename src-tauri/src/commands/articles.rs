@@ -53,6 +53,22 @@ pub async fn toggle_favorite(state: State<'_, AppState>, id: String) -> Result<b
     .map_err(|e| e.to_string())?
 }
 
+/// Called on a debounce from the reader's scroll handler.
+#[tauri::command]
+pub async fn save_reading_progress(
+    state: State<'_, AppState>,
+    id: String,
+    progress: f64,
+) -> Result<(), String> {
+    let pool = state.pool.clone();
+    tokio::task::spawn_blocking(move || {
+        let conn = pool.get().map_err(|e| e.to_string())?;
+        queries::save_reading_progress(&conn, &id, progress).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 pub async fn add_direct_link_article(
     state: State<'_, AppState>,
