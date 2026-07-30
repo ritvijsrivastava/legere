@@ -149,7 +149,8 @@
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		padding: 12px 16px;
+		padding: calc(12px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) 12px
+			calc(16px + env(safe-area-inset-left));
 		position: sticky;
 		top: 0;
 		background: var(--color-bg);
@@ -167,7 +168,7 @@
 		overflow-y: auto;
 	}
 	.content.mobile {
-		padding-bottom: 70px;
+		padding-bottom: calc(70px + env(safe-area-inset-bottom));
 	}
 
 	.bottom-bar {
@@ -176,13 +177,18 @@
 		border-top: 1px solid var(--color-divider);
 		background: var(--color-bg);
 		flex: none;
+		padding-bottom: env(safe-area-inset-bottom);
+		padding-left: env(safe-area-inset-left);
+		padding-right: env(safe-area-inset-right);
 	}
 	.bottom-nav-item {
 		flex: 1;
 		display: flex;
 		flex-direction: column;
 		align-items: center;
+		justify-content: center;
 		gap: 2px;
+		min-height: 44px;
 		padding: 8px 0 10px;
 		background: none;
 		border: none;

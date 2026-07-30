@@ -3,6 +3,7 @@ mod commands;
 mod db;
 mod events;
 mod gc;
+mod mobile_tls;
 mod models;
 mod sources;
 mod state;
@@ -19,6 +20,11 @@ use tokio::sync::Mutex;
 use state::AppState;
 
 const AUTOSYNC_INTERVAL: Duration = Duration::from_secs(15 * 60);
+/// There's no background autosync on Android (no WorkManager integration
+/// in the MVP — see `state::AppState::last_foreground_sync`), so a
+/// resumed app only gets a fresh sync if it's been a while.
+#[cfg(mobile)]
+const FOREGROUND_SYNC_MIN_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -63,6 +69,7 @@ pub fn run() {
                 data_dir,
                 autosync_handle: Mutex::new(None),
                 zim_cache: zim_server::ZimCache::new(),
+                last_foreground_sync: std::sync::Mutex::new(None),
             };
             app.manage(state);
 
@@ -72,6 +79,15 @@ pub fn run() {
                 tauri::async_runtime::block_on(async {
                     *app_state.autosync_handle.lock().await = Some(handle);
                 });
+                // `spawn_autosync` fires an immediate sync on its own; on
+                // Android, the initial `RunEvent::Resumed` (part of normal
+                // cold-start activity lifecycle, not just backgrounding)
+                // would otherwise race it into a redundant second sync —
+                // see `last_foreground_sync`'s doc comment.
+                #[cfg(mobile)]
+                {
+                    *app_state.last_foreground_sync.lock().unwrap() = Some(std::time::Instant::now());
+                }
             }
 
             // One-shot cleanup of files orphaned by crashes or removal
@@ -105,6 +121,34 @@ pub fn run() {
             commands::settings::update_settings,
             commands::system::get_data_dir,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            // Unused on desktop, where autosync's own interval loop keeps
+            // running regardless of window focus.
+            let _ = (&app_handle, &event);
+
+            #[cfg(mobile)]
+            if let tauri::RunEvent::Resumed = event {
+                let app_handle = app_handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    let state = app_handle.state::<AppState>();
+                    let should_sync = {
+                        let mut last = state.last_foreground_sync.lock().unwrap();
+                        let now = std::time::Instant::now();
+                        let should_sync = match *last {
+                            Some(t) => now.duration_since(t) > FOREGROUND_SYNC_MIN_INTERVAL,
+                            None => true,
+                        };
+                        if should_sync {
+                            *last = Some(now);
+                        }
+                        should_sync
+                    };
+                    if should_sync {
+                        sync::sync_all_sources(&app_handle, &state).await;
+                    }
+                });
+            }
+        });
 }

@@ -1,4 +1,6 @@
 use std::path::PathBuf;
+use std::sync::Mutex as StdMutex;
+use std::time::Instant;
 
 use tauri::async_runtime::JoinHandle;
 use tokio::sync::Mutex;
@@ -13,4 +15,10 @@ pub struct AppState {
     pub data_dir: PathBuf,
     pub autosync_handle: Mutex<Option<JoinHandle<()>>>,
     pub zim_cache: ZimCache,
+    /// Set on mobile's `RunEvent::Resumed`, throttling foreground-sync to
+    /// once per interval — there's no background autosync on Android (no
+    /// WorkManager integration in the MVP), so this is the only sync
+    /// trigger between app launches beyond a manual refresh.
+    #[cfg_attr(not(mobile), allow(dead_code))]
+    pub last_foreground_sync: StdMutex<Option<Instant>>,
 }

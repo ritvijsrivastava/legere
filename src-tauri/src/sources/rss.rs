@@ -116,6 +116,7 @@ mod tests {
             data_dir: data_dir.path().to_path_buf(),
             autosync_handle: Mutex::new(None),
             zim_cache: crate::zim_server::ZimCache::new(),
+            last_foreground_sync: std::sync::Mutex::new(None),
         };
 
         let source = {
@@ -162,6 +163,7 @@ mod tests {
             data_dir: data_dir.path().to_path_buf(),
             autosync_handle: Mutex::new(None),
             zim_cache: crate::zim_server::ZimCache::new(),
+            last_foreground_sync: std::sync::Mutex::new(None),
         };
 
         let feed_url = format!("{base_url}/feed.xml");

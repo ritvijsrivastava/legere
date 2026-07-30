@@ -47,6 +47,13 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 url = "2.5.8"
 uuid = { version = "1.24.0", features = ["v4"] }
 
+[target.'cfg(target_os = "android")'.dependencies]
+jni = { version = "0.22", default-features = false }
+# reqwest already pulls this in transitively (as its default rustls cert
+# verifier on Android); named explicitly here because `android::init_with_env`
+# must be called before the first TLS handshake — see `mobile_tls`.
+rustls-platform-verifier = "0.7"
+
 [dev-dependencies]
 axum = "0.8"
 tempfile = "3.27.0"

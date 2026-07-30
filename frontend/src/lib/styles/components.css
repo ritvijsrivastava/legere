@@ -33,6 +33,13 @@
 .btn-icon { width: 36px; height: 36px; padding: 0; }
 .btn-block { width: 100%; margin-top: var(--space-2); }
 
+/* Below this width Shell.svelte switches to its mobile topbar/bottom-bar
+   layout — icon buttons need a real touch target there, not just the
+   desktop hover-target size. */
+@media (max-width: 768px) {
+  .btn-icon { width: 44px; height: 44px; }
+}
+
 .field > label {
   display: block;
   font-size: 12px;

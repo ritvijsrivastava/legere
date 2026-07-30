@@ -246,7 +246,8 @@
 	}
 	.reader-page {
 		margin: 0 auto;
-		padding: 36px 36px 56px;
+		padding: calc(36px + env(safe-area-inset-top)) calc(36px + env(safe-area-inset-right)) 56px
+			calc(36px + env(safe-area-inset-left));
 	}
 	.header-row {
 		display: flex;

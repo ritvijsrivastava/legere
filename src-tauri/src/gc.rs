@@ -90,6 +90,7 @@ mod tests {
             data_dir: data_dir.to_path_buf(),
             autosync_handle: Mutex::new(None),
             zim_cache: ZimCache::new(),
+            last_foreground_sync: std::sync::Mutex::new(None),
         }
     }
 
