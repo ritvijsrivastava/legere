@@ -2348,14 +2348,19 @@ name = "legere"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "base64 0.22.1",
  "chrono",
  "dom_smoothie",
  "feed-rs",
+ "gio",
+ "glib",
+ "gtk",
  "html-escape",
  "image",
  "jni 0.22.4",
  "lol_html",
  "lru",
+ "page-capture-plugin",
  "percent-encoding",
  "r2d2",
  "r2d2_sqlite",
@@ -2375,6 +2380,7 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "uuid",
+ "webkit2gtk",
  "wraith-assets",
  "wraith-sanitize",
  "wraith-urlx",
@@ -2992,6 +2998,17 @@ checksum = "9aa2b01e1d916879f73a53d01d1d6cee68adbb31d6d9177a8cfce093cced1d50"
 dependencies = [
  "futures-core",
  "pin-project-lite",
+]
+
+[[package]]
+name = "page-capture-plugin"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-plugin",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

@@ -50,7 +50,7 @@ impl From<tokio::task::JoinError> for AppError {
 impl From<crate::capture::CaptureError> for AppError {
     fn from(e: crate::capture::CaptureError) -> Self {
         match &e {
-            crate::capture::CaptureError::Fetch(_) => AppError::Network(e.to_string()),
+            crate::capture::CaptureError::Render(_) => AppError::Network(e.to_string()),
             _ => AppError::Internal(e.to_string()),
         }
     }

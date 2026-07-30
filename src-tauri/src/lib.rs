@@ -33,8 +33,17 @@ pub fn run() {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
+    #[allow(unused_mut)]
+    let mut builder = tauri::Builder::default().plugin(tauri_plugin_opener::init());
+    // See `capture::render_android`/`page_capture_plugin`'s own docs —
+    // drives an off-layout Android `WebView` for capture, mirroring
+    // `capture::render_linux` on desktop Linux.
+    #[cfg(target_os = "android")]
+    {
+        builder = builder.plugin(page_capture_plugin::init());
+    }
+
+    builder
         // Serves archived pages out of an article's own ZIM file — see
         // `zim_server`'s module docs. Runs the actual read on a plain OS
         // thread, matching Tauri's own documented pattern for this API: a

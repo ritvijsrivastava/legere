@@ -3,6 +3,11 @@ pub mod extract;
 pub mod fetch;
 pub mod hero_image;
 pub mod localize;
+pub mod render;
+#[cfg(target_os = "android")]
+mod render_android;
+#[cfg(target_os = "linux")]
+mod render_linux;
 pub mod rewrite;
 
 use std::path::Path;
@@ -10,12 +15,12 @@ use std::path::Path;
 use thiserror::Error;
 use wraith_urlx::{canonicalize, ensure_html_extension, local_path_for, strip_tracking_params};
 
-use fetch::FetchError;
+use render::RenderError;
 
 #[derive(Debug, Error)]
 pub enum CaptureError {
     #[error(transparent)]
-    Fetch(#[from] FetchError),
+    Render(#[from] RenderError),
     #[error("failed to sanitize captured HTML: {0}")]
     Sanitize(#[from] wraith_sanitize::SanitizeError),
     #[error("failed to localize page assets: {0}")]
@@ -57,18 +62,24 @@ pub struct CaptureOutput {
     pub extraction_confident: bool,
 }
 
-/// Captures the article at `url`: fetch -> readability extraction ->
+/// Captures the article at `url`: render -> readability extraction ->
 /// sanitize -> localize assets -> ZIM archive -> rewrite readable HTML to
 /// point into the archive. `id` is the article's pre-generated uuid, used
 /// to name its on-disk files. `data_dir` is `{app_local_data_dir}/legere`;
 /// `media/` and `archives/` subdirectories are created if missing.
+///
+/// `renderer` governs only how the page itself is fetched/rendered (see
+/// `render::Renderer`); `client` is used for every asset fetch beyond
+/// whatever `renderer` already observed — hero image resize, and
+/// anything `wraith_assets` still needs to fetch during localization.
 pub async fn capture_article(
+    renderer: render::Renderer<'_>,
     client: &reqwest::Client,
     data_dir: &Path,
     id: &str,
     url: &str,
 ) -> Result<CaptureOutput, CaptureError> {
-    let page = fetch::fetch_page(client, url).await?;
+    let page = render::render(renderer, url).await?;
     let extracted = extract::extract(&page.html, page.final_url.as_str());
 
     // The archive is a script-free replay of the *whole* page; the
@@ -78,8 +89,13 @@ pub async fn capture_article(
     let sanitized_page_html = wraith_sanitize::sanitize(&page.html)?;
     let sanitized_content = wraith_sanitize::sanitize(&extracted.content_html)?;
 
-    let localized =
-        localize::localize_page(client, &sanitized_page_html, &page.final_url).await?;
+    let localized = localize::localize_page(
+        client,
+        &sanitized_page_html,
+        &page.final_url,
+        &page.network_log,
+    )
+    .await?;
 
     let canonical_final_url = canonicalize(&page.final_url);
     let page_local_path = ensure_html_extension(&local_path_for(&canonical_final_url));
@@ -167,9 +183,15 @@ mod tests {
         let client = test_support::plain_client();
 
         let url = format!("{base_url}/article.html?utm_source=newsletter&id=7");
-        let output = capture_article(&client, data_dir.path(), "test-article", &url)
-            .await
-            .expect("capture_article should succeed against the fixture server");
+        let output = capture_article(
+            render::Renderer::Static(&client),
+            &client,
+            data_dir.path(),
+            "test-article",
+            &url,
+        )
+        .await
+        .expect("capture_article should succeed against the fixture server");
 
         assert!(output.extraction_confident, "fixture article should be readable");
         assert!(output.title.contains("Quiet Harbor"));
@@ -256,9 +278,15 @@ mod tests {
         .expect("first insert should succeed");
         assert!(inserted_once);
 
-        let second_output = capture_article(&client, data_dir.path(), "test-article-2", &url)
-            .await
-            .expect("second capture should also succeed");
+        let second_output = capture_article(
+            render::Renderer::Static(&client),
+            &client,
+            data_dir.path(),
+            "test-article-2",
+            &url,
+        )
+        .await
+        .expect("second capture should also succeed");
         let inserted_twice = crate::db::queries::insert_captured_article(
             &conn,
             "article-two",

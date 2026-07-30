@@ -116,9 +116,14 @@ pub async fn recapture_article(
         .await??
     };
 
-    let output =
-        capture::capture_article(&state.http_client, &state.data_dir, &id, &existing.link)
-            .await?;
+    let output = capture::capture_article(
+        capture::render::Renderer::Static(&state.http_client),
+        &state.http_client,
+        &state.data_dir,
+        &id,
+        &existing.link,
+    )
+    .await?;
 
     let pool = state.pool.clone();
     let id_for_update = id.clone();

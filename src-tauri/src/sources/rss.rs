@@ -61,7 +61,15 @@ pub async fn sync_rss_source(state: &AppState, source: &Source) -> Result<u32, R
         }
 
         let id = uuid::Uuid::new_v4().to_string();
-        match capture::capture_article(&state.http_client, &state.data_dir, &id, &link).await {
+        match capture::capture_article(
+            capture::render::Renderer::Static(&state.http_client),
+            &state.http_client,
+            &state.data_dir,
+            &id,
+            &link,
+        )
+        .await
+        {
             Ok(output) => {
                 let conn = state.pool.get()?;
                 let inserted = queries::insert_captured_article(

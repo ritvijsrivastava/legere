@@ -160,63 +160,63 @@
 		</div>
 	{/if}
 
-	<div class="reader-page" style:max-width="{MEASURE_PX[measure]}px">
-		<div class="header-row">
-			<button class="btn btn-ghost back-btn" onclick={() => goto('/')}>
-				<ChevronLeft />
-				Library
-			</button>
-			{#if article}
-				<div class="controls">
-					<SegmentedControl
-						name="view"
-						bind:value={view}
-						options={[
-							{ value: 'readable', label: 'Readable' },
-							{ value: 'original', label: 'Original' }
-						]}
-					/>
-					{#if view === 'readable'}
-						<ReaderControls
-							{fontSize}
-							{measure}
-							{leading}
-							onFontSize={setFontSize}
-							onMeasure={setMeasure}
-							onLeading={setLeading}
-						/>
-					{/if}
-					<button
-						class="btn btn-icon btn-secondary favorite-btn"
-						class:favorited={article.favorited}
-						onclick={toggleFavorite}
-						aria-label="Favorite"
-					>
-						<Heart filled={article.favorited} />
-					</button>
-					<ArticleOverflowMenu {recapturing} onRecapture={recapture} onDelete={deleteArticle} />
-				</div>
-			{/if}
-		</div>
-
+	<div class="header-row" style:max-width="{MEASURE_PX[measure]}px">
+		<button class="btn btn-ghost back-btn" onclick={() => goto('/')}>
+			<ChevronLeft />
+			Library
+		</button>
 		{#if article}
-			<div class="hero">
-				<HeroImage path={article.hero_image_path} alt={article.title} />
+			<div class="controls">
+				<SegmentedControl
+					name="view"
+					bind:value={view}
+					options={[
+						{ value: 'readable', label: 'Readable' },
+						{ value: 'original', label: 'Original' }
+					]}
+				/>
+				{#if view === 'readable'}
+					<ReaderControls
+						{fontSize}
+						{measure}
+						{leading}
+						onFontSize={setFontSize}
+						onMeasure={setMeasure}
+						onLeading={setLeading}
+					/>
+				{/if}
+				<button
+					class="btn btn-icon btn-secondary favorite-btn"
+					class:favorited={article.favorited}
+					onclick={toggleFavorite}
+					aria-label="Favorite"
+				>
+					<Heart filled={article.favorited} />
+				</button>
+				<ArticleOverflowMenu {recapturing} onRecapture={recapture} onDelete={deleteArticle} />
 			</div>
-			<h1 class="reader-title">{article.title}</h1>
-			<div class="card-meta reader-meta">
-				<span>{article.source_name}</span>
-				<span>·</span>
-				<span>{formatDate(article.published_at)}</span>
-				<span>·</span>
-				<span>{minutesLeft} min left</span>
-				<a href={article.link} target="_blank" rel="noopener" class="view-original">
-					<ExternalLink />
-					View original
-				</a>
-			</div>
+		{/if}
+	</div>
 
-			{#if view === 'readable'}
+	{#if article}
+		{#if view === 'readable'}
+			<div class="reader-page" style:max-width="{MEASURE_PX[measure]}px">
+				<div class="hero">
+					<HeroImage path={article.hero_image_path} alt={article.title} />
+				</div>
+				<h1 class="reader-title">{article.title}</h1>
+				<div class="card-meta reader-meta">
+					<span>{article.source_name}</span>
+					<span>·</span>
+					<span>{formatDate(article.published_at)}</span>
+					<span>·</span>
+					<span>{minutesLeft} min left</span>
+					<a href={article.link} target="_blank" rel="noopener" class="view-original">
+						<ExternalLink />
+						View original
+					</a>
+				</div>
+
 				<div
 					class="reader-body"
 					style:font-size="{fontSize}px"
@@ -224,12 +224,12 @@
 				>
 					{@html resolvedContentHtml}
 				</div>
-			{:else}
-				<iframe class="archive-frame" sandbox="" title={article.title} src={originalUrl}
-				></iframe>
-			{/if}
+			</div>
+		{:else}
+			<iframe class="archive-frame" sandbox="" title={article.title} src={originalUrl}
+			></iframe>
 		{/if}
-	</div>
+	{/if}
 </div>
 
 <style>
@@ -246,14 +246,15 @@
 	}
 	.reader-page {
 		margin: 0 auto;
-		padding: calc(36px + env(safe-area-inset-top)) calc(36px + env(safe-area-inset-right)) 56px
-			calc(36px + env(safe-area-inset-left));
+		padding: 0 calc(36px + env(safe-area-inset-right)) 56px calc(36px + env(safe-area-inset-left));
 	}
 	.header-row {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		margin-bottom: 20px;
+		margin: 0 auto 20px;
+		padding: calc(36px + env(safe-area-inset-top)) calc(36px + env(safe-area-inset-right)) 0
+			calc(36px + env(safe-area-inset-left));
 	}
 	.back-btn {
 		padding-left: 0;
@@ -302,10 +303,10 @@
 		font-size: 19px;
 	}
 	.archive-frame {
+		display: block;
 		width: 100%;
-		height: calc(100vh - 140px);
+		height: calc(100vh - 96px);
 		border: none;
-		border-radius: var(--radius-md);
 		background: var(--color-surface);
 	}
 </style>

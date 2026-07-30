@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["src-tauri"]
+members = ["src-tauri", "plugins/page-capture-plugin"]
 
 [workspace.package]
 edition = "2024"

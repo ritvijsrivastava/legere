@@ -1,5 +1,7 @@
+use std::collections::HashMap;
+
 use url::Url;
-use wraith_assets::{AssetCache, FetchPolicy, LocalizedPage, localize_html};
+use wraith_assets::{AssetCache, FetchPolicy, FetchedAsset, LocalizedPage, localize_html};
 
 use super::CaptureError;
 
@@ -24,17 +26,22 @@ const MAX_ASSET_BYTES: u64 = 20 * 1024 * 1024;
 const MAX_ASSET_RETRIES: u32 = 1;
 
 /// Localizes every asset referenced by `sanitized_page_html` (already
-/// script-stripped) for archival: fetches each one over plain HTTP(S) — no
-/// browser, no JS execution — and rewrites the page to reference local
-/// copies. `base` should be the page's own final URL (after redirects).
+/// script-stripped) for archival: fetches each one over plain HTTP(S) and
+/// rewrites the page to reference local copies. `base` should be the
+/// page's own final URL (after redirects).
 ///
-/// No browser network log is available in this pipeline (there is no
-/// browser involved at all), so `network_log` is always empty: every
-/// asset reference is resolved via a direct fetch.
+/// `network_log` is bytes a real rendering engine already observed while
+/// loading the page (see `capture::render`) — consulted ahead of a
+/// redundant fetch for any reference this pass discovers, the same hybrid
+/// strategy `wraith_core::Archiver` uses with a real browser's own network
+/// log. On platforms with no such engine in the loop (the plain-fetch
+/// `render` path), this is always empty: every asset reference is
+/// resolved via a direct fetch instead.
 pub async fn localize_page(
     client: &reqwest::Client,
     sanitized_page_html: &str,
     base: &Url,
+    network_log: &HashMap<Url, FetchedAsset>,
 ) -> Result<LocalizedPage, CaptureError> {
     let policy = FetchPolicy {
         allow_private_network: false,
@@ -47,7 +54,7 @@ pub async fn localize_page(
         base,
         client,
         CONCURRENCY,
-        &std::collections::HashMap::new(),
+        network_log,
         policy,
         &cache,
     )

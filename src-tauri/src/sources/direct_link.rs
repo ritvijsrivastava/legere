@@ -22,7 +22,14 @@ pub async fn capture_direct_link(
     url: &str,
 ) -> Result<ArticleSummary, DirectLinkError> {
     let id = uuid::Uuid::new_v4().to_string();
-    let output = capture::capture_article(&state.http_client, &state.data_dir, &id, url).await?;
+    let output = capture::capture_article(
+        capture::render::Renderer::Static(&state.http_client),
+        &state.http_client,
+        &state.data_dir,
+        &id,
+        url,
+    )
+    .await?;
 
     let conn = state.pool.get()?;
     let inserted =
