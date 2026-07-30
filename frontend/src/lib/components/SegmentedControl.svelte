@@ -1,12 +1,12 @@
-<script lang="ts">
+<script lang="ts" generics="T extends string">
 	let {
 		name,
 		options,
 		value = $bindable()
 	}: {
 		name: string;
-		options: { value: string; label: string }[];
-		value: string;
+		options: { value: T; label: string }[];
+		value: T;
 	} = $props();
 </script>
 

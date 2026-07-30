@@ -143,6 +143,36 @@ mod tests {
     use tokio::sync::Mutex as TokioMutex;
     use wraith_zim::ZimWriter;
 
+    /// Writes `zim_writer`'s archive to disk and inserts the matching
+    /// `articles` row into `state`'s own DB — the multi-article half of
+    /// test setup, factored out so a single test can populate more than
+    /// one article against a shared `AppState`/`ZimCache` (see the LRU
+    /// capacity test below).
+    fn insert_article(
+        state: &AppState,
+        data_dir: &std::path::Path,
+        article_id: &str,
+        zim_writer: ZimWriter,
+    ) {
+        let archives_dir = data_dir.join("archives");
+        std::fs::create_dir_all(&archives_dir).expect("mkdir archives");
+        let zim_rel_path = format!("archives/{article_id}.zim");
+        zim_writer
+            .write(&data_dir.join(&zim_rel_path))
+            .expect("write test zim");
+
+        let conn = state.pool.get().expect("get conn");
+        conn.execute(
+            "INSERT INTO articles (
+                id, source_name, source_type, title, link, excerpt,
+                content_html, fetched_at, zim_path, zim_main_path, updated_at
+            ) VALUES (?1, 'Direct link', 'direct', 'Test', ?3, 'x',
+                      '<p>x</p>', '2026-01-01T00:00:00Z', ?2, 'index.html', '2026-01-01T00:00:00Z')",
+            rusqlite::params![article_id, zim_rel_path, format!("https://example.com/{article_id}")],
+        )
+        .expect("insert test article");
+    }
+
     fn build_state_with_article(
         data_dir: &std::path::Path,
         article_id: &str,
@@ -155,34 +185,16 @@ mod tests {
             db::schema::migrate(&mut conn).expect("migrate");
         }
 
-        let archives_dir = data_dir.join("archives");
-        std::fs::create_dir_all(&archives_dir).expect("mkdir archives");
-        let zim_rel_path = format!("archives/{article_id}.zim");
-        zim_writer
-            .write(&data_dir.join(&zim_rel_path))
-            .expect("write test zim");
-
-        {
-            let conn = pool.get().expect("get conn");
-            conn.execute(
-                "INSERT INTO articles (
-                    id, source_name, source_type, title, link, excerpt,
-                    content_html, fetched_at, zim_path, zim_main_path, updated_at
-                ) VALUES (?1, 'Direct link', 'direct', 'Test', 'https://example.com/x', 'x',
-                          '<p>x</p>', '2026-01-01T00:00:00Z', ?2, 'index.html', '2026-01-01T00:00:00Z')",
-                rusqlite::params![article_id, zim_rel_path],
-            )
-            .expect("insert test article");
-        }
-
-        AppState {
+        let state = AppState {
             pool,
             http_client: reqwest::Client::new(),
             data_dir: data_dir.to_path_buf(),
             autosync_handle: TokioMutex::new(None),
             zim_cache: ZimCache::new(),
             last_foreground_sync: std::sync::Mutex::new(None),
-        }
+        };
+        insert_article(&state, data_dir, article_id, zim_writer);
+        state
     }
 
     fn sample_writer() -> ZimWriter {
@@ -309,6 +321,46 @@ mod tests {
         let second = serve(&state, "/article-1/index.html");
         assert_eq!(second.status(), StatusCode::OK);
         assert_eq!(second.body().as_ref(), b"<p>hello</p>");
+    }
+
+    /// Proves `ZimCache`'s bounded-memory claim (module doc: "without
+    /// holding more than a handful of archives live") is actually
+    /// enforced, not just configured — filling the cache past
+    /// `CACHE_CAPACITY` must evict the least-recently-used entry on its
+    /// own, the same way `evict_forces_a_fresh_read_from_disk` proves for
+    /// *explicit* eviction.
+    #[test]
+    fn cache_evicts_the_least_recently_used_entry_once_over_capacity() {
+        let data_dir = tempfile::tempdir().expect("tempdir");
+        let state = build_state_with_article(data_dir.path(), "article-0", sample_writer());
+        for i in 1..CACHE_CAPACITY {
+            insert_article(&state, data_dir.path(), &format!("article-{i}"), sample_writer());
+        }
+
+        // Fill the cache to exactly its capacity, oldest (article-0) first.
+        for i in 0..CACHE_CAPACITY {
+            let resp = serve(&state, &format!("/article-{i}/index.html"));
+            assert_eq!(resp.status(), StatusCode::OK);
+        }
+
+        // One more distinct article pushes the cache over capacity —
+        // article-0 was the least recently used (touched first, never
+        // again), so it should be the one evicted.
+        insert_article(&state, data_dir.path(), "article-overflow", sample_writer());
+        let resp = serve(&state, "/article-overflow/index.html");
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        // If article-0 is still cached, this corrupted file would never be
+        // read and the request would still succeed. It doesn't — the
+        // capacity eviction, not an explicit `evict()` call, is what forced
+        // the fresh (failing) read.
+        std::fs::write(
+            data_dir.path().join("archives/article-0.zim"),
+            b"not a zim file",
+        )
+        .unwrap();
+        let resp = serve(&state, "/article-0/index.html");
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     }
 
     #[test]

@@ -170,7 +170,7 @@
 				<div class="controls">
 					<SegmentedControl
 						name="view"
-						bind:value={view as unknown as string}
+						bind:value={view}
 						options={[
 							{ value: 'readable', label: 'Readable' },
 							{ value: 'original', label: 'Original' }

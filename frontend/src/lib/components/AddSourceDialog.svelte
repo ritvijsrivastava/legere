@@ -45,7 +45,7 @@
 				await goto(`/reader/${article.id}`);
 			}
 		} catch (e) {
-			error = e instanceof Error ? e.message : String(e);
+			error = api.errorMessage(e);
 		} finally {
 			submitting = false;
 		}
@@ -72,7 +72,7 @@
 			<div class="dialog-title" id="add-source-title">Add a source</div>
 			<SegmentedControl
 				name="newtype"
-				bind:value={newSourceType as unknown as string}
+				bind:value={newSourceType}
 				options={[
 					{ value: 'rss', label: 'RSS feed' },
 					{ value: 'direct', label: 'Article URL' }

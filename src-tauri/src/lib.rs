@@ -1,6 +1,7 @@
 mod capture;
 mod commands;
 mod db;
+mod error;
 mod events;
 mod gc;
 mod mobile_tls;

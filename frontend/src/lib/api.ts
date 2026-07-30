@@ -108,3 +108,15 @@ export function resolveZimTokens(html: string): string {
 	const base = convertFileSrc('', 'zim');
 	return html.replaceAll(ZIM_TOKEN_PREFIX, base);
 }
+
+/** Tauri command errors reject with `{kind, message}` (see the Rust side's
+ *  `error::AppError`) rather than a JS `Error`, so `e.message`/`e instanceof
+ *  Error` don't work on them. This is the one place that shape is parsed —
+ *  every catch site should go through this instead of reading `e` directly. */
+export function errorMessage(e: unknown): string {
+	if (e && typeof e === 'object' && 'message' in e && typeof e.message === 'string') {
+		return e.message;
+	}
+	if (e instanceof Error) return e.message;
+	return String(e);
+}
