@@ -38,3 +38,12 @@ pub fn emit_articles_changed(app: &AppHandle) {
 pub fn emit_source_changed(app: &AppHandle) {
     let _ = app.emit("source:changed", ());
 }
+
+/// Fired once an article's full archive is actually cached locally and
+/// ready to open (not merely `ready` server-side) — after either the
+/// reconciler's own background download or `open_for_reading`'s
+/// download-if-needed spawn completes. `id` is the article whose Original
+/// view just became available.
+pub fn emit_archive_ready(app: &AppHandle, id: &str) {
+    let _ = app.emit("archive:ready", id);
+}

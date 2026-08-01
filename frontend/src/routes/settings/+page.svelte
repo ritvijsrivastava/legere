@@ -11,6 +11,12 @@
 	function setAutosync(enabled: boolean) {
 		settingsStore.update({ autosync: enabled });
 	}
+	function setArchiveServerUrl(value: string) {
+		settingsStore.update({ archive_server_url: value });
+	}
+	function setArchiveServerToken(value: string) {
+		settingsStore.update({ archive_server_token: value });
+	}
 </script>
 
 <div class="settings-page">
@@ -102,6 +108,31 @@
 		</div>
 	</section>
 
+	<section>
+		<h4>Server</h4>
+		<p class="text-muted section-desc">
+			Self-hosted <code>legere-server</code> archive server. Only articles currently being read
+			download their full archive from it; unread and finished articles stay server-only.
+		</p>
+		<label for="archive-server-url" class="field-label">Server URL</label>
+		<input
+			id="archive-server-url"
+			class="input"
+			type="text"
+			placeholder="http://192.168.1.10:8787"
+			value={settingsStore.current.archive_server_url}
+			onchange={(e) => setArchiveServerUrl(e.currentTarget.value)}
+		/>
+		<label for="archive-server-token" class="field-label">Access token</label>
+		<input
+			id="archive-server-token"
+			class="input"
+			type="password"
+			value={settingsStore.current.archive_server_token}
+			onchange={(e) => setArchiveServerToken(e.currentTarget.value)}
+		/>
+	</section>
+
 	<p class="version">Legere · Version 0.1.0</p>
 </div>
 
@@ -130,5 +161,14 @@
 		font-size: 12px;
 		color: var(--color-neutral-600);
 		margin: 32px 0 0;
+	}
+	.field-label {
+		display: block;
+		font-size: 12px;
+		color: var(--color-neutral-600);
+		margin: 12px 0 4px;
+	}
+	.field-label:first-of-type {
+		margin-top: 0;
 	}
 </style>

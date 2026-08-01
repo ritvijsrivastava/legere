@@ -20,14 +20,14 @@ class ArticlesStore {
 		if (article) article.favorited = favorited;
 	}
 
-	async markRead(id: string) {
-		await api.markRead(id);
+	async markAsRead(id: string) {
+		await api.markAsRead(id);
 		const article = this.items.find((a) => a.id === id);
-		if (article) article.unread = false;
+		if (article) article.reading_state = 'read';
 	}
 
 	get unreadCount(): number {
-		return this.items.filter((a) => a.unread).length;
+		return this.items.filter((a) => a.reading_state === 'unread').length;
 	}
 }
 

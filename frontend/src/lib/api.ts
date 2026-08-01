@@ -16,8 +16,19 @@ export function getArticle(id: string): Promise<ArticleDetail> {
 	return invoke<ArticleDetail>('get_article', { id });
 }
 
-export function markRead(id: string): Promise<void> {
-	return invoke<void>('mark_read', { id });
+/** Transitions an article into `reading` (from `unread` or `read`) and
+ *  returns its refreshed detail. Also kicks off a background archive
+ *  download server-side if the full archive is `ready` but not yet cached
+ *  locally — see `commands::articles::open_for_reading` on the Rust side. */
+export function openForReading(id: string): Promise<ArticleDetail> {
+	return invoke<ArticleDetail>('open_for_reading', { id });
+}
+
+/** Transitions an article into `read` — the only path there, always a
+ *  manual action. Evicts its locally cached full archive, if any; the
+ *  server retains its own copy. */
+export function markAsRead(id: string): Promise<void> {
+	return invoke<void>('mark_as_read', { id });
 }
 
 export function toggleFavorite(id: string): Promise<boolean> {

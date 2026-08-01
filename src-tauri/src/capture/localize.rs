@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use url::Url;
-use wraith_assets::{AssetCache, FetchPolicy, FetchedAsset, LocalizedPage, localize_html};
+use wraith_assets::{AssetCache, FetchPolicy, LocalizedPage, localize_html};
 
 use super::CaptureError;
 
@@ -25,23 +25,29 @@ const MAX_ASSET_BYTES: u64 = 20 * 1024 * 1024;
 /// that may be capturing up to 30 articles in a row.
 const MAX_ASSET_RETRIES: u32 = 1;
 
-/// Localizes every asset referenced by `sanitized_page_html` (already
-/// script-stripped) for archival: fetches each one over plain HTTP(S) and
-/// rewrites the page to reference local copies. `base` should be the
-/// page's own final URL (after redirects).
+/// Localizes every asset referenced by `sanitized_content` — the readable
+/// view's own content fragment, already script-stripped and already
+/// scoped down by Readability extraction, *not* the full page — fetching
+/// each one over plain HTTP(S) and rewriting references to local copies.
+/// `base` should be the page's own final URL (after redirects), used to
+/// resolve any relative reference in the fragment.
 ///
-/// `network_log` is bytes a real rendering engine already observed while
-/// loading the page (see `capture::render`) — consulted ahead of a
-/// redundant fetch for any reference this pass discovers, the same hybrid
-/// strategy `wraith_core::Archiver` uses with a real browser's own network
-/// log. On platforms with no such engine in the loop (the plain-fetch
-/// `render` path), this is always empty: every asset reference is
+/// Deliberately scoped to just the content fragment rather than the whole
+/// page: the resulting [`LocalizedPage`] is what
+/// [`super::archive::write_content_zim`] archives into the small,
+/// persistent content zim behind the readable view's images, so fetching
+/// page-level assets the readable view never references (page chrome,
+/// unused stylesheets) here would be wasted work.
+///
+/// legere's own capture is a plain HTTP fetch with no rendering engine
+/// observing responses as they load, so `localize_html`'s own
+/// `network_log` parameter (bytes such an engine already captured, ahead
+/// of a redundant fetch) is always empty here — every reference is
 /// resolved via a direct fetch instead.
-pub async fn localize_page(
+pub async fn localize_content(
     client: &reqwest::Client,
-    sanitized_page_html: &str,
+    sanitized_content: &str,
     base: &Url,
-    network_log: &HashMap<Url, FetchedAsset>,
 ) -> Result<LocalizedPage, CaptureError> {
     let policy = FetchPolicy {
         allow_private_network: false,
@@ -50,11 +56,11 @@ pub async fn localize_page(
     };
     let cache = AssetCache::new();
     localize_html(
-        sanitized_page_html,
+        sanitized_content,
         base,
         client,
         CONCURRENCY,
-        network_log,
+        &HashMap::new(),
         policy,
         &cache,
     )

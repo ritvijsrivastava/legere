@@ -1,3 +1,5 @@
+mod archive_client;
+mod archive_reconciler;
 mod capture;
 mod commands;
 mod db;
@@ -33,15 +35,7 @@ pub fn run() {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    #[allow(unused_mut)]
-    let mut builder = tauri::Builder::default().plugin(tauri_plugin_opener::init());
-    // See `capture::render_android`/`page_capture_plugin`'s own docs —
-    // drives an off-layout Android `WebView` for capture, mirroring
-    // `capture::render_linux` on desktop Linux.
-    #[cfg(target_os = "android")]
-    {
-        builder = builder.plugin(page_capture_plugin::init());
-    }
+    let builder = tauri::Builder::default().plugin(tauri_plugin_opener::init());
 
     builder
         // Serves archived pages out of an article's own ZIM file — see
@@ -76,6 +70,7 @@ pub fn run() {
             let state = AppState {
                 pool,
                 http_client: capture::fetch::build_client(),
+                server_http_client: reqwest::Client::new(),
                 data_dir,
                 autosync_handle: Mutex::new(None),
                 zim_cache: zim_server::ZimCache::new(),
@@ -110,12 +105,19 @@ pub fn run() {
                 gc::sweep_orphaned_files(&state).await;
             });
 
+            // Unconditional, unlike autosync — archive completion isn't a
+            // feature to toggle off, it just idles (an early return each
+            // tick) until a server URL is configured. See the module's
+            // own docs.
+            archive_reconciler::spawn(app.handle().clone());
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::articles::list_articles,
             commands::articles::get_article,
-            commands::articles::mark_read,
+            commands::articles::open_for_reading,
+            commands::articles::mark_as_read,
             commands::articles::toggle_favorite,
             commands::articles::save_reading_progress,
             commands::articles::delete_article,

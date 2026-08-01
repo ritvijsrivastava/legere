@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
+	import { listen } from '@tauri-apps/api/event';
 	import { articlesStore } from '$lib/stores/articles.svelte';
 	import { settingsStore } from '$lib/stores/settings.svelte';
 	import * as api from '$lib/api';
@@ -11,6 +12,7 @@
 	import ArticleOverflowMenu from '$lib/components/ArticleOverflowMenu.svelte';
 	import ChevronLeft from '$lib/icons/ChevronLeft.svelte';
 	import Heart from '$lib/icons/Heart.svelte';
+	import Check from '$lib/icons/Check.svelte';
 	import ExternalLink from '$lib/icons/ExternalLink.svelte';
 	import { formatDate } from '$lib/format';
 
@@ -40,24 +42,51 @@
 		}
 	});
 
+	/** Original tab is only actually openable once the full archive is
+	 *  cached on this device — `ready` server-side isn't enough, since the
+	 *  bytes might not be downloaded yet (or might have been evicted). */
+	let archiveAvailable = $derived(
+		article ? article.archive_status === 'ready' && article.archive_available_locally : false
+	);
+
+	// Always opens on the readable view — a freshly captured article's
+	// Original view won't exist locally yet, so defaulting there would be
+	// a dead end. Once the archive becomes available, a low-confidence
+	// extraction (readability fell back to a naive strip) switches to
+	// Original automatically, matching the original single-archive
+	// model's intent; a confident extraction stays on Readable.
 	$effect(() => {
 		const id = page.params.id;
 		if (!id) return;
 		article = null;
 		restoredScrollForId = null;
-		api.getArticle(id).then(async (detail) => {
-			view = detail.extraction_confident ? 'readable' : 'original';
-			if (detail.unread) {
-				await articlesStore.markRead(id);
-				article = { ...detail, unread: false };
-			} else {
-				article = detail;
+		view = 'readable';
+		api.openForReading(id).then((detail) => {
+			article = detail;
+			if (!detail.extraction_confident && detail.archive_status === 'ready' && detail.archive_available_locally) {
+				view = 'original';
 			}
 		});
+
+		const unlistenPromise = listen<string>('archive:ready', (event) => {
+			if (event.payload !== id) return;
+			api.getArticle(id).then((detail) => {
+				if (page.params.id !== id) return;
+				article = detail;
+				if (!detail.extraction_confident && detail.archive_status === 'ready' && detail.archive_available_locally) {
+					view = 'original';
+				}
+			});
+		});
+		return () => {
+			unlistenPromise.then((unlisten) => unlisten());
+		};
 	});
 
 	let resolvedContentHtml = $derived(article ? api.resolveZimTokens(article.content_html) : '');
-	let originalUrl = $derived(article ? api.zimUrl(article.id, article.zim_main_path) : '');
+	let originalUrl = $derived(
+		article?.zim_main_path ? api.zimUrl(article.id, article.zim_main_path) : ''
+	);
 	let minutesLeft = $derived(
 		article ? Math.max(1, Math.round(article.read_time_min * (1 - scrollProgress))) : 0
 	);
@@ -130,6 +159,19 @@
 		if (storeItem) storeItem.favorited = favorited;
 	}
 
+	async function markAsRead() {
+		if (!article) return;
+		await articlesStore.markAsRead(article.id);
+		article = { ...article, reading_state: 'read' };
+	}
+
+	let originalLabel = $derived.by(() => {
+		if (!article || archiveAvailable) return 'Original';
+		if (article.archive_status === 'failed') return 'Original (failed)';
+		if (article.archive_status === 'pending') return 'Original (processing…)';
+		return 'Original (downloading…)';
+	});
+
 	let recapturing = $state(false);
 
 	async function recapture() {
@@ -137,7 +179,7 @@
 		recapturing = true;
 		try {
 			article = await api.recaptureArticle(article.id);
-			view = article.extraction_confident ? 'readable' : 'original';
+			view = 'readable';
 		} finally {
 			recapturing = false;
 		}
@@ -172,7 +214,7 @@
 					bind:value={view}
 					options={[
 						{ value: 'readable', label: 'Readable' },
-						{ value: 'original', label: 'Original' }
+						{ value: 'original', label: originalLabel, disabled: !archiveAvailable }
 					]}
 				/>
 				{#if view === 'readable'}
@@ -192,6 +234,14 @@
 					aria-label="Favorite"
 				>
 					<Heart filled={article.favorited} />
+				</button>
+				<button
+					class="btn btn-icon btn-secondary read-btn"
+					class:read={article.reading_state === 'read'}
+					onclick={markAsRead}
+					aria-label="Mark as read"
+				>
+					<Check />
 				</button>
 				<ArticleOverflowMenu {recapturing} onRecapture={recapture} onDelete={deleteArticle} />
 			</div>
@@ -268,6 +318,12 @@
 		color: var(--color-text);
 	}
 	.favorite-btn.favorited {
+		color: var(--color-accent);
+	}
+	.read-btn {
+		color: var(--color-text);
+	}
+	.read-btn.read {
 		color: var(--color-accent);
 	}
 	.hero {

@@ -53,25 +53,8 @@ jni = { version = "0.22", default-features = false }
 # verifier on Android); named explicitly here because `android::init_with_env`
 # must be called before the first TLS handshake — see `mobile_tls`.
 rustls-platform-verifier = "0.7"
-page-capture-plugin = { path = "../plugins/page-capture-plugin" }
-base64 = "0.22"
-
-[target.'cfg(target_os = "linux")'.dependencies]
-# Already resolved transitively via `tauri`/`wry`'s own Linux backend (same
-# WebKitGTK the app's UI webview uses) — named explicitly here because
-# `capture::render_linux` drives its own, separate `WebView` instance
-# directly. See that module's docs.
-webkit2gtk = "2.0"
-glib = "0.18"
-gio = "0.18"
 
 [dev-dependencies]
 axum = "0.8"
 tempfile = "3.27.0"
 tokio = { version = "1.52.3", features = ["test-util", "rt-multi-thread", "macros", "net"] }
-
-[target.'cfg(target_os = "linux")'.dev-dependencies]
-# Only `render_linux`'s own test needs this directly: in production,
-# Tauri's webview already calls `gtk::init()` before any capture ever
-# runs, but a bare `cargo test` has no Tauri app doing that for it.
-gtk = "0.18"

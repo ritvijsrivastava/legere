@@ -24,7 +24,7 @@
 		<div class="body">
 			<div class="title-row">
 				<h4 class="title">{article.title}</h4>
-				{#if article.unread}
+				{#if article.reading_state === 'unread'}
 					<span class="unread-dot"></span>
 				{/if}
 			</div>

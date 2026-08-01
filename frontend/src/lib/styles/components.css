@@ -86,6 +86,8 @@
 .seg-opt:has(input:checked) { color: var(--color-accent); box-shadow: inset 0 0 0 1px var(--color-accent); }
 .seg-opt:not(:has(input:checked)):hover { background: color-mix(in srgb, var(--color-text) 7%, transparent); }
 .seg-opt:has(input:focus-visible) { outline: 2px solid var(--color-accent); outline-offset: -2px; }
+.seg-opt-disabled { cursor: not-allowed; opacity: 0.5; }
+.seg-opt-disabled:hover { background: none; }
 
 .card {
   display: flex;

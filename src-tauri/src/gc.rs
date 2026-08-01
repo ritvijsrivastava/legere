@@ -14,7 +14,7 @@ use crate::state::AppState;
 
 /// Directory names under `data_dir` this sweep considers, and whether a
 /// file found there but not in the referenced set is safe to remove.
-const SWEPT_DIRS: [&str; 2] = ["archives", "media"];
+const SWEPT_DIRS: [&str; 3] = ["archives", "media", "content"];
 
 pub async fn sweep_orphaned_files(state: &AppState) {
     let referenced = {
@@ -87,6 +87,7 @@ mod tests {
         AppState {
             pool,
             http_client: reqwest::Client::new(),
+            server_http_client: reqwest::Client::new(),
             data_dir: data_dir.to_path_buf(),
             autosync_handle: Mutex::new(None),
             zim_cache: ZimCache::new(),

@@ -24,7 +24,7 @@
 		<div class="body">
 			<div class="title-row">
 				<h3 class="card-title">{article.title}</h3>
-				{#if article.unread}
+				{#if article.reading_state === 'unread'}
 					<span class="unread-dot"></span>
 				{/if}
 			</div>

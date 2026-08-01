@@ -36,13 +36,16 @@ impl ZimCache {
         }
     }
 
-    /// Drops any cached reader for `article_id`, so a subsequent request
-    /// (if the file still exists) re-opens it from disk rather than
-    /// serving stale in-memory content. Called on article delete and
-    /// re-capture — both replace or remove the underlying ZIM file out
-    /// from under whatever's cached.
+    /// Drops any cached reader for `article_id` — both the content-zim and
+    /// full-archive-zim entries, since an article can have either or both
+    /// live in the cache at once (see `serve`'s two-tier lookup). Called
+    /// on article delete, re-capture, archive download, and archive
+    /// eviction — all of which replace or remove an underlying ZIM file
+    /// out from under whatever's cached.
     pub fn evict(&self, article_id: &str) {
-        self.inner.lock().unwrap().pop(article_id);
+        let mut cache = self.inner.lock().unwrap();
+        cache.pop(&content_cache_key(article_id));
+        cache.pop(&archive_cache_key(article_id));
     }
 
     fn get_or_open(
@@ -64,6 +67,16 @@ impl Default for ZimCache {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Distinct cache keys per article for its two possible ZIM files — a
+/// plain `article_id` key would collide two entirely different files
+/// (content zim vs full archive) onto one `ZimCache` slot.
+fn content_cache_key(article_id: &str) -> String {
+    format!("{article_id}:content")
+}
+fn archive_cache_key(article_id: &str) -> String {
+    format!("{article_id}:archive")
 }
 
 fn text_response(status: StatusCode, body: &'static str) -> Response<Cow<'static, [u8]>> {
@@ -97,10 +110,53 @@ fn parse_request_path(path: &str) -> Option<(String, String)> {
     Some((article_id.to_string(), entry_path.to_string()))
 }
 
+fn ok_response(bytes: Vec<u8>, mimetype: &str) -> Response<Cow<'static, [u8]>> {
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, mimetype)
+        .header(header::CACHE_CONTROL, "public, max-age=31536000, immutable")
+        .body(Cow::Owned(bytes))
+        .expect("response with a validated mimetype should always build")
+}
+
+/// Looks `full_path` up in whichever ZIM `rel_path` points at, using
+/// `cache_key` for `ZimCache`. Returns `None` (rather than a response) on
+/// a clean miss — no such entry in an openable archive — so the caller can
+/// fall through to the next tier; an actually-unreadable file still
+/// short-circuits straight to a response, since that's not a "try the
+/// next tier" situation.
+fn try_serve_from(
+    state: &AppState,
+    cache_key: &str,
+    rel_path: &str,
+    full_path: &str,
+) -> Result<Option<Response<Cow<'static, [u8]>>>, Response<Cow<'static, [u8]>>> {
+    let abs_path = state.data_dir.join(rel_path);
+    let reader = state
+        .zim_cache
+        .get_or_open(cache_key, &abs_path)
+        .map_err(|_| text_response(StatusCode::NOT_FOUND, "archive unreadable"))?;
+    match reader.get_entry_by_full_path(full_path) {
+        Ok(Some((bytes, mimetype))) => Ok(Some(ok_response(bytes, &mimetype))),
+        Ok(None) => Ok(None),
+        Err(_) => Err(text_response(StatusCode::INTERNAL_SERVER_ERROR, "archive read error")),
+    }
+}
+
 /// Handles one `zim://` request: validates `article_id` against the
 /// database (this is the traversal guard — see
-/// `queries::get_article_zim_path`'s doc comment), opens/reuses its
-/// cached [`ZimReader`], and resolves `entry_path` within it.
+/// `queries::get_article_zim_paths`'s doc comment), then resolves
+/// `entry_path` against whichever of the article's two ZIM files actually
+/// has it.
+///
+/// Two-tier lookup, in this order: the persistent content zim first (every
+/// image the readable view references lives there, and it's never
+/// evicted), then the full archive if one happens to be cached locally
+/// (the main page, and everything a `local_legacy` row's readable view
+/// referenced before content zims existed, since that row's `content_zim_path`
+/// is `NULL` and its one archive serves both roles). This keeps readable-view
+/// images available regardless of whether the full archive is currently
+/// cached — the whole reason the two are separate files.
 pub fn serve(state: &AppState, request_path: &str) -> Response<Cow<'static, [u8]>> {
     let Some((article_id, entry_path)) = parse_request_path(request_path) else {
         return text_response(StatusCode::BAD_REQUEST, "malformed zim:// request path");
@@ -110,30 +166,32 @@ pub fn serve(state: &AppState, request_path: &str) -> Response<Cow<'static, [u8]
         Ok(conn) => conn,
         Err(_) => return text_response(StatusCode::INTERNAL_SERVER_ERROR, "database unavailable"),
     };
-    let zim_rel_path = match queries::get_article_zim_path(&conn, &article_id) {
-        Ok(Some(path)) => path,
+    let paths = match queries::get_article_zim_paths(&conn, &article_id) {
+        Ok(Some(paths)) => paths,
         Ok(None) => return text_response(StatusCode::NOT_FOUND, "no such article"),
         Err(_) => return text_response(StatusCode::INTERNAL_SERVER_ERROR, "database error"),
     };
     drop(conn);
 
-    let zim_abs_path = state.data_dir.join(&zim_rel_path);
-    let reader = match state.zim_cache.get_or_open(&article_id, &zim_abs_path) {
-        Ok(reader) => reader,
-        Err(_) => return text_response(StatusCode::NOT_FOUND, "archive unreadable"),
-    };
-
     let full_path = format!("C{entry_path}");
-    match reader.get_entry_by_full_path(&full_path) {
-        Ok(Some((bytes, mimetype))) => Response::builder()
-            .status(StatusCode::OK)
-            .header(header::CONTENT_TYPE, mimetype)
-            .header(header::CACHE_CONTROL, "public, max-age=31536000, immutable")
-            .body(Cow::Owned(bytes))
-            .expect("response with a validated mimetype should always build"),
-        Ok(None) => text_response(StatusCode::NOT_FOUND, "no such entry in archive"),
-        Err(_) => text_response(StatusCode::INTERNAL_SERVER_ERROR, "archive read error"),
+
+    if let Some(content_zim_path) = &paths.content_zim_path {
+        match try_serve_from(state, &content_cache_key(&article_id), content_zim_path, &full_path) {
+            Ok(Some(response)) => return response,
+            Ok(None) => {} // not in the content zim — fall through to the archive
+            Err(response) => return response,
+        }
     }
+
+    if let Some(zim_path) = &paths.zim_path {
+        match try_serve_from(state, &archive_cache_key(&article_id), zim_path, &full_path) {
+            Ok(Some(response)) => return response,
+            Ok(None) => return text_response(StatusCode::NOT_FOUND, "no such entry in archive"),
+            Err(response) => return response,
+        }
+    }
+
+    text_response(StatusCode::NOT_FOUND, "no such entry in archive")
 }
 
 #[cfg(test)]
@@ -188,6 +246,7 @@ mod tests {
         let state = AppState {
             pool,
             http_client: reqwest::Client::new(),
+            server_http_client: reqwest::Client::new(),
             data_dir: data_dir.to_path_buf(),
             autosync_handle: TokioMutex::new(None),
             zim_cache: ZimCache::new(),
@@ -209,6 +268,102 @@ mod tests {
             .add_content("index.html", "text/html", "Test", "<p>hello</p>".as_bytes().to_vec())
             .add_content("style.css", "text/css", "", "body{}".as_bytes().to_vec())
             .main_page("index.html")
+    }
+
+    /// Writes a content zim (`photo.jpg` only, no page HTML — matching
+    /// `capture::archive::write_content_zim`'s real shape) and a separate
+    /// full-archive zim (`index.html` main page + its own `photo.jpg`) for
+    /// the same article, so the two-tier lookup actually has two distinct
+    /// files to choose between rather than falling back on a fixture that
+    /// happens to look the same either way.
+    fn insert_article_with_content_and_archive_zim(state: &AppState, data_dir: &std::path::Path, article_id: &str) {
+        let content_dir = data_dir.join("content");
+        let archives_dir = data_dir.join("archives");
+        std::fs::create_dir_all(&content_dir).expect("mkdir content");
+        std::fs::create_dir_all(&archives_dir).expect("mkdir archives");
+
+        let content_zim_rel = format!("content/{article_id}.zim");
+        ZimWriter::new()
+            .name(article_id)
+            .title(article_id)
+            .creator("Legere")
+            .publisher("Legere")
+            .date("2026-01-01")
+            .description(article_id)
+            .language("eng")
+            .add_content("photo.jpg", "image/jpeg", "", b"content-zim-photo".to_vec())
+            .write(&data_dir.join(&content_zim_rel))
+            .expect("write test content zim");
+
+        let zim_rel = format!("archives/{article_id}.zim");
+        ZimWriter::new()
+            .name(article_id)
+            .title(article_id)
+            .creator("Legere")
+            .publisher("Legere")
+            .date("2026-01-01")
+            .description(article_id)
+            .language("eng")
+            .add_content("index.html", "text/html", "Test", b"<p>full page</p>".to_vec())
+            .add_content("photo.jpg", "image/jpeg", "", b"archive-zim-photo".to_vec())
+            .main_page("index.html")
+            .write(&data_dir.join(&zim_rel))
+            .expect("write test archive zim");
+
+        let conn = state.pool.get().expect("get conn");
+        conn.execute(
+            "INSERT INTO articles (
+                id, source_name, source_type, title, link, excerpt,
+                content_html, fetched_at, content_zim_path, zim_path, zim_main_path, updated_at
+            ) VALUES (?1, 'Direct link', 'direct', 'Test', ?4, 'x',
+                      '<p>x</p>', '2026-01-01T00:00:00Z', ?2, ?3, 'index.html', '2026-01-01T00:00:00Z')",
+            rusqlite::params![article_id, content_zim_rel, zim_rel, format!("https://example.com/{article_id}")],
+        )
+        .expect("insert test article");
+    }
+
+    /// Proves the two-tier lookup actually prefers the content zim (not
+    /// just falls back to the archive by coincidence): the same
+    /// `photo.jpg` path exists in both files with different bytes, and the
+    /// content zim's copy — the one the readable view's `legere-zim:`
+    /// tokens actually point at — must win.
+    #[test]
+    fn prefers_the_content_zim_over_the_archive_for_a_shared_path() {
+        let data_dir = tempfile::tempdir().expect("tempdir");
+        let state = build_state_with_article(data_dir.path(), "unused", sample_writer());
+        insert_article_with_content_and_archive_zim(&state, data_dir.path(), "article-both");
+
+        let resp = serve(&state, "/article-both/photo.jpg");
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(resp.body().as_ref(), b"content-zim-photo");
+    }
+
+    /// A path only the archive has (the main page — content zims never
+    /// contain one) must fall through to it once the content zim reports a
+    /// clean miss, rather than 404ing at the first tier.
+    #[test]
+    fn falls_back_to_the_archive_zim_when_the_content_zim_lacks_the_entry() {
+        let data_dir = tempfile::tempdir().expect("tempdir");
+        let state = build_state_with_article(data_dir.path(), "unused", sample_writer());
+        insert_article_with_content_and_archive_zim(&state, data_dir.path(), "article-both");
+
+        let resp = serve(&state, "/article-both/index.html");
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(resp.body().as_ref(), b"<p>full page</p>");
+    }
+
+    /// A `local_legacy`-style row (`content_zim_path` is `NULL`, only
+    /// `zim_path` set — exactly what the V3 migration produces for every
+    /// pre-remodel article) must resolve entirely via the archive-zim
+    /// fallback, with no content-zim tier to even attempt.
+    #[test]
+    fn resolves_entirely_via_the_archive_zim_when_there_is_no_content_zim() {
+        let data_dir = tempfile::tempdir().expect("tempdir");
+        let state = build_state_with_article(data_dir.path(), "legacy-article", sample_writer());
+
+        let resp = serve(&state, "/legacy-article/style.css");
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(resp.body().as_ref(), b"body{}");
     }
 
     #[test]

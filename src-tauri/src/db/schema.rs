@@ -150,8 +150,86 @@ FROM settings WHERE key = 'default_font_size'
 ON CONFLICT(key) DO NOTHING;
 ";
 
+// Introduces server-side archiving: a real `unread`/`reading`/`read` state
+// machine (replacing the old `unread` boolean, which had no "finished"
+// signal) and the bookkeeping needed to cache a full-page ZIM archive
+// locally only while an article is being read, while a small "content
+// zim" holding just the readable view's own images is never evicted.
+//
+// `zim_path`/`zim_main_path` are repurposed rather than replaced: both
+// become nullable, and `zim_path` becomes "the full archive's *current
+// local cache path*, or NULL if not cached right now" for every row (not
+// just newly captured ones) — reusing the same column avoids a second
+// column that has to be kept in sync with it. `zim_main_path` stays
+// populated independently of whether the bytes are cached locally (it's
+// metadata the server reports once capture finishes), so re-downloading
+// an evicted archive never has to re-fetch status first.
+//
+// Migrated (pre-V3) rows get `archive_source = 'local_legacy'`: their one
+// full archive already exists locally and predates server-side capture
+// entirely, so the LRU sweep (which only ever considers
+// `archive_source = 'server'` rows) never evicts it.
+const V3: &str = "
+CREATE TABLE articles_v3 (
+    id                     TEXT PRIMARY KEY,
+    source_id              TEXT REFERENCES sources(id) ON DELETE SET NULL,
+    source_name            TEXT NOT NULL,
+    source_type            TEXT NOT NULL CHECK (source_type IN ('rss','direct')),
+    title                  TEXT NOT NULL,
+    link                   TEXT NOT NULL,
+    excerpt                TEXT NOT NULL,
+    content_html           TEXT NOT NULL,
+    hero_image_path        TEXT,
+    published_at           TEXT,
+    fetched_at             TEXT NOT NULL,
+    read_time_min          INTEGER NOT NULL DEFAULT 1,
+    reading_state          TEXT NOT NULL DEFAULT 'unread' CHECK (reading_state IN ('unread','reading','read')),
+    favorited              INTEGER NOT NULL DEFAULT 0,
+    zim_path               TEXT,
+    zim_main_path          TEXT,
+    extraction_confident    INTEGER NOT NULL DEFAULT 1,
+    reading_progress        REAL NOT NULL DEFAULT 0,
+    content_zim_path        TEXT,
+    archive_source           TEXT NOT NULL DEFAULT 'server' CHECK (archive_source IN ('server','local_legacy')),
+    archive_status           TEXT NOT NULL DEFAULT 'pending' CHECK (archive_status IN ('pending','ready','failed')),
+    archive_last_error       TEXT,
+    archive_last_opened_at   TEXT,
+    updated_at               TEXT NOT NULL
+);
+INSERT INTO articles_v3 (
+    id, source_id, source_name, source_type, title, link, excerpt,
+    content_html, hero_image_path, published_at, fetched_at, read_time_min,
+    reading_state, favorited, zim_path, zim_main_path, extraction_confident,
+    reading_progress, content_zim_path, archive_source, archive_status,
+    archive_last_error, archive_last_opened_at, updated_at
+)
+SELECT
+    id, source_id, source_name, source_type, title, link, excerpt,
+    content_html, hero_image_path, published_at, fetched_at, read_time_min,
+    CASE
+        WHEN unread = 1 THEN 'unread'
+        WHEN reading_progress = 0 THEN 'read'
+        ELSE 'reading'
+    END,
+    favorited, zim_path, zim_main_path, extraction_confident,
+    reading_progress, NULL, 'local_legacy', 'ready', NULL, NULL, updated_at
+FROM articles;
+DROP TABLE articles;
+ALTER TABLE articles_v3 RENAME TO articles;
+
+CREATE INDEX idx_articles_source_id ON articles(source_id);
+CREATE INDEX idx_articles_fetched_at ON articles(fetched_at DESC);
+CREATE INDEX idx_articles_reading_state ON articles(reading_state);
+CREATE UNIQUE INDEX idx_articles_link ON articles(link);
+
+INSERT INTO settings (key, value) VALUES
+    ('archive_server_url', ''),
+    ('archive_server_token', '')
+ON CONFLICT(key) DO NOTHING;
+";
+
 pub fn migrations() -> Migrations<'static> {
-    Migrations::new(vec![M::up(V1), M::up(V2)])
+    Migrations::new(vec![M::up(V1), M::up(V2), M::up(V3)])
 }
 
 pub fn migrate(conn: &mut Connection) -> Result<(), rusqlite_migration::Error> {
@@ -278,6 +356,84 @@ mod tests {
         // v1_conn_with_test_data never overrides the V1-seeded default
         // ('medium'), which maps to '19'.
         assert_eq!(value, "19");
+    }
+
+    /// Builds a V2-schema connection with three rows covering every
+    /// `unread`/`reading_progress` combination V3's `reading_state`
+    /// mapping has to judge: never opened, opened and finished (progress
+    /// at 0, the old model's only "done" signal), and opened but
+    /// abandoned partway through.
+    fn v2_conn_with_test_data() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("open in-memory db");
+        Migrations::new(vec![M::up(V1), M::up(V2)])
+            .to_latest(&mut conn)
+            .expect("apply V1+V2 schema via rusqlite_migration");
+
+        conn.execute_batch(
+            "INSERT INTO articles (
+                 id, source_name, source_type, title, link, excerpt,
+                 content_html, fetched_at, zim_path, zim_main_path, unread, reading_progress, updated_at
+             ) VALUES
+                 ('art-unread', 'Direct link', 'direct', 'Unread', 'https://example.com/unread',
+                  'e', '<p>x</p>', '2026-01-01T00:00:00Z', 'archives/a.zim', 'index.html', 1, 0, '2026-01-01T00:00:00Z'),
+                 ('art-finished', 'Direct link', 'direct', 'Finished', 'https://example.com/finished',
+                  'e', '<p>x</p>', '2026-01-01T00:00:00Z', 'archives/b.zim', 'index.html', 0, 0, '2026-01-01T00:00:00Z'),
+                 ('art-partial', 'Direct link', 'direct', 'Partial', 'https://example.com/partial',
+                  'e', '<p>x</p>', '2026-01-01T00:00:00Z', 'archives/c.zim', 'index.html', 0, 0.4, '2026-01-01T00:00:00Z');",
+        )
+        .expect("insert V2 test data");
+
+        conn
+    }
+
+    #[test]
+    fn v3_maps_unread_and_reading_progress_onto_reading_state() {
+        let mut conn = v2_conn_with_test_data();
+        migrate(&mut conn).expect("migrate to V3");
+
+        let reading_state = |id: &str| -> String {
+            conn.query_row(
+                "SELECT reading_state FROM articles WHERE id = ?1",
+                [id],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(reading_state("art-unread"), "unread");
+        assert_eq!(reading_state("art-finished"), "read");
+        assert_eq!(reading_state("art-partial"), "reading");
+    }
+
+    #[test]
+    fn v3_migrated_rows_are_local_legacy_and_keep_their_zim_path() {
+        let mut conn = v2_conn_with_test_data();
+        migrate(&mut conn).expect("migrate to V3");
+
+        let (source, status, zim_path): (String, String, Option<String>) = conn
+            .query_row(
+                "SELECT archive_source, archive_status, zim_path FROM articles WHERE id = 'art-unread'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(source, "local_legacy");
+        assert_eq!(status, "ready");
+        assert_eq!(zim_path.as_deref(), Some("archives/a.zim"));
+    }
+
+    #[test]
+    fn v3_seeds_archive_server_settings_defaults() {
+        let mut conn = v2_conn_with_test_data();
+        migrate(&mut conn).expect("migrate to V3");
+
+        let value: String = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'archive_server_url'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(value, "");
     }
 
     #[test]
