@@ -1,11 +1,18 @@
 <script lang="ts">
 	import MoreVertical from '$lib/icons/MoreVertical.svelte';
+	import ExternalLink from '$lib/icons/ExternalLink.svelte';
 
 	let {
 		recapturing,
+		link,
 		onRecapture,
 		onDelete
-	}: { recapturing: boolean; onRecapture: () => void; onDelete: () => void } = $props();
+	}: {
+		recapturing: boolean;
+		link: string;
+		onRecapture: () => void;
+		onDelete: () => void;
+	} = $props();
 
 	let open = $state(false);
 	let rootEl = $state<HTMLElement | null>(null);
@@ -35,6 +42,17 @@
 	</button>
 	{#if open}
 		<div class="overflow-popover elev-md" role="menu">
+			<a
+				class="overflow-item"
+				role="menuitem"
+				href={link}
+				target="_blank"
+				rel="noopener"
+				onclick={() => (open = false)}
+			>
+				<ExternalLink />
+				View original
+			</a>
 			<button
 				class="overflow-item"
 				role="menuitem"
@@ -77,8 +95,12 @@
 		background: var(--color-surface);
 	}
 	.overflow-item {
+		display: flex;
+		align-items: center;
+		gap: 8px;
 		width: 100%;
 		text-align: left;
+		text-decoration: none;
 		background: none;
 		border: none;
 		border-radius: var(--radius-sm);
@@ -96,6 +118,6 @@
 		cursor: not-allowed;
 	}
 	.overflow-item.danger {
-		color: var(--color-accent-200);
+		color: var(--color-danger);
 	}
 </style>

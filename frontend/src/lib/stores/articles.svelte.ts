@@ -29,6 +29,10 @@ class ArticlesStore {
 	get unreadCount(): number {
 		return this.items.filter((a) => a.reading_state === 'unread').length;
 	}
+
+	get favoritedCount(): number {
+		return this.items.filter((a) => a.favorited).length;
+	}
 }
 
 export const articlesStore = new ArticlesStore();

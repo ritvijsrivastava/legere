@@ -249,6 +249,7 @@ mod tests {
             "Direct link",
             "direct",
             &output,
+            &[],
         )
         .expect("first insert should succeed");
         assert!(inserted_once);
@@ -263,6 +264,7 @@ mod tests {
             "Direct link",
             "direct",
             &second_output,
+            &[],
         )
         .expect("second insert should not error, just be ignored");
         assert!(

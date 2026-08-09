@@ -289,8 +289,19 @@ const V4: &str = "
  DELETE FROM settings WHERE key IN ('archive_server_url', 'archive_server_token');
 ";
 
+// Adds a `tags` column, populated from RSS `<category>` elements
+// (`feed_rs::Entry::categories`) at capture time — real per-article data,
+// not a fixed/hardcoded taxonomy. A plain `ADD COLUMN` suffices here (no
+// `CHECK` constraint involved, unlike V2-V4's renames), so this is the
+// first migration that doesn't need the recreate-and-swap dance.
+// Direct-link articles have no feed to draw categories from and simply
+// keep the column's default, `'[]'`.
+const V5: &str = "
+ALTER TABLE articles ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';
+";
+
 pub fn migrations() -> Migrations<'static> {
-    Migrations::new(vec![M::up(V1), M::up(V2), M::up(V3), M::up(V4)])
+    Migrations::new(vec![M::up(V1), M::up(V2), M::up(V3), M::up(V4), M::up(V5)])
 }
 
 pub fn migrate(conn: &mut Connection) -> Result<(), rusqlite_migration::Error> {
@@ -511,6 +522,17 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 0, "archive server settings should be removed by V4");
+    }
+
+    #[test]
+    fn v5_adds_tags_column_defaulting_to_an_empty_array() {
+        let mut conn = v2_conn_with_test_data();
+        migrate(&mut conn).expect("migrate to latest");
+
+        let tags: String = conn
+            .query_row("SELECT tags FROM articles WHERE id = 'art-unread'", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(tags, "[]");
     }
 
     #[test]

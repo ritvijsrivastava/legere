@@ -4,19 +4,45 @@
 	import { articlesStore } from '$lib/stores/articles.svelte';
 	import { settingsStore } from '$lib/stores/settings.svelte';
 	import * as api from '$lib/api';
-	import type { ArticleDetail, ReaderMeasure, ReaderLeading } from '$lib/types';
+	import type { ArticleDetail, ReaderMeasure, ReaderLeading, ReaderTheme } from '$lib/types';
 	import HeroImage from '$lib/components/HeroImage.svelte';
 	import ReaderControls from '$lib/components/ReaderControls.svelte';
 	import ArticleOverflowMenu from '$lib/components/ArticleOverflowMenu.svelte';
 	import ChevronLeft from '$lib/icons/ChevronLeft.svelte';
-	import Heart from '$lib/icons/Heart.svelte';
+	import Star from '$lib/icons/Star.svelte';
 	import Check from '$lib/icons/Check.svelte';
-	import ExternalLink from '$lib/icons/ExternalLink.svelte';
-	import { formatDate } from '$lib/format';
+	import { formatCompactRelativeTime } from '$lib/format';
 
 	const SAVE_PROGRESS_DEBOUNCE_MS = 750;
 	const MEASURE_PX: Record<ReaderMeasure, number> = { narrow: 600, default: 680, wide: 760 };
 	const LEADING_VALUE: Record<ReaderLeading, number> = { compact: 1.6, default: 1.75, airy: 1.9 };
+	/** `light` tracks the app's own theme (no override, falls through to
+	 *  the ambient --color-* tokens); sepia/dark are fixed palettes,
+	 *  verbatim from the Legere.dc.html design's `readerThemeMap`. */
+	const READER_THEME_OVERRIDES: Record<
+		ReaderTheme,
+		{ bg: string; fg: string; muted: string; divider: string } | null
+	> = {
+		light: null,
+		sepia: { bg: '#f2e8d8', fg: '#3a2f20', muted: 'rgba(58,47,32,0.6)', divider: 'rgba(58,47,32,0.14)' },
+		dark: { bg: '#1a1820', fg: '#eee9e2', muted: 'rgba(238,233,226,0.55)', divider: 'rgba(255,255,255,0.1)' }
+	};
+
+	const BACK_LABELS: Record<string, string> = { '/': 'Library', '/favorites': 'Favorites', '/highlights': 'Highlights' };
+	let backHref = $derived.by(() => {
+		const from = page.url.searchParams.get('from');
+		return from && from in BACK_LABELS ? from : '/';
+	});
+	let backLabel = $derived(BACK_LABELS[backHref]);
+
+	let isMobile = $state(typeof window !== 'undefined' ? window.innerWidth < 768 : false);
+	$effect(() => {
+		function onResize() {
+			isMobile = window.innerWidth < 768;
+		}
+		window.addEventListener('resize', onResize);
+		return () => window.removeEventListener('resize', onResize);
+	});
 
 	let article = $state<ArticleDetail | null>(null);
 	let scrollProgress = $state(0);
@@ -28,6 +54,7 @@
 	let fontSize = $state(19);
 	let measure = $state<ReaderMeasure>('default');
 	let leading = $state<ReaderLeading>('default');
+	let readerTheme = $state<ReaderTheme>('light');
 	let initializedReaderSettings = false;
 
 	$effect(() => {
@@ -35,9 +62,12 @@
 			fontSize = settingsStore.current.reader_font_size;
 			measure = settingsStore.current.reader_measure;
 			leading = settingsStore.current.reader_leading;
+			readerTheme = settingsStore.current.reader_theme;
 			initializedReaderSettings = true;
 		}
 	});
+
+	let readerPalette = $derived(READER_THEME_OVERRIDES[readerTheme]);
 
 	$effect(() => {
 		const id = page.params.id;
@@ -113,6 +143,10 @@
 		leading = value;
 		if (initializedReaderSettings) settingsStore.update({ reader_leading: value });
 	}
+	function setReaderTheme(value: ReaderTheme) {
+		readerTheme = value;
+		if (initializedReaderSettings) settingsStore.update({ reader_theme: value });
+	}
 
 	async function toggleFavorite() {
 		if (!article) return;
@@ -146,19 +180,27 @@
 		const id = article.id;
 		await api.deleteArticle(id);
 		articlesStore.items = articlesStore.items.filter((a) => a.id !== id);
-		goto('/');
+		goto(backHref);
 	}
 </script>
 
-<div bind:this={containerEl}>
+<div
+	bind:this={containerEl}
+	class="reader-root"
+	style:background={readerPalette ? readerPalette.bg : 'var(--color-bg)'}
+	style:color={readerPalette ? readerPalette.fg : 'var(--color-text)'}
+	style:--reader-fg={readerPalette ? readerPalette.fg : 'var(--color-text)'}
+	style:--reader-muted={readerPalette ? readerPalette.muted : 'var(--color-muted)'}
+	style:--reader-divider={readerPalette ? readerPalette.divider : 'var(--color-divider)'}
+>
 	<div class="progress-track">
 		<div class="progress-fill" style:width="{Math.round(scrollProgress * 100)}%"></div>
 	</div>
 
-	<div class="header-row" style:max-width="{MEASURE_PX[measure]}px">
-		<button class="btn btn-ghost back-btn" onclick={() => goto('/')}>
+	<div class="header-row">
+		<button class="btn btn-ghost back-btn" onclick={() => goto(backHref)}>
 			<ChevronLeft />
-			Library
+			{backLabel}
 		</button>
 		{#if article}
 			<div class="controls">
@@ -166,9 +208,12 @@
 					{fontSize}
 					{measure}
 					{leading}
+					{readerTheme}
+					inline={!isMobile}
 					onFontSize={setFontSize}
 					onMeasure={setMeasure}
 					onLeading={setLeading}
+					onReaderTheme={setReaderTheme}
 				/>
 				<button
 					class="btn btn-icon btn-secondary favorite-btn"
@@ -176,7 +221,7 @@
 					onclick={toggleFavorite}
 					aria-label="Favorite"
 				>
-					<Heart filled={article.favorited} />
+					<Star filled={article.favorited} />
 				</button>
 				<button
 					class="btn btn-icon btn-secondary read-btn"
@@ -186,28 +231,32 @@
 				>
 					<Check />
 				</button>
-				<ArticleOverflowMenu {recapturing} onRecapture={recapture} onDelete={deleteArticle} />
+				<ArticleOverflowMenu
+					{recapturing}
+					link={article.link}
+					onRecapture={recapture}
+					onDelete={deleteArticle}
+				/>
 			</div>
 		{/if}
 	</div>
 
 	{#if article}
 		<div class="reader-page" style:max-width="{MEASURE_PX[measure]}px">
-			<div class="hero">
-				<HeroImage path={article.hero_image_path} alt={article.title} />
-			</div>
-			<h1 class="reader-title">{article.title}</h1>
+			{#if article.hero_image_path}
+				<div class="hero">
+					<HeroImage path={article.hero_image_path} alt={article.title} />
+				</div>
+			{/if}
 			<div class="card-meta reader-meta">
 				<span>{article.source_name}</span>
 				<span>·</span>
-				<span>{formatDate(article.published_at)}</span>
-				<span>·</span>
 				<span>{minutesLeft} min left</span>
-				<a href={article.link} target="_blank" rel="noopener" class="view-original">
-					<ExternalLink />
-					View original
-				</a>
+				<span>·</span>
+				<span>{formatCompactRelativeTime(article.published_at)}</span>
 			</div>
+			<h1 class="reader-title">{article.title}</h1>
+			<p class="reader-hint">Tap a marked passage to highlight it and add a note.</p>
 
 			<div
 				class="reader-body"
@@ -221,11 +270,14 @@
 </div>
 
 <style>
+	.reader-root {
+		min-height: 100%;
+	}
 	.progress-track {
 		position: sticky;
 		top: 0;
 		height: 2px;
-		background: var(--color-divider);
+		background: var(--reader-divider, var(--color-divider));
 		z-index: 4;
 	}
 	.progress-fill {
@@ -240,9 +292,29 @@
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		margin: 0 auto 20px;
-		padding: calc(36px + env(safe-area-inset-top)) calc(36px + env(safe-area-inset-right)) 0
+		flex-wrap: wrap;
+		row-gap: 10px;
+		margin: 0 0 20px;
+		padding: calc(36px + env(safe-area-inset-top)) calc(36px + env(safe-area-inset-right)) 18px
 			calc(36px + env(safe-area-inset-left));
+		border-bottom: 1px solid var(--reader-divider, var(--color-divider));
+	}
+	.header-row :global(.btn-secondary) {
+		border-color: var(--reader-divider, var(--color-divider));
+		color: var(--reader-fg, var(--color-text));
+	}
+	.header-row :global(.btn-secondary:hover:not(:disabled)) {
+		background: color-mix(in srgb, var(--reader-fg, var(--color-text)) 7%, transparent);
+	}
+	.header-row :global(.seg) {
+		border-color: var(--reader-divider, var(--color-divider));
+	}
+	.header-row :global(.seg-opt) {
+		color: var(--reader-fg, var(--color-text));
+		border-color: var(--reader-divider, var(--color-divider));
+	}
+	.header-row :global(.seg-opt:not(:has(input:checked)):hover) {
+		background: color-mix(in srgb, var(--reader-fg, var(--color-text)) 7%, transparent);
 	}
 	.back-btn {
 		padding-left: 0;
@@ -250,16 +322,18 @@
 	.controls {
 		display: flex;
 		align-items: center;
+		flex-wrap: wrap;
+		row-gap: 8px;
 		gap: 10px;
 	}
 	.favorite-btn {
-		color: var(--color-text);
+		color: var(--reader-fg, var(--color-text));
 	}
 	.favorite-btn.favorited {
 		color: var(--color-accent);
 	}
 	.read-btn {
-		color: var(--color-text);
+		color: var(--reader-fg, var(--color-text));
 	}
 	.read-btn.read {
 		color: var(--color-accent);
@@ -270,8 +344,13 @@
 		margin-bottom: 24px;
 		border-radius: var(--radius-md);
 		overflow: hidden;
-		background: var(--color-surface);
-		border: 1px solid var(--color-divider);
+		background: color-mix(in srgb, var(--reader-fg, var(--color-text)) 6%, transparent);
+		border: 1px solid var(--reader-divider, var(--color-divider));
+	}
+	.reader-meta {
+		font-size: 13px;
+		margin-bottom: 10px;
+		color: var(--reader-muted, var(--color-muted));
 	}
 	.reader-title {
 		font-family: var(--font-reading);
@@ -279,19 +358,13 @@
 		font-size: clamp(28px, 5vw, 38px);
 		line-height: 1.15;
 		letter-spacing: -0.01em;
-		margin: 0 0 12px;
+		margin: 0 0 10px;
 	}
-	.reader-meta {
-		font-size: 13px;
-		margin-bottom: 28px;
-	}
-	.view-original {
-		display: inline-flex;
-		align-items: center;
-		gap: 5px;
-		margin-left: 8px;
-		color: var(--color-neutral-500);
-		text-decoration: none;
+	.reader-hint {
+		font-family: var(--font-reading);
+		font-size: 15px;
+		margin: 0 0 28px;
+		color: var(--reader-muted, var(--color-muted));
 	}
 	.reader-body {
 		font-size: 19px;

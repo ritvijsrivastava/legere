@@ -5,8 +5,10 @@
 	import * as api from '$lib/api';
 	import type { ArticleSummary } from '$lib/types';
 
+	let favorited = $derived(articlesStore.items.filter((a) => a.favorited));
+
 	function openArticle(id: string) {
-		goto(`/reader/${id}?from=/`);
+		goto(`/reader/${id}?from=/favorites`);
 	}
 
 	async function deleteArticle(article: ArticleSummary) {
@@ -17,11 +19,9 @@
 </script>
 
 <ArticleCollection
-	title="Library"
-	subtitle="{articlesStore.unreadCount} unread"
-	items={articlesStore.items}
-	emptyMessage="No articles yet. Add a source or paste a direct link to get started."
-	showRefresh
+	title="Favorites"
+	items={favorited}
+	emptyMessage="No favorites yet. Tap the star on an article to save it here."
 	onopen={openArticle}
 	ondelete={deleteArticle}
 />

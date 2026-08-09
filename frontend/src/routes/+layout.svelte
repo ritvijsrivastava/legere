@@ -15,6 +15,10 @@
 		settingsStore.refresh();
 		registerBackendEvents();
 	});
+
+	$effect(() => {
+		document.documentElement.dataset.theme = settingsStore.current.app_theme;
+	});
 </script>
 
 <svelte:head>

@@ -17,6 +17,9 @@ pub struct ArticleSummary {
     pub favorited: bool,
     /// 0.0-1.0 scroll fraction, for the library card's progress indicator.
     pub reading_progress: f64,
+    /// From the source feed's `<category>` elements (`feed_rs`); always
+    /// empty for direct-link articles, which have no feed to draw from.
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,6 +41,7 @@ pub struct ArticleDetail {
     /// confidence.
     pub extraction_confident: bool,
     pub reading_progress: f64,
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -64,6 +68,12 @@ pub struct Settings {
     pub reader_font_size: i64,
     pub reader_measure: String,
     pub reader_leading: String,
+    /// `light` | `dark` — the app chrome's own color scheme.
+    pub app_theme: String,
+    /// `light` | `sepia` | `dark` — the reader's own color scheme. `light`
+    /// tracks whatever `app_theme` currently is rather than forcing a
+    /// literal light palette; `sepia`/`dark` are fixed overrides.
+    pub reader_theme: String,
 }
 
 impl Default for Settings {
@@ -75,6 +85,8 @@ impl Default for Settings {
             reader_font_size: 19,
             reader_measure: "default".into(),
             reader_leading: "default".into(),
+            app_theme: "dark".into(),
+            reader_theme: "light".into(),
         }
     }
 }
@@ -82,4 +94,12 @@ impl Default for Settings {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyncResult {
     pub new_article_count: u32,
+}
+
+/// Metadata about an available update, sent to the frontend.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateInfo {
+    pub version: String,
+    pub notes: Option<String>,
+    pub date: Option<String>,
 }

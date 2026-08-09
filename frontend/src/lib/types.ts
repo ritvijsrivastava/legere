@@ -4,6 +4,10 @@ export type FontSize = 'small' | 'medium' | 'large';
 export type LibraryView = 'cards' | 'list';
 export type ReaderMeasure = 'narrow' | 'default' | 'wide';
 export type ReaderLeading = 'compact' | 'default' | 'airy';
+export type AppTheme = 'light' | 'dark';
+/** `light` tracks the current `AppTheme` rather than forcing a literal
+ *  light palette; `sepia`/`dark` are fixed overrides. */
+export type ReaderTheme = 'light' | 'sepia' | 'dark';
 
 /** `unread` -> `reading` on opening the reader (whether previously unread
  *  or read); `reading` -> `read` only via the manual "mark as read" action. */
@@ -22,6 +26,9 @@ export interface ArticleSummary {
 	favorited: boolean;
 	/** 0.0-1.0 scroll fraction, for the library card's progress indicator. */
 	reading_progress: number;
+	/** From the source feed's `<category>` elements; always empty for
+	 *  direct-link articles. */
+	tags: string[];
 }
 
 export interface ArticleDetail extends ArticleSummary {
@@ -52,6 +59,8 @@ export interface Settings {
 	reader_font_size: number;
 	reader_measure: ReaderMeasure;
 	reader_leading: ReaderLeading;
+	app_theme: AppTheme;
+	reader_theme: ReaderTheme;
 }
 
 export interface SyncResult {

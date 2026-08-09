@@ -1,7 +1,10 @@
 <script lang="ts">
 	import type { ArticleSummary } from '$lib/types';
 	import { formatDate, formatReadTime } from '$lib/format';
+	import { articlesStore } from '$lib/stores/articles.svelte';
+	import { sourceDotColor } from '$lib/sourceColor';
 	import HeroImage from './HeroImage.svelte';
+	import Star from '$lib/icons/Star.svelte';
 	import Trash from '$lib/icons/Trash.svelte';
 
 	let {
@@ -9,6 +12,11 @@
 		onclick,
 		ondelete
 	}: { article: ArticleSummary; onclick: () => void; ondelete: () => void } = $props();
+
+	function toggleFavorite(e: MouseEvent) {
+		e.stopPropagation();
+		articlesStore.toggleFavorite(article.id);
+	}
 </script>
 
 <div class="row-wrapper">
@@ -22,12 +30,14 @@
 			{/if}
 		</div>
 		<div class="body">
-			<div class="title-row">
-				<h4 class="title">{article.title}</h4>
+			<div class="top-row">
+				<span class="dot" style:background={sourceDotColor(article.source_name)}></span>
+				<span class="source-label">{article.source_name}</span>
 				{#if article.reading_state === 'unread'}
 					<span class="unread-dot"></span>
 				{/if}
 			</div>
+			<h4 class="title">{article.title}</h4>
 			<div class="card-meta">
 				<span>{article.source_name}</span>
 				<span>·</span>
@@ -36,6 +46,14 @@
 				<span>{formatReadTime(article.read_time_min)}</span>
 			</div>
 		</div>
+	</button>
+	<button
+		class="fav-btn"
+		class:favorited={article.favorited}
+		onclick={toggleFavorite}
+		aria-label={article.favorited ? 'Remove from favorites' : 'Add to favorites'}
+	>
+		<Star size={15} filled={article.favorited} />
 	</button>
 	<button class="delete-btn" onclick={ondelete} aria-label="Delete article">
 		<Trash size={14} />
@@ -47,10 +65,10 @@
 		display: flex;
 		align-items: center;
 		gap: 2px;
-		border-radius: var(--radius-md);
+		border-radius: 10px;
 	}
 	.row-wrapper:hover {
-		background: color-mix(in srgb, var(--color-text) 5%, transparent);
+		background: var(--color-surface);
 	}
 	.row-wrapper:not(:hover):not(:focus-within) .delete-btn {
 		opacity: 0;
@@ -62,14 +80,15 @@
 		text-align: left;
 		background: none;
 		border: none;
-		border-radius: var(--radius-md);
+		border-radius: 10px;
 		cursor: pointer;
-		padding: 10px 8px;
+		padding: 12px 8px;
 		font-family: var(--font-body);
 		color: var(--color-text);
 		flex: 1;
 		min-width: 0;
 	}
+	.fav-btn,
 	.delete-btn {
 		flex: none;
 		display: flex;
@@ -77,24 +96,32 @@
 		justify-content: center;
 		width: 30px;
 		height: 30px;
-		margin-right: 8px;
 		border: none;
 		border-radius: var(--radius-sm);
 		background: none;
-		color: var(--color-neutral-500);
+		color: var(--color-muted);
 		cursor: pointer;
 		transition: opacity 0.1s;
 	}
+	.fav-btn.favorited {
+		color: var(--color-accent);
+	}
+	.fav-btn:hover,
 	.delete-btn:hover {
-		color: var(--color-accent-200);
 		background: color-mix(in srgb, var(--color-text) 8%, transparent);
+	}
+	.delete-btn {
+		margin-right: 8px;
+	}
+	.delete-btn:hover {
+		color: var(--color-danger);
 	}
 	.thumb {
 		position: relative;
-		width: 56px;
-		height: 56px;
+		width: 52px;
+		height: 52px;
 		flex: none;
-		border-radius: var(--radius-sm);
+		border-radius: 10px;
 		overflow: hidden;
 		background: var(--color-surface);
 		border: 1px solid var(--color-divider);
@@ -114,16 +141,30 @@
 	.body {
 		flex: 1;
 		min-width: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 3px;
 	}
-	.title-row {
+	.top-row {
 		display: flex;
 		align-items: center;
-		gap: 8px;
+		gap: 6px;
+	}
+	.dot {
+		width: 7px;
+		height: 7px;
+		border-radius: 50%;
+		flex: none;
+	}
+	.source-label {
+		font-size: 11px;
+		color: var(--color-muted);
 	}
 	.title {
 		margin: 0;
-		font-size: 15px;
-		font-weight: 500;
+		font-family: var(--font-heading);
+		font-size: 14.5px;
+		font-weight: 600;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
@@ -134,8 +175,5 @@
 		border-radius: 50%;
 		background: var(--color-accent);
 		flex: none;
-	}
-	.card-meta {
-		margin-top: 3px;
 	}
 </style>

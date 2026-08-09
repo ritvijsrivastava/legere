@@ -52,6 +52,7 @@ pub async fn sync_rss_source(state: &AppState, source: &Source) -> Result<u32, R
         let Some(link) = entry.links.first().map(|l| l.href.clone()) else {
             continue;
         };
+        let tags: Vec<String> = entry.categories.iter().map(|c| c.term.clone()).collect();
 
         let already_exists = {
             let conn = state.pool.get()?;
@@ -72,6 +73,7 @@ pub async fn sync_rss_source(state: &AppState, source: &Source) -> Result<u32, R
                     &source.name,
                     "rss",
                     &output,
+                    &tags,
                 )?;
                 if inserted {
                     new_count += 1;

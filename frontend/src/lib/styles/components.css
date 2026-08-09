@@ -21,9 +21,9 @@
 }
 .btn svg { display: block; }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
-.btn-primary { color: var(--color-accent); border-color: var(--color-accent); }
-.btn-primary:hover:not(:disabled) { background: color-mix(in srgb, var(--color-accent) 12%, transparent); }
-.btn-primary:active:not(:disabled) { background: color-mix(in srgb, var(--color-accent) 22%, transparent); }
+.btn-primary { color: var(--color-accent-fg); background: var(--color-accent); border-color: var(--color-accent); }
+.btn-primary:hover:not(:disabled) { background: color-mix(in srgb, var(--color-accent) 88%, black); }
+.btn-primary:active:not(:disabled) { background: color-mix(in srgb, var(--color-accent) 78%, black); }
 .btn-secondary { border-color: var(--color-divider); }
 .btn-secondary:hover:not(:disabled) { background: color-mix(in srgb, var(--color-text) 7%, transparent); }
 .btn-secondary:active:not(:disabled) { background: color-mix(in srgb, var(--color-text) 14%, transparent); }
@@ -83,9 +83,13 @@
   pointer-events: none;
 }
 .seg-opt + .seg-opt { border-left: 1px solid var(--color-divider); }
-.seg-opt:has(input:checked) { color: var(--color-accent); box-shadow: inset 0 0 0 1px var(--color-accent); }
+.seg-opt:has(input:checked) { background: var(--color-accent); color: var(--color-accent-fg); border-left-color: var(--color-accent); }
+.seg-opt:has(input:checked) + .seg-opt { border-left-color: var(--color-accent); }
 .seg-opt:not(:has(input:checked)):hover { background: color-mix(in srgb, var(--color-text) 7%, transparent); }
-.seg-opt:has(input:focus-visible) { outline: 2px solid var(--color-accent); outline-offset: -2px; }
+/* `outline` (unlike `box-shadow`) ignores the parent `.seg`'s
+   border-radius in WebKitGTK, drawing a hard-cornered rectangle detached
+   from the button's rounded shape — a box-shadow stays properly inset. */
+.seg-opt:has(input:focus-visible) { box-shadow: inset 0 0 0 2px var(--color-accent); }
 .seg-opt-disabled { cursor: not-allowed; opacity: 0.5; }
 .seg-opt-disabled:hover { background: none; }
 
@@ -119,9 +123,8 @@
   padding: 3px 10px;
   border-radius: calc(var(--radius-md) * 0.75);
 }
-.tag-accent { background: var(--color-accent-800); color: var(--color-accent-100); }
-.tag-accent-2 { background: var(--color-accent-2-800); color: var(--color-accent-2-100); }
-.tag-neutral { background: var(--color-neutral-800); color: var(--color-neutral-100); }
+.tag-accent { background: color-mix(in srgb, var(--color-accent) 18%, var(--color-surface)); color: var(--color-accent); }
+.tag-neutral { background: var(--color-surface); color: var(--color-muted); }
 .tag-outline { border: 1px solid var(--color-accent); color: var(--color-accent); }
 
 .dialog-backdrop {
@@ -130,18 +133,18 @@
   display: grid;
   place-items: center;
   padding: var(--space-4);
-  background: color-mix(in srgb, var(--color-neutral-900) 50%, transparent);
+  background: rgba(20, 16, 24, 0.5);
 }
 .dialog {
-  width: min(440px, 100%);
+  width: min(420px, 90vw);
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
-  padding: var(--space-4);
-  border-radius: var(--radius-lg);
+  gap: 16px;
+  padding: 26px;
+  border-radius: 18px;
   background: var(--color-surface);
   box-shadow: var(--shadow-lg);
 }
-.dialog-title { font-family: var(--font-heading); font-weight: var(--font-heading-weight); font-size: 20px; }
+.dialog-title { font-family: var(--font-heading); font-weight: 700; font-size: 18px; }
 .dialog-body { font-size: 14px; opacity: 0.85; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-2); }

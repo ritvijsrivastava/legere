@@ -27,7 +27,7 @@ pub async fn capture_direct_link(
 
     let conn = state.pool.get()?;
     let inserted =
-        queries::insert_captured_article(&conn, &id, None, "Direct link", "direct", &output)?;
+        queries::insert_captured_article(&conn, &id, None, "Direct link", "direct", &output, &[])?;
 
     // `output.link`'s cleaned form was already saved under a different id
     // (the user re-submitted a URL they already have) — the fresh `id`
@@ -51,5 +51,6 @@ pub async fn capture_direct_link(
         reading_state: "unread".to_string(),
         favorited: false,
         reading_progress: 0.0,
+        tags: Vec::new(),
     })
 }

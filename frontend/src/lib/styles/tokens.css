@@ -1,48 +1,31 @@
-/* Nocturne design tokens, ported verbatim from the claude.ai/design project
-   ("Legere article app design", Nocturne design system). Inter is vendored
-   locally via @fontsource/inter (imported in app.css) rather than the
-   original @import from Google Fonts — this app must work fully offline. */
+/* Legere design tokens, ported from claude.ai/design ("Legere article app
+   design" project, `Legere.dc.html`) — light is the base palette on :root,
+   dark overrides live under :root[data-theme="dark"] (see
+   +layout.svelte for how the app-theme setting drives that attribute).
+   Poppins/Inter/Source Serif 4 are vendored locally via @fontsource
+   (imported in app.css) rather than the original Google Fonts @import —
+   this app must work fully offline. */
 
 :root {
-  --color-bg: #161826;
-  --color-surface: #232532;
-  --color-text: #e9e9ed;
-  --color-accent: #9184d9;
-  --color-accent-2: #a7a1db;
-  --color-divider: color-mix(in srgb, #e9e9ed 16%, transparent);
+  --color-bg: #f6f2ea;
+  --color-surface: #efe9dd;
+  --color-text: #2b241d;
+  --color-muted: rgba(43, 36, 29, 0.58);
+  --color-divider: rgba(43, 36, 29, 0.12);
+  --color-accent: #6d5bd0;
+  --color-accent-fg: #ffffff;
+  --color-danger: #b3483e;
 
-  --color-neutral-100: #f3f5fe;
-  --color-neutral-200: #e4e7f5;
-  --color-neutral-300: #cfd3e5;
-  --color-neutral-400: #b2b6ca;
-  --color-neutral-500: #9397ab;
-  --color-neutral-600: #75798c;
-  --color-neutral-700: #595d6c;
-  --color-neutral-800: #3f424d;
-  --color-neutral-900: #292b31;
+  --shadow-card: 0 1px 2px rgba(40, 30, 15, 0.05), 0 6px 18px rgba(40, 30, 15, 0.07);
+  --shadow-card-hover: 0 4px 10px rgba(40, 30, 15, 0.08), 0 14px 30px rgba(40, 30, 15, 0.12);
+  /* Hero images get a subtle `lighten` blend against the dark surface so
+     they don't look like flat rectangles pasted on the page; against a
+     light surface the same blend washes images out, so it's a no-op
+     there. */
+  --hero-blend: normal;
 
-  --color-accent-100: #f5f4ff;
-  --color-accent-200: #e7e5fe;
-  --color-accent-300: #d2cefd;
-  --color-accent-400: #b5abfc;
-  --color-accent-500: #968ae0;
-  --color-accent-600: #796cbf;
-  --color-accent-700: #5d5294;
-  --color-accent-800: #423a6a;
-  --color-accent-900: #2b2741;
-
-  --color-accent-2-100: #f5f4ff;
-  --color-accent-2-200: #e7e5fe;
-  --color-accent-2-300: #d2cefd;
-  --color-accent-2-400: #b5afe8;
-  --color-accent-2-500: #9690c9;
-  --color-accent-2-600: #7972a9;
-  --color-accent-2-700: #5c5783;
-  --color-accent-2-800: #423e5d;
-  --color-accent-2-900: #2b293a;
-
-  --font-heading: 'Inter', system-ui, sans-serif;
-  --font-heading-weight: 500;
+  --font-heading: 'Poppins', system-ui, sans-serif;
+  --font-heading-weight: 600;
   --font-body: 'Inter', system-ui, sans-serif;
   --font-reading: 'Source Serif 4 Variable', Georgia, serif;
 
@@ -57,9 +40,27 @@
   --radius-md: 8px;
   --radius-lg: 14px;
 
-  --shadow-sm: 0 0 0 1px #3f424d;
-  --shadow-md: 0 0 0 1px #595d6c, 0 6px 18px rgba(0, 0, 0, 0.55);
-  --shadow-lg: 0 0 0 1px #9397ab, 0 16px 40px rgba(0, 0, 0, 0.65);
+  --shadow-sm: 0 0 0 1px var(--color-divider);
+  --shadow-md: 0 0 0 1px var(--color-divider), 0 6px 18px rgba(40, 30, 15, 0.12);
+  --shadow-lg: 0 0 0 1px var(--color-divider), 0 16px 40px rgba(40, 30, 15, 0.18);
+}
+
+:root[data-theme='dark'] {
+  --color-bg: #1e1c22;
+  --color-surface: #28252d;
+  --color-text: #f0ece4;
+  --color-muted: rgba(240, 236, 228, 0.58);
+  --color-divider: rgba(255, 255, 255, 0.09);
+  --color-accent: #a597f2;
+  --color-danger: #e2897c;
+
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 6px 18px rgba(0, 0, 0, 0.35);
+  --shadow-card-hover: 0 6px 16px rgba(0, 0, 0, 0.4), 0 18px 40px rgba(0, 0, 0, 0.45);
+  --hero-blend: lighten;
+
+  --shadow-sm: 0 0 0 1px var(--color-divider);
+  --shadow-md: 0 0 0 1px var(--color-divider), 0 6px 18px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 0 0 1px var(--color-divider), 0 16px 40px rgba(0, 0, 0, 0.55);
 }
 
 *,
@@ -81,27 +82,27 @@ body {
 h1, h2, h3, h4, h5, h6 {
   font-family: var(--font-heading);
   font-weight: var(--font-heading-weight);
-  line-height: 1.12;
-  letter-spacing: -0.015em;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
   margin: 0 0 var(--space-2);
 }
-h1 { font-size: 42px; }
-h2 { font-size: 32px; }
-h3 { font-size: 25px; }
-h4 { font-size: 20px; }
-h5 { font-size: 16px; }
-h6 { font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; }
+h1 { font-size: 30px; font-weight: 700; }
+h2 { font-size: 24px; font-weight: 700; }
+h3 { font-size: 19px; }
+h4 { font-size: 16px; }
+h5 { font-size: 14px; }
+h6 { font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-muted); }
 p { margin: 0 0 var(--space-3); }
 a { color: var(--color-accent); text-underline-offset: 3px; }
 img { display: block; max-width: 100%; }
 
-.text-muted { color: color-mix(in srgb, var(--color-text) 55%, transparent); }
+.text-muted { color: var(--color-muted); }
 :focus { outline: none; }
 :focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 ::selection { background: color-mix(in srgb, var(--color-accent) 30%, transparent); }
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: var(--color-bg); }
-::-webkit-scrollbar-thumb { background: var(--color-neutral-800); border-radius: 8px; }
+::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--color-text) 20%, transparent); border-radius: 8px; }
 
-.lighten { mix-blend-mode: lighten; background-color: transparent; }
+.lighten { mix-blend-mode: var(--hero-blend); background-color: transparent; }

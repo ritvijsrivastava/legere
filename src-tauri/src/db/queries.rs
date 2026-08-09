@@ -7,6 +7,18 @@ use uuid::Uuid;
 use crate::capture::LocalCaptureOutput;
 use crate::models::{ArticleDetail, ArticleSummary, Settings, Source};
 
+/// `tags` is stored as a JSON array string; a row with anything other
+/// than a valid JSON array (shouldn't happen — only this module writes
+/// the column) is treated as untagged rather than failing the whole
+/// query.
+fn parse_tags(raw: String) -> Vec<String> {
+    serde_json::from_str(&raw).unwrap_or_default()
+}
+
+fn tags_to_json(tags: &[String]) -> String {
+    serde_json::to_string(tags).unwrap_or_else(|_| "[]".to_string())
+}
+
 fn article_summary_from_row(row: &Row) -> rusqlite::Result<ArticleSummary> {
     Ok(ArticleSummary {
         id: row.get("id")?,
@@ -20,11 +32,12 @@ fn article_summary_from_row(row: &Row) -> rusqlite::Result<ArticleSummary> {
         reading_state: row.get("reading_state")?,
         favorited: row.get::<_, i64>("favorited")? != 0,
         reading_progress: row.get("reading_progress")?,
+        tags: parse_tags(row.get("tags")?),
     })
 }
 
 const ARTICLE_SUMMARY_COLUMNS: &str = "id, title, source_name, source_type, excerpt, hero_image_path,
-                published_at, read_time_min, reading_state, favorited, reading_progress";
+                published_at, read_time_min, reading_state, favorited, reading_progress, tags";
 
 /// A cheap pre-check used to skip capturing (fetching + localizing +
 /// archiving) an article whose link is already known, before doing any of
@@ -60,6 +73,7 @@ pub fn insert_captured_article(
     source_name: &str,
     source_type: &str,
     output: &LocalCaptureOutput,
+    tags: &[String],
 ) -> rusqlite::Result<bool> {
     let now = Utc::now().to_rfc3339();
     let inserted = conn.execute(
@@ -67,8 +81,8 @@ pub fn insert_captured_article(
             id, source_id, source_name, source_type, title, link, excerpt,
             content_html, hero_image_path, published_at, fetched_at,
             read_time_min, favorited, content_zim_path,
-            extraction_confident, updated_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 0, ?13, ?14, ?15)",
+            extraction_confident, tags, updated_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 0, ?13, ?14, ?15, ?16)",
         params![
             id,
             source_id,
@@ -84,6 +98,7 @@ pub fn insert_captured_article(
             output.read_time_min,
             output.content_zim_path,
             output.extraction_confident,
+            tags_to_json(tags),
             now,
         ],
     )? > 0;
@@ -151,7 +166,7 @@ pub fn get_article(conn: &Connection, id: &str) -> rusqlite::Result<Option<Artic
     conn.query_row(
         "SELECT id, title, source_name, source_type, excerpt, hero_image_path,
                 published_at, read_time_min, reading_state, favorited, link, content_html,
-                extraction_confident, reading_progress
+                extraction_confident, reading_progress, tags
          FROM articles WHERE id = ?1",
         params![id],
         |row| {
@@ -170,6 +185,7 @@ pub fn get_article(conn: &Connection, id: &str) -> rusqlite::Result<Option<Artic
                 content_html: row.get("content_html")?,
                 extraction_confident: row.get::<_, i64>("extraction_confident")? != 0,
                 reading_progress: row.get("reading_progress")?,
+                tags: parse_tags(row.get("tags")?),
             })
         },
     )
@@ -453,6 +469,8 @@ pub fn get_settings(conn: &Connection) -> rusqlite::Result<Settings> {
             }
             "reader_measure" => settings.reader_measure = value,
             "reader_leading" => settings.reader_leading = value,
+            "app_theme" => settings.app_theme = value,
+            "reader_theme" => settings.reader_theme = value,
             _ => {}
         }
     }
@@ -489,6 +507,16 @@ pub fn update_settings(conn: &Connection, settings: &Settings) -> rusqlite::Resu
         "INSERT INTO settings (key, value) VALUES ('reader_leading', ?1)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value",
         params![settings.reader_leading],
+    )?;
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES ('app_theme', ?1)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![settings.app_theme],
+    )?;
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES ('reader_theme', ?1)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![settings.reader_theme],
     )?;
     Ok(())
 }
@@ -554,7 +582,7 @@ mod tests {
         let conn = migrated_conn();
         let source = insert_rss_source(&conn, "Feed", "https://example.com/feed.xml").unwrap();
         let output = sample_capture_output("https://example.com/article");
-        insert_captured_article(&conn, "art-1", Some(&source.id), &source.name, "rss", &output).unwrap();
+        insert_captured_article(&conn, "art-1", Some(&source.id), &source.name, "rss", &output, &[]).unwrap();
         assert_eq!(get_source(&conn, &source.id).unwrap().unwrap().article_count, 1);
 
         let deleted = delete_article(&conn, "art-1").unwrap().expect("row existed");

@@ -21,9 +21,17 @@
 	};
 
 	const statusStyle: Record<Source['status'], { bg: string; color: string; label: string }> = {
-		active: { bg: 'var(--color-accent-800)', color: 'var(--color-accent-200)', label: 'Active' },
-		paused: { bg: 'var(--color-neutral-800)', color: 'var(--color-neutral-300)', label: 'Paused' },
-		error: { bg: 'var(--color-accent-800)', color: 'var(--color-accent-100)', label: 'Error' }
+		active: {
+			bg: 'color-mix(in srgb, var(--color-accent) 18%, var(--color-surface))',
+			color: 'var(--color-accent)',
+			label: 'Active'
+		},
+		paused: { bg: 'var(--color-surface)', color: 'var(--color-muted)', label: 'Paused' },
+		error: {
+			bg: 'color-mix(in srgb, var(--color-danger) 18%, var(--color-surface))',
+			color: 'var(--color-danger)',
+			label: 'Error'
+		}
 	};
 
 	async function syncNow(id: string) {
@@ -106,7 +114,6 @@
 <style>
 	.sources-page {
 		max-width: 860px;
-		margin: 0 auto;
 		padding: 36px 36px 56px;
 	}
 	.header-row {
@@ -118,8 +125,7 @@
 		margin-bottom: 22px;
 	}
 	.header-row h1 {
-		font-size: 30px;
-		font-weight: 500;
+		font-size: 24px;
 		margin: 0;
 	}
 	.source-list {
@@ -143,7 +149,7 @@
 		justify-content: center;
 		background: var(--color-surface);
 		border-radius: var(--radius-md);
-		color: var(--color-neutral-400);
+		color: var(--color-muted);
 	}
 	.info {
 		flex: 1;
@@ -151,7 +157,7 @@
 	}
 	.name {
 		font-family: var(--font-heading);
-		font-weight: 500;
+		font-weight: 600;
 		font-size: 14px;
 		overflow: hidden;
 		text-overflow: ellipsis;
@@ -160,12 +166,18 @@
 	.error-text {
 		margin-top: 3px;
 		font-size: 11px;
-		color: var(--color-accent-300);
+		color: var(--color-danger);
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
 	.empty-state {
 		padding: 40px 0;
+	}
+
+	@media (max-width: 768px) {
+		.sources-page {
+			padding: 20px 16px 32px;
+		}
 	}
 </style>

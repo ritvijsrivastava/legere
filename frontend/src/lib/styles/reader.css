@@ -8,7 +8,7 @@
 .reader-body {
   font-family: var(--font-reading);
   font-variation-settings: 'wght' 400;
-  color: var(--color-neutral-100);
+  color: var(--reader-fg, var(--color-text));
 }
 
 .reader-body :global(p) {
@@ -30,7 +30,7 @@
 .reader-body :global(h4) {
   font-family: var(--font-heading);
   font-weight: 600;
-  color: var(--color-text);
+  color: var(--reader-fg, var(--color-text));
   letter-spacing: -0.01em;
   margin: 1.6em 0 0.6em;
 }
@@ -53,7 +53,7 @@
   margin: 1.6em 0;
   padding-left: 1.1em;
   border-left: 2px solid var(--color-accent);
-  color: color-mix(in srgb, var(--color-neutral-100) 82%, transparent);
+  color: color-mix(in srgb, var(--reader-fg, var(--color-text)) 82%, transparent);
   font-style: italic;
 }
 
@@ -67,7 +67,7 @@
   margin-top: 8px;
   font-family: var(--font-body);
   font-size: 0.72em;
-  color: var(--color-neutral-500);
+  color: var(--reader-muted, var(--color-muted));
   text-align: center;
 }
 
@@ -81,8 +81,8 @@
   padding: var(--space-4);
   overflow-x: auto;
   border-radius: var(--radius-md);
-  background: var(--color-surface);
-  border: 1px solid var(--color-divider);
+  background: color-mix(in srgb, var(--reader-fg, var(--color-text)) 6%, transparent);
+  border: 1px solid var(--reader-divider, var(--color-divider));
 }
 .reader-body :global(code) {
   font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
@@ -92,7 +92,7 @@
 .reader-body :global(li code) {
   padding: 0.15em 0.4em;
   border-radius: 4px;
-  background: var(--color-surface);
+  background: color-mix(in srgb, var(--reader-fg, var(--color-text)) 6%, transparent);
 }
 .reader-body :global(pre code) {
   padding: 0;
@@ -111,5 +111,5 @@
 .reader-body :global(hr) {
   margin: 2.2em 0;
   border: none;
-  border-top: 1px solid var(--color-divider);
+  border-top: 1px solid var(--reader-divider, var(--color-divider));
 }
