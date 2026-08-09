@@ -41,14 +41,4 @@ export function registerBackendEvents() {
 	listen('source:changed', () => {
 		sourcesStore.refresh();
 	});
-
-	// A full archive finished downloading and is now cached locally —
-	// refresh the library so any card's archive-status affordance updates.
-	// The reader page (if one happens to be open for this exact article)
-	// has its own targeted listener for switching the Original tab live;
-	// this one is the same coarse-refresh pattern as every other listener
-	// here.
-	listen('archive:ready', () => {
-		articlesStore.refresh();
-	});
 }

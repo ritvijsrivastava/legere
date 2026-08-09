@@ -2,8 +2,10 @@
 
 A local-first, offline-first article reader. Add RSS feeds or paste a
 direct link; Legere extracts a readable version, cleans tracking params
-off the link, and archives the original page into a self-contained ZIM
-file so it stays readable (images included) with no network at all.
+off the link, and stores that readable view's own images in a small,
+self-contained ZIM file so it stays readable with no network at all. The
+original page itself is never archived — "view original" just opens the
+live link in your browser.
 
 Built with Tauri 2 (Rust) + SvelteKit (Svelte 5 runes), SQLite storage,
 and the [wraith](../wraith) crates (sanitize/asset-localize/ZIM) as path

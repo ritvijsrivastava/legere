@@ -17,16 +17,13 @@ export function getArticle(id: string): Promise<ArticleDetail> {
 }
 
 /** Transitions an article into `reading` (from `unread` or `read`) and
- *  returns its refreshed detail. Also kicks off a background archive
- *  download server-side if the full archive is `ready` but not yet cached
- *  locally — see `commands::articles::open_for_reading` on the Rust side. */
+ *  returns its refreshed detail. */
 export function openForReading(id: string): Promise<ArticleDetail> {
 	return invoke<ArticleDetail>('open_for_reading', { id });
 }
 
 /** Transitions an article into `read` — the only path there, always a
- *  manual action. Evicts its locally cached full archive, if any; the
- *  server retains its own copy. */
+ *  manual action. */
 export function markAsRead(id: string): Promise<void> {
 	return invoke<void>('mark_as_read', { id });
 }
@@ -98,12 +95,6 @@ export async function assetUrl(relativePath: string | null): Promise<string | nu
 	const dataDir = await getDataDir();
 	const separator = dataDir.endsWith('/') || dataDir.endsWith('\\') ? '' : '/';
 	return convertFileSrc(`${dataDir}${separator}${relativePath}`);
-}
-
-/** Builds a webview-loadable URL for `path` inside an article's own ZIM
- *  archive, served by the `zim://` protocol handler registered in `lib.rs`. */
-export function zimUrl(articleId: string, path: string): string {
-	return convertFileSrc(`${articleId}/${path}`, 'zim');
 }
 
 /** The `legere-zim:/` token prefix capture writes into readable-view

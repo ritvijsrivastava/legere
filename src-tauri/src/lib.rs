@@ -1,5 +1,3 @@
-mod archive_client;
-mod archive_reconciler;
 mod capture;
 mod commands;
 mod db;
@@ -70,7 +68,6 @@ pub fn run() {
             let state = AppState {
                 pool,
                 http_client: capture::fetch::build_client(),
-                server_http_client: reqwest::Client::new(),
                 data_dir,
                 autosync_handle: Mutex::new(None),
                 zim_cache: zim_server::ZimCache::new(),
@@ -104,12 +101,6 @@ pub fn run() {
                 let state = app_handle_for_gc.state::<AppState>();
                 gc::sweep_orphaned_files(&state).await;
             });
-
-            // Unconditional, unlike autosync — archive completion isn't a
-            // feature to toggle off, it just idles (an early return each
-            // tick) until a server URL is configured. See the module's
-            // own docs.
-            archive_reconciler::spawn(app.handle().clone());
 
             Ok(())
         })

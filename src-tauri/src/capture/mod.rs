@@ -31,21 +31,24 @@ pub enum CaptureError {
 /// Everything needed to insert a freshly captured article into SQLite. Both
 /// the RSS-poll path and the direct-link-submit path converge on
 /// [`capture_local`] so they share one
-/// fetch->extract->sanitize->localize->content-zim pipeline. The full-page
-/// archive is *not* produced here — it's captured server-side by
-/// `legere-server` (real headless Chromium), submitted as a fire-and-forget
-/// job right after this returns (see `crate::archive_client`).
+/// fetch->extract->sanitize->localize->content-zim pipeline. There is no
+/// full-page archive of the original site — offline reading is the
+/// readable view above, and the original page is always just a plain
+/// link out to the live site (see `link`).
 pub struct LocalCaptureOutput {
     pub title: String,
     /// The article's canonical link with tracking query parameters
     /// stripped — a display/storage value, not necessarily byte-identical
-    /// to whatever URL was actually fetched.
+    /// to whatever URL was actually fetched. This is what the reader
+    /// links out to for "view original".
     pub link: String,
-    /// The URL actually fetched, after following redirects — what gets
-    /// submitted to the archive server, since server-side Chromium
-    /// navigation may follow further (JS-driven) redirects a plain fetch
-    /// never sees, and the server's own reported `zim_main_path` must be
-    /// trusted over anything computed locally from this value.
+    /// The URL actually fetched, after following redirects — kept for
+    /// diagnostics/tests; not persisted to the database. No non-test code
+    /// reads this right now (it existed for the archive-server submission
+    /// path this struct no longer has), but it's cheap to keep around and
+    /// exactly the value a future feature wanting the post-redirect URL
+    /// would need.
+    #[allow(dead_code)]
     pub final_url: String,
     pub excerpt: String,
     /// Readable-view HTML: sanitized, with image references rewritten to
@@ -57,13 +60,10 @@ pub struct LocalCaptureOutput {
     /// Relative to `data_dir`, e.g. `media/<id>.jpg`.
     pub hero_image_path: Option<String>,
     /// Relative to `data_dir`, e.g. `content/<id>.zim`. Holds only the
-    /// images `content_html` references — persistent, never evicted,
-    /// independent of whether the full archive is currently cached
-    /// locally.
+    /// images `content_html` references — persistent, never evicted.
     pub content_zim_path: String,
-    /// `false` when extraction fell back to naive extraction — the reader
-    /// should default such an article to the archived view once it's
-    /// available.
+    /// `false` when extraction fell back to naive extraction — the
+    /// readable view may be lower quality for such an article.
     pub extraction_confident: bool,
 }
 

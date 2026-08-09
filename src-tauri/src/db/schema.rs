@@ -228,8 +228,69 @@ INSERT INTO settings (key, value) VALUES
 ON CONFLICT(key) DO NOTHING;
 ";
 
+// Removes server-side full-page archiving entirely (the app now offers
+// only the offline readable view plus a plain external link to the
+// original page — no in-app archived-page viewer). Drops the
+// full-archive bookkeeping columns (`zim_path`, `zim_main_path`,
+// `archive_source`, `archive_status`, `archive_last_error`,
+// `archive_last_opened_at`) and the `archive_server_url`/
+// `archive_server_token` settings; `content_zim_path` (the small,
+// never-evicted zim holding just the readable view's own images) is
+// untouched — that's what keeps the readable view working offline.
+//
+// `local_legacy` rows (pre-server-side-archiving articles, migrated by
+// V3) had no `content_zim_path` of their own — their one full archive
+// served both roles. Dropping `zim_path` here means those specific
+// rows' readable-view images stop resolving offline; accepted the same
+// way V2's dup-collapse was (personal, pre-remodel data), rather than
+// engineered around with a backfill that would require re-fetching
+// every such article's images from the live network during migration.
+const V4: &str = "
+ CREATE TABLE articles_v4 (
+     id                   TEXT PRIMARY KEY,
+     source_id            TEXT REFERENCES sources(id) ON DELETE SET NULL,
+     source_name          TEXT NOT NULL,
+     source_type          TEXT NOT NULL CHECK (source_type IN ('rss','direct')),
+     title                TEXT NOT NULL,
+     link                 TEXT NOT NULL,
+     excerpt              TEXT NOT NULL,
+     content_html         TEXT NOT NULL,
+     hero_image_path      TEXT,
+     published_at         TEXT,
+     fetched_at           TEXT NOT NULL,
+     read_time_min        INTEGER NOT NULL DEFAULT 1,
+     reading_state        TEXT NOT NULL DEFAULT 'unread' CHECK (reading_state IN ('unread','reading','read')),
+     favorited            INTEGER NOT NULL DEFAULT 0,
+     extraction_confident INTEGER NOT NULL DEFAULT 1,
+     reading_progress     REAL NOT NULL DEFAULT 0,
+     content_zim_path     TEXT,
+     updated_at           TEXT NOT NULL
+ );
+ INSERT INTO articles_v4 (
+     id, source_id, source_name, source_type, title, link, excerpt,
+     content_html, hero_image_path, published_at, fetched_at, read_time_min,
+     reading_state, favorited, extraction_confident, reading_progress,
+     content_zim_path, updated_at
+ )
+ SELECT
+     id, source_id, source_name, source_type, title, link, excerpt,
+     content_html, hero_image_path, published_at, fetched_at, read_time_min,
+     reading_state, favorited, extraction_confident, reading_progress,
+     content_zim_path, updated_at
+ FROM articles;
+ DROP TABLE articles;
+ ALTER TABLE articles_v4 RENAME TO articles;
+
+ CREATE INDEX idx_articles_source_id ON articles(source_id);
+ CREATE INDEX idx_articles_fetched_at ON articles(fetched_at DESC);
+ CREATE INDEX idx_articles_reading_state ON articles(reading_state);
+ CREATE UNIQUE INDEX idx_articles_link ON articles(link);
+
+ DELETE FROM settings WHERE key IN ('archive_server_url', 'archive_server_token');
+";
+
 pub fn migrations() -> Migrations<'static> {
-    Migrations::new(vec![M::up(V1), M::up(V2), M::up(V3)])
+    Migrations::new(vec![M::up(V1), M::up(V2), M::up(V3), M::up(V4)])
 }
 
 pub fn migrate(conn: &mut Connection) -> Result<(), rusqlite_migration::Error> {
@@ -326,9 +387,9 @@ mod tests {
         let duplicate_insert = conn.execute(
             "INSERT INTO articles (
                  id, source_name, source_type, title, link, excerpt,
-                 content_html, fetched_at, zim_path, updated_at
+                 content_html, fetched_at, updated_at
              ) VALUES ('art-dup2', 'Direct link', 'direct', 'x', 'https://example.com/dup',
-                       'x', '<p>x</p>', '2026-01-03T00:00:00Z', 'archives/x.zim', '2026-01-03T00:00:00Z')",
+                       'x', '<p>x</p>', '2026-01-03T00:00:00Z', '2026-01-03T00:00:00Z')",
             [],
         );
         assert!(duplicate_insert.is_err(), "UNIQUE(link) should reject this insert");
@@ -404,36 +465,52 @@ mod tests {
         assert_eq!(reading_state("art-partial"), "reading");
     }
 
+    /// V4 drops every full-archive bookkeeping column V3 introduced
+    /// (`zim_path`, `archive_source`, `archive_status`, ...) entirely —
+    /// the app no longer stores a server-captured full-page snapshot at
+    /// all, only the readable view (and its own small, persistent
+    /// `content_zim_path`, which this proves survives untouched).
     #[test]
-    fn v3_migrated_rows_are_local_legacy_and_keep_their_zim_path() {
+    fn v4_drops_full_archive_columns_but_keeps_content_zim_path() {
         let mut conn = v2_conn_with_test_data();
-        migrate(&mut conn).expect("migrate to V3");
+        migrate(&mut conn).expect("migrate to latest");
 
-        let (source, status, zim_path): (String, String, Option<String>) = conn
+        let content_zim_path: Option<String> = conn
             .query_row(
-                "SELECT archive_source, archive_status, zim_path FROM articles WHERE id = 'art-unread'",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .unwrap();
-        assert_eq!(source, "local_legacy");
-        assert_eq!(status, "ready");
-        assert_eq!(zim_path.as_deref(), Some("archives/a.zim"));
-    }
-
-    #[test]
-    fn v3_seeds_archive_server_settings_defaults() {
-        let mut conn = v2_conn_with_test_data();
-        migrate(&mut conn).expect("migrate to V3");
-
-        let value: String = conn
-            .query_row(
-                "SELECT value FROM settings WHERE key = 'archive_server_url'",
+                "SELECT content_zim_path FROM articles WHERE id = 'art-unread'",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(value, "");
+        // V3 leaves every migrated (`local_legacy`) row's own
+        // `content_zim_path` NULL — this only proves the column survives
+        // V4, not that it's populated here.
+        assert_eq!(content_zim_path, None);
+
+        let zim_path_column_gone = conn.query_row(
+            "SELECT zim_path FROM articles WHERE id = 'art-unread'",
+            [],
+            |row| row.get::<_, Option<String>>(0),
+        );
+        assert!(
+            zim_path_column_gone.is_err(),
+            "zim_path column should no longer exist after V4"
+        );
+    }
+
+    #[test]
+    fn v4_removes_archive_server_settings() {
+        let mut conn = v2_conn_with_test_data();
+        migrate(&mut conn).expect("migrate to latest");
+
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM settings WHERE key IN ('archive_server_url', 'archive_server_token')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0, "archive server settings should be removed by V4");
     }
 
     #[test]

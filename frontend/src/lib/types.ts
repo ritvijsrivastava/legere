@@ -9,15 +9,6 @@ export type ReaderLeading = 'compact' | 'default' | 'airy';
  *  or read); `reading` -> `read` only via the manual "mark as read" action. */
 export type ReadingState = 'unread' | 'reading' | 'read';
 
-/** The full-page archive's server-side capture job status. Always `ready`
- *  for `archive_source: 'local_legacy'` articles. */
-export type ArchiveStatus = 'pending' | 'ready' | 'failed';
-
-/** `server`: captured by the archive server, its local copy evictable.
- *  `local_legacy`: captured before server-side archiving existed,
- *  permanently local, never evicted. */
-export type ArchiveSource = 'server' | 'local_legacy';
-
 export interface ArticleSummary {
 	id: string;
 	title: string;
@@ -31,23 +22,13 @@ export interface ArticleSummary {
 	favorited: boolean;
 	/** 0.0-1.0 scroll fraction, for the library card's progress indicator. */
 	reading_progress: number;
-	archive_status: ArchiveStatus;
-	archive_source: ArchiveSource;
-	/** Whether the full archive's bytes are cached on this device right
-	 *  now — independent of `archive_status`, since a `ready` archive may
-	 *  still have been evicted locally. */
-	archive_available_locally: boolean;
 }
 
 export interface ArticleDetail extends ArticleSummary {
 	link: string;
 	content_html: string;
-	/** The archived page's own ZIM entry path — see `api.zimUrl`. `null`
-	 *  until the server-side capture reports a result. */
-	zim_main_path: string | null;
-	/** `false` when captured via the naive extraction fallback; the reader
-	 *  defaults to the archived (Original) view for such articles once
-	 *  it's available. */
+	/** `false` when captured via the naive extraction fallback; the readable
+	 *  view may be lower quality for such an article. */
 	extraction_confident: boolean;
 }
 
@@ -71,10 +52,6 @@ export interface Settings {
 	reader_font_size: number;
 	reader_measure: ReaderMeasure;
 	reader_leading: ReaderLeading;
-	/** Base URL of the self-hosted `legere-server` archive server, e.g.
-	 *  `http://192.168.1.10:8787`. Empty means archiving is unconfigured. */
-	archive_server_url: string;
-	archive_server_token: string;
 }
 
 export interface SyncResult {

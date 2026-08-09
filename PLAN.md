@@ -1,5 +1,23 @@
 # Legere Remodel — Offline Article Reader (Desktop + Android)
 
+## Addendum — offline website archive removed (MVP scope cut)
+
+Everything below describes an earlier plan (and the codebase evolved past
+it further still — e.g. full-page archiving was later moved server-side to
+a separate `legere-server`, capturing via headless Chromium, polled by an
+archive reconciler and cached/evicted locally). That entire feature —
+the in-app "Original" archived-page viewer, its `archives/` ZIM cache, the
+archive server settings, and all server-capture bookkeeping — has been
+**removed** for the MVP. Legere now offers exactly two ways to read an
+article: the offline **readable view** (extracted content plus its own
+small, persistent `content/<id>.zim` holding just that view's own images —
+this part is unchanged and still fully offline-capable), and a plain
+**external link to the original site** (`article.link`, opened in the
+system browser) — no in-app original-page snapshot. Full-page archiving may
+be revisited post-MVP; until then, treat every mention of `archives/`,
+`zim_main_path`, `archive_status`/`archive_source`, the archive server, or
+an in-app "Original" tab below as historical.
+
 ## Context
 
 Legere (`~/Code/legere`, Tauri 2 + SvelteKit/Svelte 5) is an existing MVP scaffold (~1k lines Rust, ~2.1k frontend, 2 commits) for an offline article reader. The user wants RSS/Atom + direct-URL ingestion where each article stores three things: (1) extracted readable HTML, (2) a self-contained single-page **.zim** archive (reusing the sibling `~/Code/wraith` crates, consumed as path deps), and (3) the original link with tracking params stripped. Reading experience anchored on **Matter**. Exploration found the scaffold sound but with structural gaps: the ZIM is write-only and not self-contained (raw HTML, zero assets), extracted articles reference remote images (offline reading is broken), `wraith-urlx` is imported but never called (and wraith has **no** tracking-param stripping anywhere — new work), there is no event system (library never refreshes after autosync), errored sources are unrecoverable, and archive/media files leak forever.

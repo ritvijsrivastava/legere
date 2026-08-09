@@ -1,4 +1,4 @@
-//! One-shot startup cleanup: files under `archives/`/`media/` with no
+//! One-shot startup cleanup: files under `content/`/`media/` with no
 //! matching database row are removed. This exists for two reasons —
 //! `remove_source`'s `ON DELETE SET NULL` never touches article files
 //! (read-later semantics, articles survive their source going away), and
@@ -14,7 +14,7 @@ use crate::state::AppState;
 
 /// Directory names under `data_dir` this sweep considers, and whether a
 /// file found there but not in the referenced set is safe to remove.
-const SWEPT_DIRS: [&str; 3] = ["archives", "media", "content"];
+const SWEPT_DIRS: [&str; 2] = ["media", "content"];
 
 pub async fn sweep_orphaned_files(state: &AppState) {
     let referenced = {
@@ -87,7 +87,6 @@ mod tests {
         AppState {
             pool,
             http_client: reqwest::Client::new(),
-            server_http_client: reqwest::Client::new(),
             data_dir: data_dir.to_path_buf(),
             autosync_handle: Mutex::new(None),
             zim_cache: ZimCache::new(),
@@ -100,14 +99,14 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let state = build_state(tmp.path()).await;
 
-        std::fs::create_dir_all(tmp.path().join("archives")).unwrap();
+        std::fs::create_dir_all(tmp.path().join("content")).unwrap();
         std::fs::create_dir_all(tmp.path().join("media")).unwrap();
-        std::fs::write(tmp.path().join("archives/orphan.zim"), b"x").unwrap();
+        std::fs::write(tmp.path().join("content/orphan.zim"), b"x").unwrap();
         std::fs::write(tmp.path().join("media/orphan.jpg"), b"x").unwrap();
 
         sweep_orphaned_files(&state).await;
 
-        assert!(!tmp.path().join("archives/orphan.zim").exists());
+        assert!(!tmp.path().join("content/orphan.zim").exists());
         assert!(!tmp.path().join("media/orphan.jpg").exists());
     }
 
@@ -116,9 +115,9 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let state = build_state(tmp.path()).await;
 
-        std::fs::create_dir_all(tmp.path().join("archives")).unwrap();
+        std::fs::create_dir_all(tmp.path().join("content")).unwrap();
         std::fs::create_dir_all(tmp.path().join("media")).unwrap();
-        std::fs::write(tmp.path().join("archives/keep.zim"), b"x").unwrap();
+        std::fs::write(tmp.path().join("content/keep.zim"), b"x").unwrap();
         std::fs::write(tmp.path().join("media/keep.jpg"), b"x").unwrap();
 
         {
@@ -126,9 +125,9 @@ mod tests {
             conn.execute(
                 "INSERT INTO articles (
                     id, source_name, source_type, title, link, excerpt,
-                    content_html, fetched_at, zim_path, hero_image_path, updated_at
+                    content_html, fetched_at, content_zim_path, hero_image_path, updated_at
                 ) VALUES ('a1', 'Direct link', 'direct', 't', 'https://x/1', 'e',
-                          '<p>x</p>', '2026-01-01T00:00:00Z', 'archives/keep.zim',
+                          '<p>x</p>', '2026-01-01T00:00:00Z', 'content/keep.zim',
                           'media/keep.jpg', '2026-01-01T00:00:00Z')",
                 [],
             )
@@ -137,7 +136,7 @@ mod tests {
 
         sweep_orphaned_files(&state).await;
 
-        assert!(tmp.path().join("archives/keep.zim").exists());
+        assert!(tmp.path().join("content/keep.zim").exists());
         assert!(tmp.path().join("media/keep.jpg").exists());
     }
 

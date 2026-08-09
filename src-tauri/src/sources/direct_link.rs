@@ -1,6 +1,5 @@
 use thiserror::Error;
 
-use crate::archive_client;
 use crate::capture::{self, CaptureError};
 use crate::db::queries;
 use crate::models::ArticleSummary;
@@ -18,11 +17,7 @@ pub enum DirectLinkError {
 
 /// A one-shot local-capture-and-insert for a user-submitted URL. Unlike
 /// RSS, this isn't tied to a recurring `sources` row — `source_id` is left
-/// `NULL`. Fires off the full-page server capture job as fire-and-forget
-/// right after inserting, via [`archive_client::spawn_submission`] — this
-/// function itself returns as soon as the readable view is ready, without
-/// waiting on the (potentially slow, potentially unreachable) archive
-/// server at all.
+/// `NULL`.
 pub async fn capture_direct_link(
     state: &AppState,
     url: &str,
@@ -44,13 +39,6 @@ pub async fn capture_direct_link(
         return Ok(existing);
     }
 
-    archive_client::spawn_submission(
-        state.pool.clone(),
-        state.server_http_client.clone(),
-        id.clone(),
-        output.final_url,
-    );
-
     Ok(ArticleSummary {
         id,
         title: output.title,
@@ -63,8 +51,5 @@ pub async fn capture_direct_link(
         reading_state: "unread".to_string(),
         favorited: false,
         reading_progress: 0.0,
-        archive_status: "pending".to_string(),
-        archive_source: "server".to_string(),
-        archive_available_locally: false,
     })
 }

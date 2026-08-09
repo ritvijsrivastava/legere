@@ -1,13 +1,11 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
-	import { listen } from '@tauri-apps/api/event';
 	import { articlesStore } from '$lib/stores/articles.svelte';
 	import { settingsStore } from '$lib/stores/settings.svelte';
 	import * as api from '$lib/api';
 	import type { ArticleDetail, ReaderMeasure, ReaderLeading } from '$lib/types';
 	import HeroImage from '$lib/components/HeroImage.svelte';
-	import SegmentedControl from '$lib/components/SegmentedControl.svelte';
 	import ReaderControls from '$lib/components/ReaderControls.svelte';
 	import ArticleOverflowMenu from '$lib/components/ArticleOverflowMenu.svelte';
 	import ChevronLeft from '$lib/icons/ChevronLeft.svelte';
@@ -21,7 +19,6 @@
 	const LEADING_VALUE: Record<ReaderLeading, number> = { compact: 1.6, default: 1.75, airy: 1.9 };
 
 	let article = $state<ArticleDetail | null>(null);
-	let view = $state<'readable' | 'original'>('readable');
 	let scrollProgress = $state(0);
 	let containerEl = $state<HTMLElement | null>(null);
 	let scrollParentEl: HTMLElement | null = null;
@@ -42,57 +39,23 @@
 		}
 	});
 
-	/** Original tab is only actually openable once the full archive is
-	 *  cached on this device — `ready` server-side isn't enough, since the
-	 *  bytes might not be downloaded yet (or might have been evicted). */
-	let archiveAvailable = $derived(
-		article ? article.archive_status === 'ready' && article.archive_available_locally : false
-	);
-
-	// Always opens on the readable view — a freshly captured article's
-	// Original view won't exist locally yet, so defaulting there would be
-	// a dead end. Once the archive becomes available, a low-confidence
-	// extraction (readability fell back to a naive strip) switches to
-	// Original automatically, matching the original single-archive
-	// model's intent; a confident extraction stays on Readable.
 	$effect(() => {
 		const id = page.params.id;
 		if (!id) return;
 		article = null;
 		restoredScrollForId = null;
-		view = 'readable';
 		api.openForReading(id).then((detail) => {
 			article = detail;
-			if (!detail.extraction_confident && detail.archive_status === 'ready' && detail.archive_available_locally) {
-				view = 'original';
-			}
 		});
-
-		const unlistenPromise = listen<string>('archive:ready', (event) => {
-			if (event.payload !== id) return;
-			api.getArticle(id).then((detail) => {
-				if (page.params.id !== id) return;
-				article = detail;
-				if (!detail.extraction_confident && detail.archive_status === 'ready' && detail.archive_available_locally) {
-					view = 'original';
-				}
-			});
-		});
-		return () => {
-			unlistenPromise.then((unlisten) => unlisten());
-		};
 	});
 
 	let resolvedContentHtml = $derived(article ? api.resolveZimTokens(article.content_html) : '');
-	let originalUrl = $derived(
-		article?.zim_main_path ? api.zimUrl(article.id, article.zim_main_path) : ''
-	);
 	let minutesLeft = $derived(
 		article ? Math.max(1, Math.round(article.read_time_min * (1 - scrollProgress))) : 0
 	);
 
 	$effect(() => {
-		if (!containerEl || view !== 'readable') return;
+		if (!containerEl) return;
 		const scrollParent = containerEl.closest('.content') as HTMLElement | null;
 		if (!scrollParent) return;
 		scrollParentEl = scrollParent;
@@ -110,7 +73,7 @@
 	// has rendered — deferred a frame so images/layout have settled and
 	// `scrollHeight` reflects the real content height.
 	$effect(() => {
-		if (!article || !scrollParentEl || view !== 'readable') return;
+		if (!article || !scrollParentEl) return;
 		if (restoredScrollForId === article.id) return;
 		restoredScrollForId = article.id;
 		const progress = article.reading_progress;
@@ -165,13 +128,6 @@
 		article = { ...article, reading_state: 'read' };
 	}
 
-	let originalLabel = $derived.by(() => {
-		if (!article || archiveAvailable) return 'Original';
-		if (article.archive_status === 'failed') return 'Original (failed)';
-		if (article.archive_status === 'pending') return 'Original (processing…)';
-		return 'Original (downloading…)';
-	});
-
 	let recapturing = $state(false);
 
 	async function recapture() {
@@ -179,7 +135,6 @@
 		recapturing = true;
 		try {
 			article = await api.recaptureArticle(article.id);
-			view = 'readable';
 		} finally {
 			recapturing = false;
 		}
@@ -196,11 +151,9 @@
 </script>
 
 <div bind:this={containerEl}>
-	{#if view === 'readable'}
-		<div class="progress-track">
-			<div class="progress-fill" style:width="{Math.round(scrollProgress * 100)}%"></div>
-		</div>
-	{/if}
+	<div class="progress-track">
+		<div class="progress-fill" style:width="{Math.round(scrollProgress * 100)}%"></div>
+	</div>
 
 	<div class="header-row" style:max-width="{MEASURE_PX[measure]}px">
 		<button class="btn btn-ghost back-btn" onclick={() => goto('/')}>
@@ -209,24 +162,14 @@
 		</button>
 		{#if article}
 			<div class="controls">
-				<SegmentedControl
-					name="view"
-					bind:value={view}
-					options={[
-						{ value: 'readable', label: 'Readable' },
-						{ value: 'original', label: originalLabel, disabled: !archiveAvailable }
-					]}
+				<ReaderControls
+					{fontSize}
+					{measure}
+					{leading}
+					onFontSize={setFontSize}
+					onMeasure={setMeasure}
+					onLeading={setLeading}
 				/>
-				{#if view === 'readable'}
-					<ReaderControls
-						{fontSize}
-						{measure}
-						{leading}
-						onFontSize={setFontSize}
-						onMeasure={setMeasure}
-						onLeading={setLeading}
-					/>
-				{/if}
 				<button
 					class="btn btn-icon btn-secondary favorite-btn"
 					class:favorited={article.favorited}
@@ -249,36 +192,31 @@
 	</div>
 
 	{#if article}
-		{#if view === 'readable'}
-			<div class="reader-page" style:max-width="{MEASURE_PX[measure]}px">
-				<div class="hero">
-					<HeroImage path={article.hero_image_path} alt={article.title} />
-				</div>
-				<h1 class="reader-title">{article.title}</h1>
-				<div class="card-meta reader-meta">
-					<span>{article.source_name}</span>
-					<span>·</span>
-					<span>{formatDate(article.published_at)}</span>
-					<span>·</span>
-					<span>{minutesLeft} min left</span>
-					<a href={article.link} target="_blank" rel="noopener" class="view-original">
-						<ExternalLink />
-						View original
-					</a>
-				</div>
-
-				<div
-					class="reader-body"
-					style:font-size="{fontSize}px"
-					style:line-height={LEADING_VALUE[leading]}
-				>
-					{@html resolvedContentHtml}
-				</div>
+		<div class="reader-page" style:max-width="{MEASURE_PX[measure]}px">
+			<div class="hero">
+				<HeroImage path={article.hero_image_path} alt={article.title} />
 			</div>
-		{:else}
-			<iframe class="archive-frame" sandbox="" title={article.title} src={originalUrl}
-			></iframe>
-		{/if}
+			<h1 class="reader-title">{article.title}</h1>
+			<div class="card-meta reader-meta">
+				<span>{article.source_name}</span>
+				<span>·</span>
+				<span>{formatDate(article.published_at)}</span>
+				<span>·</span>
+				<span>{minutesLeft} min left</span>
+				<a href={article.link} target="_blank" rel="noopener" class="view-original">
+					<ExternalLink />
+					View original
+				</a>
+			</div>
+
+			<div
+				class="reader-body"
+				style:font-size="{fontSize}px"
+				style:line-height={LEADING_VALUE[leading]}
+			>
+				{@html resolvedContentHtml}
+			</div>
+		</div>
 	{/if}
 </div>
 
@@ -357,12 +295,5 @@
 	}
 	.reader-body {
 		font-size: 19px;
-	}
-	.archive-frame {
-		display: block;
-		width: 100%;
-		height: calc(100vh - 96px);
-		border: none;
-		background: var(--color-surface);
 	}
 </style>

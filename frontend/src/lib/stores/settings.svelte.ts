@@ -7,9 +7,7 @@ const DEFAULT_SETTINGS: Settings = {
 	autosync: true,
 	reader_font_size: 19,
 	reader_measure: 'default',
-	reader_leading: 'default',
-	archive_server_url: '',
-	archive_server_token: ''
+	reader_leading: 'default'
 };
 
 class SettingsStore {

@@ -1,6 +1,5 @@
 use thiserror::Error;
 
-use crate::archive_client;
 use crate::capture;
 use crate::db::queries;
 use crate::models::Source;
@@ -25,9 +24,8 @@ const MAX_ENTRIES_PER_SYNC: usize = 30;
 
 /// Fetches `source`'s feed, skips entries already stored (by link), and
 /// locally captures every new one via the shared
-/// [`capture::capture_local`] pipeline — firing off each one's full-page
-/// server capture job as fire-and-forget right after inserting. Returns
-/// the number of newly captured articles.
+/// [`capture::capture_local`] pipeline. Returns the number of newly
+/// captured articles.
 pub async fn sync_rss_source(state: &AppState, source: &Source) -> Result<u32, RssSyncError> {
     let feed_url = source.feed_url.as_deref().unwrap_or_default();
     let bytes = state
@@ -77,12 +75,6 @@ pub async fn sync_rss_source(state: &AppState, source: &Source) -> Result<u32, R
                 )?;
                 if inserted {
                     new_count += 1;
-                    archive_client::spawn_submission(
-                        state.pool.clone(),
-                        state.server_http_client.clone(),
-                        id.clone(),
-                        output.final_url,
-                    );
                 }
             }
             Err(err) => {
@@ -122,7 +114,6 @@ mod tests {
         let state = AppState {
             pool: pool.clone(),
             http_client: test_support::plain_client(),
-            server_http_client: reqwest::Client::new(),
             data_dir: data_dir.path().to_path_buf(),
             autosync_handle: Mutex::new(None),
             zim_cache: crate::zim_server::ZimCache::new(),
@@ -170,7 +161,6 @@ mod tests {
         let state = AppState {
             pool: pool.clone(),
             http_client: test_support::plain_client(),
-            server_http_client: reqwest::Client::new(),
             data_dir: data_dir.path().to_path_buf(),
             autosync_handle: Mutex::new(None),
             zim_cache: crate::zim_server::ZimCache::new(),
