@@ -32,5 +32,9 @@
 		width: 100%;
 		height: 100%;
 		object-fit: cover;
+		animation: hero-in var(--duration-base) var(--ease-snap);
+	}
+	@keyframes hero-in {
+		from { opacity: 0; }
 	}
 </style>

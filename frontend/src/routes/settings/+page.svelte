@@ -3,7 +3,7 @@
 	import { settingsStore } from '$lib/stores/settings.svelte';
 	import { sourcesStore } from '$lib/stores/sources.svelte';
 	import ChevronRight from '$lib/icons/ChevronRight.svelte';
-	import type { FontSize, LibraryView, ReaderMeasure, ReaderTheme } from '$lib/types';
+	import type { LibraryView, ReaderMeasure, ReaderTheme } from '$lib/types';
 	import { isTauri } from '$lib/platform';
 	import { errorMessage } from '$lib/api';
 	import {
@@ -170,9 +170,6 @@
 			: null
 	);
 
-	function setFontSize(size: FontSize) {
-		settingsStore.update({ default_font_size: size });
-	}
 	function setLibraryView(view: LibraryView) {
 		settingsStore.update({ default_library_view: view });
 	}
@@ -261,40 +258,6 @@
 					+
 				</button>
 			</div>
-		</div>
-	</section>
-
-	<section>
-		<h4>Reading</h4>
-		<p class="text-muted section-desc">Default text size for article view.</p>
-		<div class="seg">
-			<label class="seg-opt">
-				<input
-					type="radio"
-					name="fs2"
-					checked={settingsStore.current.default_font_size === 'small'}
-					onchange={() => setFontSize('small')}
-				/>
-				<span>Small</span>
-			</label>
-			<label class="seg-opt">
-				<input
-					type="radio"
-					name="fs2"
-					checked={settingsStore.current.default_font_size === 'medium'}
-					onchange={() => setFontSize('medium')}
-				/>
-				<span>Medium</span>
-			</label>
-			<label class="seg-opt">
-				<input
-					type="radio"
-					name="fs2"
-					checked={settingsStore.current.default_font_size === 'large'}
-					onchange={() => setFontSize('large')}
-				/>
-				<span>Large</span>
-			</label>
 		</div>
 	</section>
 

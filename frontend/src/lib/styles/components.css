@@ -1,6 +1,7 @@
-/* Nocturne component classes, ported verbatim from the claude.ai/design
-   project. Global (non-scoped) on purpose, matching the design system's own
-   plain-CSS-class approach. */
+/* Field Index component classes — global (non-scoped) on purpose, so every
+   route and component shares one small vocabulary of buttons, inputs,
+   segmented controls, cards, tags, and dialogs instead of re-deriving its
+   own chrome. See tokens.css for the palette/type/motion this draws on. */
 
 .btn {
   display: inline-flex;
@@ -18,9 +19,12 @@
   border: 1px solid transparent;
   padding: var(--space-2) calc(var(--space-3) * 1.2);
   border-radius: var(--radius-md);
+  transition: background var(--duration-base) var(--ease-snap), border-color var(--duration-base) var(--ease-snap),
+    color var(--duration-base) var(--ease-snap), transform var(--duration-fast) var(--ease-snap);
 }
 .btn svg { display: block; }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn:active:not(:disabled) { transform: scale(0.96); }
 .btn-primary { color: var(--color-accent-fg); background: var(--color-accent); border-color: var(--color-accent); }
 .btn-primary:hover:not(:disabled) { background: color-mix(in srgb, var(--color-accent) 88%, black); }
 .btn-primary:active:not(:disabled) { background: color-mix(in srgb, var(--color-accent) 78%, black); }
@@ -63,17 +67,25 @@
 
 .seg {
   display: inline-flex;
+  /* A `.seg` is a small, content-sized control, not a region to fill —
+     without this it silently stretches to its full cross-axis width
+     inside a `flex-direction: column` parent (e.g. the Add Source
+     dialog), leaving a wide band of empty pill after a 2-option toggle. */
+  width: max-content;
+  max-width: 100%;
   overflow: hidden;
   border: 1px solid var(--color-divider);
-  border-radius: var(--radius-md);
+  border-radius: 999px;
 }
 .seg-opt {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 7px 12px;
-  font-size: 13px;
+  padding: 7px 13px;
+  font-size: 12.5px;
+  font-weight: 500;
   cursor: pointer;
+  transition: background var(--duration-base) var(--ease-snap), color var(--duration-base) var(--ease-snap);
 }
 .seg-opt input {
   position: absolute;
@@ -83,7 +95,7 @@
   pointer-events: none;
 }
 .seg-opt + .seg-opt { border-left: 1px solid var(--color-divider); }
-.seg-opt:has(input:checked) { background: var(--color-accent); color: var(--color-accent-fg); border-left-color: var(--color-accent); }
+.seg-opt:has(input:checked) { background: var(--color-accent); color: var(--color-accent-fg); border-left-color: var(--color-accent); font-weight: 600; }
 .seg-opt:has(input:checked) + .seg-opt { border-left-color: var(--color-accent); }
 .seg-opt:not(:has(input:checked)):hover { background: color-mix(in srgb, var(--color-text) 7%, transparent); }
 /* `outline` (unlike `box-shadow`) ignores the parent `.seg`'s
@@ -133,7 +145,9 @@
   display: grid;
   place-items: center;
   padding: var(--space-4);
-  background: rgba(20, 16, 24, 0.5);
+  background: color-mix(in srgb, var(--color-text) 45%, transparent);
+  backdrop-filter: blur(2px);
+  animation: dialog-in var(--duration-base) var(--ease-snap);
 }
 .dialog {
   width: min(420px, 90vw);
@@ -141,9 +155,16 @@
   flex-direction: column;
   gap: 16px;
   padding: 26px;
-  border-radius: 18px;
-  background: var(--color-surface);
+  border-radius: var(--radius-xl);
+  background: var(--color-surface-raised);
   box-shadow: var(--shadow-lg);
+  animation: dialog-pop var(--duration-base) var(--ease-snap);
+}
+@keyframes dialog-in {
+  from { opacity: 0; }
+}
+@keyframes dialog-pop {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
 }
 .dialog-title { font-family: var(--font-heading); font-weight: 700; font-size: 18px; }
 .dialog-body { font-size: 14px; opacity: 0.85; }

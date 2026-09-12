@@ -10,6 +10,7 @@
 	} = $props();
 </script>
 
+
 <div class="seg">
 	{#each options as opt (opt.value)}
 		<label class="seg-opt" class:seg-opt-disabled={opt.disabled}>
@@ -25,3 +26,4 @@
 		</label>
 	{/each}
 </div>
+

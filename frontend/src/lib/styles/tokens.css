@@ -1,66 +1,79 @@
-/* Legere design tokens, ported from claude.ai/design ("Legere article app
-   design" project, `Legere.dc.html`) — light is the base palette on :root,
-   dark overrides live under :root[data-theme="dark"] (see
-   +layout.svelte for how the app-theme setting drives that attribute).
-   Poppins/Inter/Source Serif 4 are vendored locally via @fontsource
-   (imported in app.css) rather than the original Google Fonts @import —
-   this app must work fully offline. */
+/* Legere design tokens — "Field Index": a personal, offline reading
+   library styled after the quiet craft of index cards and specimen
+   labels, not a generic SaaS dashboard. Restrained palette (warm paper
+   neutrals + one ink-green accent), Literata for reading (a serif
+   purpose-built for long-form on-screen text) and Inter for UI chrome.
+   Light is the base palette on :root, dark overrides live under
+   :root[data-theme="dark"] (see +layout.svelte for how the app-theme
+   setting drives that attribute). Fonts are vendored locally via
+   @fontsource (imported in app.css) — this app must work fully offline. */
 
 :root {
-  --color-bg: #f6f2ea;
-  --color-surface: #efe9dd;
-  --color-text: #2b241d;
-  --color-muted: rgba(43, 36, 29, 0.58);
-  --color-divider: rgba(43, 36, 29, 0.12);
-  --color-accent: #6d5bd0;
+  --color-bg: #faf8f3;
+  --color-surface: #f0eae0;
+  --color-surface-raised: #ffffff;
+  --color-text: #221f19;
+  --color-muted: rgba(34, 31, 25, 0.58);
+  --color-divider: rgba(34, 31, 25, 0.12);
+  --color-accent: #2d6b50;
   --color-accent-fg: #ffffff;
-  --color-danger: #b3483e;
+  --color-danger: #ae3c2e;
 
-  --shadow-card: 0 1px 2px rgba(40, 30, 15, 0.05), 0 6px 18px rgba(40, 30, 15, 0.07);
-  --shadow-card-hover: 0 4px 10px rgba(40, 30, 15, 0.08), 0 14px 30px rgba(40, 30, 15, 0.12);
+  --shadow-card: 0 1px 2px rgba(38, 28, 12, 0.05), 0 6px 16px rgba(38, 28, 12, 0.06);
+  --shadow-card-hover: 0 3px 8px rgba(38, 28, 12, 0.07), 0 14px 28px rgba(38, 28, 12, 0.1);
   /* Hero images get a subtle `lighten` blend against the dark surface so
      they don't look like flat rectangles pasted on the page; against a
      light surface the same blend washes images out, so it's a no-op
      there. */
   --hero-blend: normal;
 
-  --font-heading: 'Poppins', system-ui, sans-serif;
-  --font-heading-weight: 600;
+  --font-heading: 'Inter', system-ui, sans-serif;
+  --font-heading-weight: 650;
   --font-body: 'Inter', system-ui, sans-serif;
-  --font-reading: 'Source Serif 4 Variable', Georgia, serif;
+  --font-reading: 'Literata Variable', Georgia, serif;
 
-  --space-1: 2.8px;
-  --space-2: 5.6px;
-  --space-3: 8.4px;
-  --space-4: 11.2px;
-  --space-6: 16.8px;
-  --space-8: 22.4px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
 
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 14px;
+  --radius-sm: 5px;
+  --radius-md: 9px;
+  --radius-lg: 15px;
+  --radius-xl: 20px;
 
   --shadow-sm: 0 0 0 1px var(--color-divider);
-  --shadow-md: 0 0 0 1px var(--color-divider), 0 6px 18px rgba(40, 30, 15, 0.12);
-  --shadow-lg: 0 0 0 1px var(--color-divider), 0 16px 40px rgba(40, 30, 15, 0.18);
+  --shadow-md: 0 0 0 1px var(--color-divider), 0 6px 16px rgba(38, 28, 12, 0.1);
+  --shadow-lg: 0 0 0 1px var(--color-divider), 0 20px 44px rgba(38, 28, 12, 0.16);
+
+  /* One snap, everywhere: exponential ease-out reads as responsive
+     rather than laggy, and a single duration pair keeps every hover,
+     press, and reveal in the app feeling like the same material. */
+  --ease-snap: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast: 0.1s;
+  --duration-base: 0.18s;
 }
 
 :root[data-theme='dark'] {
-  --color-bg: #1e1c22;
-  --color-surface: #28252d;
-  --color-text: #f0ece4;
-  --color-muted: rgba(240, 236, 228, 0.58);
-  --color-divider: rgba(255, 255, 255, 0.09);
-  --color-accent: #a597f2;
-  --color-danger: #e2897c;
+  --color-bg: #1a1814;
+  --color-surface: #24211a;
+  --color-surface-raised: #2b271f;
+  --color-text: #ece6d8;
+  --color-muted: rgba(236, 230, 216, 0.6);
+  --color-divider: rgba(255, 255, 255, 0.08);
+  --color-accent: #7fc39d;
+  --color-accent-fg: #12231a;
+  --color-danger: #e2887a;
 
-  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 6px 18px rgba(0, 0, 0, 0.35);
-  --shadow-card-hover: 0 6px 16px rgba(0, 0, 0, 0.4), 0 18px 40px rgba(0, 0, 0, 0.45);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 6px 16px rgba(0, 0, 0, 0.32);
+  --shadow-card-hover: 0 5px 14px rgba(0, 0, 0, 0.36), 0 18px 36px rgba(0, 0, 0, 0.42);
   --hero-blend: lighten;
 
   --shadow-sm: 0 0 0 1px var(--color-divider);
-  --shadow-md: 0 0 0 1px var(--color-divider), 0 6px 18px rgba(0, 0, 0, 0.45);
-  --shadow-lg: 0 0 0 1px var(--color-divider), 0 16px 40px rgba(0, 0, 0, 0.55);
+  --shadow-md: 0 0 0 1px var(--color-divider), 0 6px 16px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 0 0 1px var(--color-divider), 0 20px 44px rgba(0, 0, 0, 0.5);
 }
 
 *,
@@ -83,7 +96,7 @@ h1, h2, h3, h4, h5, h6 {
   font-family: var(--font-heading);
   font-weight: var(--font-heading-weight);
   line-height: 1.15;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.015em;
   margin: 0 0 var(--space-2);
 }
 h1 { font-size: 30px; font-weight: 700; }
@@ -99,10 +112,23 @@ img { display: block; max-width: 100%; }
 .text-muted { color: var(--color-muted); }
 :focus { outline: none; }
 :focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
-::selection { background: color-mix(in srgb, var(--color-accent) 30%, transparent); }
+::selection { background: color-mix(in srgb, var(--color-accent) 32%, transparent); }
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: var(--color-bg); }
 ::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--color-text) 20%, transparent); border-radius: 8px; }
+::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--color-text) 32%, transparent); }
+
+/* Tabular figures for anything numeric (reader "min left", counts,
+   font-size stepper) so digits don't jitter the layout as they change. */
+.tabular-nums { font-variant-numeric: tabular-nums; }
 
 .lighten { mix-blend-mode: var(--hero-blend); background-color: transparent; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

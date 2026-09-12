@@ -25,7 +25,7 @@
 	> = {
 		light: null,
 		sepia: { bg: '#f2e8d8', fg: '#3a2f20', muted: 'rgba(58,47,32,0.6)', divider: 'rgba(58,47,32,0.14)' },
-		dark: { bg: '#1a1820', fg: '#eee9e2', muted: 'rgba(238,233,226,0.55)', divider: 'rgba(255,255,255,0.1)' }
+		dark: { bg: '#1a1712', fg: '#ece6d8', muted: 'rgba(236,230,216,0.55)', divider: 'rgba(255,255,255,0.1)' }
 	};
 
 	const BACK_LABELS: Record<string, string> = { '/': 'Library', '/favorites': 'Favorites', '/highlights': 'Highlights' };
@@ -34,15 +34,6 @@
 		return from && from in BACK_LABELS ? from : '/';
 	});
 	let backLabel = $derived(BACK_LABELS[backHref]);
-
-	let isMobile = $state(typeof window !== 'undefined' ? window.innerWidth < 768 : false);
-	$effect(() => {
-		function onResize() {
-			isMobile = window.innerWidth < 768;
-		}
-		window.addEventListener('resize', onResize);
-		return () => window.removeEventListener('resize', onResize);
-	});
 
 	let article = $state<ArticleDetail | null>(null);
 	let scrollProgress = $state(0);
@@ -209,7 +200,6 @@
 					{measure}
 					{leading}
 					{readerTheme}
-					inline={!isMobile}
 					onFontSize={setFontSize}
 					onMeasure={setMeasure}
 					onLeading={setLeading}
@@ -340,9 +330,10 @@
 	}
 	.hero {
 		width: 100%;
-		aspect-ratio: 16 / 9;
-		margin-bottom: 24px;
-		border-radius: var(--radius-md);
+		aspect-ratio: 21 / 9;
+		max-height: 340px;
+		margin-bottom: 28px;
+		border-radius: var(--radius-lg);
 		overflow: hidden;
 		background: color-mix(in srgb, var(--reader-fg, var(--color-text)) 6%, transparent);
 		border: 1px solid var(--reader-divider, var(--color-divider));

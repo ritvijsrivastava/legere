@@ -87,22 +87,24 @@
 		display: flex;
 		flex-direction: column;
 		width: 100%;
-		aspect-ratio: 1 / 1;
 		text-align: left;
 		background: var(--color-surface);
 		border: none;
-		border-radius: 16px;
+		border-radius: var(--radius-lg);
 		overflow: hidden;
 		cursor: pointer;
 		padding: 0;
 		font-family: var(--font-body);
 		color: var(--color-text);
 		box-shadow: var(--shadow-card);
-		transition: transform 0.15s ease, box-shadow 0.15s ease;
+		transition: transform var(--duration-base) var(--ease-snap), box-shadow var(--duration-base) var(--ease-snap);
 	}
 	.article-card:hover {
 		transform: translateY(-3px);
 		box-shadow: var(--shadow-card-hover);
+	}
+	.article-card:active {
+		transform: translateY(-1px);
 	}
 	.delete-btn {
 		position: absolute;
@@ -128,8 +130,12 @@
 	.hero {
 		position: relative;
 		width: 100%;
+		/* The hero owns its own proportions instead of the whole card being
+		   forced to a 1:1 square — that made cards balloon in height at
+		   the fixed grid width, especially with only 1–2 columns fit. */
+		aspect-ratio: 16 / 10;
+		flex: none;
 		border-bottom: 1px solid var(--color-divider);
-		flex: 0 0 42%;
 	}
 	.progress-track {
 		position: absolute;
@@ -146,9 +152,8 @@
 	.body {
 		display: flex;
 		flex-direction: column;
-		justify-content: space-between;
-		gap: 9px;
-		padding: 16px;
+		gap: 8px;
+		padding: 14px;
 		flex: 1 1 auto;
 		min-height: 0;
 	}

@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>Legere</title>
+  <rect width="1024" height="1024" fill="#2d6b50"/>
+  <path
+    d="M356,232
+       L668,232
+       Q692,232 692,256
+       L692,860
+       L512,742
+       L332,860
+       L332,256
+       Q332,232 356,232
+       Z"
+    fill="#faf8f3"
+  />
+  <line x1="512" y1="256" x2="512" y2="742" stroke="#e4dcc9" stroke-width="6" opacity="0.6"/>
+</svg>

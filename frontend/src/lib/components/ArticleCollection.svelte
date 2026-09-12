@@ -216,8 +216,12 @@
 	}
 	.cards-grid {
 		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-		gap: 20px;
+		/* A fixed max (not 1fr) keeps cards at a comfortable, constant size
+		   as the window is resized — more columns appear as it widens,
+		   rather than a couple of cards stretching to fill a narrow
+		   window and towering into oversized squares. */
+		grid-template-columns: repeat(auto-fill, minmax(216px, 264px));
+		gap: 18px;
 	}
 	.list-rows {
 		display: flex;

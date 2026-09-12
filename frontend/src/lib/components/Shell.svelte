@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
+	import Logo from '$lib/icons/Logo.svelte';
 	import Library from '$lib/icons/Library.svelte';
 	import Star from '$lib/icons/Star.svelte';
 	import Highlighter from '$lib/icons/Highlighter.svelte';
@@ -140,7 +141,7 @@
 		<div class="sidebar">
 			<div class="brand-row">
 				<div class="brand">
-					<span class="brand-dot"></span>
+					<span class="brand-mark"><Logo size={17} /></span>
 					Legere
 				</div>
 				<button
@@ -155,6 +156,10 @@
 					{/if}
 				</button>
 			</div>
+			<button onclick={() => uiStore.openAddSource()} class="add-source-btn">
+				<Plus size={15} />
+				Add source
+			</button>
 			{@render sidebarNav()}
 
 			<div class="sidebar-spacer"></div>
@@ -167,15 +172,11 @@
 					onDismiss={dismissUpdate}
 				/>
 			{/if}
-			<button onclick={() => uiStore.openAddSource()} class="add-source-btn">
-				<Plus size={15} />
-				Add source
-			</button>
 		</div>
 	{:else if !isReader}
 		<div class="topbar">
 			<span class="brand">
-				<span class="brand-dot"></span>
+				<span class="brand-mark"><Logo size={16} /></span>
 				Legere
 			</span>
 			<div class="topbar-actions">
@@ -258,17 +259,15 @@
 	.brand {
 		display: flex;
 		align-items: center;
-		gap: 9px;
+		gap: 8px;
 		font-family: var(--font-heading);
 		font-weight: 700;
-		font-size: 19px;
-		letter-spacing: -0.01em;
+		font-size: 18px;
+		letter-spacing: -0.015em;
 	}
-	.brand-dot {
-		width: 10px;
-		height: 10px;
-		border-radius: 50%;
-		background: var(--color-accent);
+	.brand-mark {
+		display: flex;
+		color: var(--color-accent);
 		flex: none;
 	}
 	.theme-toggle {
@@ -377,6 +376,7 @@
 	}
 	.add-source-btn {
 		display: flex;
+		flex: none;
 		align-items: center;
 		justify-content: center;
 		gap: 7px;
@@ -389,9 +389,11 @@
 		font-size: 13.5px;
 		padding: 12px;
 		cursor: pointer;
-		position: sticky;
-		bottom: 0;
-		transition: transform 0.08s ease;
+		margin-bottom: 18px;
+		transition: transform var(--duration-fast) var(--ease-snap), background var(--duration-base) var(--ease-snap);
+	}
+	.add-source-btn:hover {
+		background: color-mix(in srgb, var(--color-accent) 88%, black);
 	}
 	.add-source-btn:active {
 		transform: scale(0.97);

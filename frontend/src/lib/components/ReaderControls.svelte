@@ -6,7 +6,6 @@
 		measure,
 		leading,
 		readerTheme,
-		inline = false,
 		onFontSize,
 		onMeasure,
 		onLeading,
@@ -16,10 +15,6 @@
 		measure: ReaderMeasure;
 		leading: ReaderLeading;
 		readerTheme: ReaderTheme;
-		/** Desktop (per the Legere.dc.html design): controls sit inline in
-		 *  the header, always visible, no trigger/popover. Mobile keeps the
-		 *  design's "Aa" toggle + reveal panel. */
-		inline?: boolean;
 		onFontSize: (size: number) => void;
 		onMeasure: (measure: ReaderMeasure) => void;
 		onLeading: (leading: ReaderLeading) => void;
@@ -129,52 +124,44 @@
 	}}
 />
 
-{#if inline}
-	<div class="inline-controls">
-		{@render stepper()}
-		{@render measureSeg()}
-		{@render themeSeg()}
-		{@render leadingSeg()}
-	</div>
-{:else}
-	<div class="reader-controls" bind:this={rootEl}>
-		<button
-			class="btn btn-secondary btn-icon aa-trigger"
-			onclick={() => (open = !open)}
-			aria-label="Typography settings"
-			aria-expanded={open}
-		>
-			Aa
-		</button>
-		{#if open}
-			<div class="aa-popover elev-md" role="dialog" aria-label="Typography settings">
-				<div class="aa-row">
-					<span class="aa-label">Size</span>
-					{@render stepper()}
-				</div>
-				<div class="aa-row">
-					<span class="aa-label">Width</span>
-					{@render measureSeg()}
-				</div>
-				<div class="aa-row">
-					<span class="aa-label">Line height</span>
-					{@render leadingSeg()}
-				</div>
-				<div class="aa-row">
-					<span class="aa-label">Theme</span>
-					{@render themeSeg()}
-				</div>
+<!-- One trigger, one popover, on every platform: the previous desktop
+     layout laid the size stepper and three separate segmented controls
+     out inline in the header, competing with the back button, favorite,
+     mark-read, and overflow menu for attention. Typography is a
+     preference you set occasionally, not a control you need visible at
+     all times — it earns a single quiet trigger. -->
+<div class="reader-controls" bind:this={rootEl}>
+	<button
+		class="btn btn-secondary btn-icon aa-trigger"
+		onclick={() => (open = !open)}
+		aria-label="Typography settings"
+		aria-expanded={open}
+	>
+		Aa
+	</button>
+	{#if open}
+		<div class="aa-popover elev-md" role="dialog" aria-label="Typography settings">
+			<div class="aa-row">
+				<span class="aa-label">Size</span>
+				{@render stepper()}
 			</div>
-		{/if}
-	</div>
-{/if}
+			<div class="aa-row">
+				<span class="aa-label">Width</span>
+				{@render measureSeg()}
+			</div>
+			<div class="aa-row">
+				<span class="aa-label">Line height</span>
+				{@render leadingSeg()}
+			</div>
+			<div class="aa-row">
+				<span class="aa-label">Theme</span>
+				{@render themeSeg()}
+			</div>
+		</div>
+	{/if}
+</div>
 
 <style>
-	.inline-controls {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-	}
 	.reader-controls {
 		position: relative;
 	}
