@@ -1,0 +1,148 @@
+name: Warm release caches
+
+# release.yml only ever runs on tag pushes, and GitHub Actions caches are
+# scoped per-ref: a tag ref (refs/tags/vX.Y.Z) is brand new on every release
+# and can only fall back to a cache on the *same* ref or the default branch.
+# Since nothing ever built on main, every release build would otherwise be a
+# 100% cold `cargo build`. This workflow does the same compiles on pushes to
+# main so a cache exists under refs/heads/main for release builds to restore
+# from.
+#
+# Paths are filtered to what actually invalidates the Rust build, so this
+# doesn't burn compute on unrelated (e.g. frontend-only) commits.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src-tauri/**'
+      - 'frontend/package-lock.json'
+  workflow_dispatch:
+
+env:
+  ANDROID_NDK_VERSION: '30.0.15729638'
+
+jobs:
+  warm-desktop:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: legere
+
+      - uses: actions/checkout@v7
+        with:
+          repository: ritvijsrivastava/wraith
+          path: wraith
+          token: ${{ secrets.WRAITH_PAT }}
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: legere/frontend/package-lock.json
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      # Same shared-key/workspaces as release.yml's build-desktop job — must
+      # match exactly for the saved cache to be reusable there.
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: 'legere -> target'
+          shared-key: desktop-linux
+
+      - name: Install frontend dependencies
+        working-directory: legere/frontend
+        run: npm ci
+
+      # Plain tauri CLI invocation (not tauri-action) — no GITHUB_TOKEN, no
+      # release/tag involved, this job only exists to populate the Rust
+      # cache under refs/heads/main. Still needs the signing key: tauri.conf
+      # has createUpdaterArtifacts=true and a configured updater.pubkey, and
+      # the bundler hard-errors ("A public key has been found, but no
+      # private key") on any build attempt if TAURI_SIGNING_PRIVATE_KEY is
+      # unset — it's not just skipped.
+      - name: Build desktop bundles (cache warm-up only)
+        working-directory: legere
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npm run tauri build -- --bundles deb,rpm,appimage
+
+  warm-android:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: legere
+
+      - uses: actions/checkout@v7
+        with:
+          repository: ritvijsrivastava/wraith
+          path: wraith
+          token: ${{ secrets.WRAITH_PAT }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: legere/frontend/package-lock.json
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      # Same shared-key/workspaces as release.yml's build-android job — must
+      # match exactly for the saved cache to be reusable there.
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: 'legere -> target'
+          shared-key: android-aarch64
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      # Same setup as release.yml's build-android job (read-write here,
+      # since this is the job that actually seeds the cache under
+      # refs/heads/main for that one to restore from).
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Install Android NDK
+        run: |
+          echo "yes" | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-36" "ndk;${{ env.ANDROID_NDK_VERSION }}"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/${{ env.ANDROID_NDK_VERSION }}" >> "$GITHUB_ENV"
+
+      - name: Install frontend dependencies
+        working-directory: legere/frontend
+        run: npm ci
+
+      # Needs real signing config to complete: `tauri android build` runs
+      # gradle's assembleRelease, which fails to configure at all without a
+      # valid keystore.properties, so an incomplete build here would abort
+      # before the Rust cross-compile that's the actual point of this job.
+      - name: Set up Android signing
+        working-directory: legere/src-tauri/gen/android
+        run: |
+          echo "keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}" > keystore.properties
+          echo "password=${{ secrets.ANDROID_KEY_PASSWORD }}" >> keystore.properties
+          base64 -d <<< "${{ secrets.ANDROID_KEY_BASE64 }}" > "$RUNNER_TEMP/keystore.jks"
+          echo "storeFile=$RUNNER_TEMP/keystore.jks" >> keystore.properties
+
+      - name: Build Android APK (cache warm-up only)
+        working-directory: legere
+        run: npm run tauri android build -- --target aarch64 --apk --ci

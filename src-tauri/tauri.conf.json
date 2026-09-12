@@ -20,7 +20,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' asset: http://asset.localhost zim: http://zim.localhost data:; media-src 'self' asset: http://asset.localhost zim: http://zim.localhost; frame-src 'self' zim: http://zim.localhost; connect-src 'self' ipc: http://ipc.localhost",
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' asset: http://asset.localhost legere-content: http://legere-content.localhost data:; media-src 'self' asset: http://asset.localhost legere-content: http://legere-content.localhost; frame-src 'self' legere-content: http://legere-content.localhost; connect-src 'self' ipc: http://ipc.localhost",
       "assetProtocol": {
         "enable": true,
         "scope": ["$APPLOCALDATA/legere/**"]
@@ -29,7 +29,8 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["deb", "rpm", "app", "dmg", "nsis", "msi"],
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -39,6 +40,14 @@
     ],
     "android": {
       "minSdkVersion": 30
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "REPLACE_ME_RUN_NPM_RUN_TAURI_SIGNER_GENERATE",
+      "endpoints": [
+        "https://github.com/ritvijsrivastava/legere/releases/latest/download/latest.json"
+      ]
     }
   }
 }

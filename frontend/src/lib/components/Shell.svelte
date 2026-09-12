@@ -13,10 +13,16 @@
 	import { libraryFiltersStore } from '$lib/stores/libraryFilters.svelte';
 	import { sourceDotColor } from '$lib/sourceColor';
 	import { deriveCategories, deriveTags } from '$lib/deriveCategories';
+	import { goto } from '$app/navigation';
+	import { isTauri } from '$lib/platform';
+	import { checkForUpdate, getLastDismissedVersion, setLastDismissedVersion } from '$lib/update';
+	import UpdateToast from '$lib/components/UpdateToast.svelte';
+
 	let { children } = $props();
 
 	let isMobile = $state(typeof window !== 'undefined' ? window.innerWidth < 768 : false);
 	let isReader = $derived(page.url.pathname.startsWith('/reader/'));
+	let isSettings = $derived(page.url.pathname === '/settings');
 
 	$effect(() => {
 		function onResize() {
@@ -24,6 +30,37 @@
 		}
 		window.addEventListener('resize', onResize);
 		return () => window.removeEventListener('resize', onResize);
+	});
+
+	// ── Background update check ──────────────────────────────────────────────
+	let updateAvailable = $state<{ version: string; notes?: string | null } | null>(null);
+
+	/** Fire-and-forget: check for an update without blocking or delaying page load.
+	 *  Skipped when landing directly on Settings — that page runs its own check
+	 *  on mount, and duplicating it here would just double the GitHub call. */
+	async function backgroundCheckForUpdate() {
+		if (!isTauri() || isSettings) return;
+		try {
+			const result = await checkForUpdate();
+			if (!result.available) return;
+			const dismissed = await getLastDismissedVersion();
+			if (dismissed === result.version) return;
+			updateAvailable = { version: result.version, notes: result.notes };
+		} catch {
+			// No token configured yet, or a transient network error — the user
+			// can still check manually from Settings, so fail silently here.
+		}
+	}
+
+	function dismissUpdate() {
+		if (updateAvailable) setLastDismissedVersion(updateAvailable.version);
+		updateAvailable = null;
+	}
+
+	const showUpdatePrompt = $derived(updateAvailable !== null && !isSettings);
+
+	$effect(() => {
+		backgroundCheckForUpdate();
 	});
 
 	const navItems = [
@@ -121,6 +158,15 @@
 			{@render sidebarNav()}
 
 			<div class="sidebar-spacer"></div>
+			{#if showUpdatePrompt && updateAvailable}
+				<UpdateToast
+					version={updateAvailable.version}
+					notes={updateAvailable.notes}
+					variant="inline"
+					onUpdate={() => goto('/settings')}
+					onDismiss={dismissUpdate}
+				/>
+			{/if}
 			<button onclick={() => uiStore.openAddSource()} class="add-source-btn">
 				<Plus size={15} />
 				Add source
@@ -170,6 +216,15 @@
 		</div>
 	{/if}
 </div>
+
+{#if showUpdatePrompt && isMobile && updateAvailable}
+	<UpdateToast
+		version={updateAvailable.version}
+		notes={updateAvailable.notes}
+		onUpdate={() => goto('/settings')}
+		onDismiss={dismissUpdate}
+	/>
+{/if}
 
 <style>
 	.app-root {

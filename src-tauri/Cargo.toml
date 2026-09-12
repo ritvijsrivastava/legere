@@ -22,20 +22,22 @@ feed-rs = "2.4.0"
 html-escape = "0.2"
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "webp"] }
 lol_html = "3"
-lru = "0.18.1"
 percent-encoding = "2.3.2"
 r2d2 = "0.8.10"
 r2d2_sqlite = { version = "0.35.0", features = ["bundled"] }
-reqwest = { version = "0.13.4", default-features = false, features = ["rustls", "http2", "json"] }
+reqwest = { version = "0.13.4", default-features = false, features = ["rustls", "http2", "json", "stream"] }
 rusqlite = { version = "0.40.1", features = ["bundled"] }
 rusqlite_migration = "2.6.0"
-# TODO: switch to a git dependency pinned to a commit SHA once SSH auth to
-# github.com/ritvijsrivastava/wraith is available non-interactively (the
-# passphrase-protected key here needs a GUI prompt this session can't answer).
-wraith-assets = { version = "0.1.0", path = "../../wraith/crates/assets" }
-wraith-sanitize = { version = "0.1.0", path = "../../wraith/crates/sanitize" }
-wraith-urlx = { version = "0.1.0", path = "../../wraith/crates/urlx" }
-wraith-zim = { version = "0.1.0", path = "../../wraith/crates/zim" }
+# Manifest version compares and downloaded-package checksum verification in
+# the Android/Linux self-update flows (see commands::update_android,
+# commands::update_linux) — tauri-plugin-updater doesn't support mobile, and
+# has no Linux .deb/.rpm support either, so both drive the same latest.json
+# manifest by hand.
+semver = "1"
+sha2 = "0.10"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+tauri-plugin-store = "2"
+tauri-plugin-os = "2"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
 tauri = { version = "2.11.5", features = ["protocol-asset"] }
@@ -47,12 +49,29 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 url = "2.5.8"
 uuid = { version = "1.24.0", features = ["v4"] }
 
+# tauri-plugin-updater doesn't support mobile targets, so it's kept out of the
+# Android build entirely rather than compiled-but-unused.
+[target.'cfg(not(target_os = "android"))'.dependencies]
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+
 [target.'cfg(target_os = "android")'.dependencies]
 jni = { version = "0.22", default-features = false }
 # reqwest already pulls this in transitively (as its default rustls cert
 # verifier on Android); named explicitly here because `android::init_with_env`
 # must be called before the first TLS handshake — see `mobile_tls`.
 rustls-platform-verifier = "0.7"
+# Android has no equivalent official updater plugin, so it drives the same
+# latest.json manifest itself over a plain authenticated reqwest GET. Kept
+# optional (see [features] below) — a plain dev/local Android build should
+# not link install-package machinery in at all.
+tauri-plugin-apk-installer = { path = "../plugins/tauri-plugin-apk-installer", optional = true }
+
+[features]
+# Enables the GitHub-release/sideload Android build's self-update flow.
+# Deliberately not a default feature — "no flags passed" means "no
+# self-update mechanism at all" (a plain dev build).
+apk-self-update = ["dep:tauri-plugin-apk-installer"]
 
 [dev-dependencies]
 axum = "0.8"

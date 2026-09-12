@@ -1,0 +1,328 @@
+name: Release
+run-name: Release ${{ github.ref_name }}
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+env:
+  ANDROID_NDK_VERSION: '30.0.15729638'
+
+jobs:
+  build-desktop:
+    permissions:
+      contents: write
+    runs-on: ubuntu-22.04
+    steps:
+      # legere/src-tauri depends on the wraith-* crates via a local path
+      # dependency (see src-tauri/Cargo.toml) rather than a registry/git
+      # dependency, so wraith has to be checked out as a sibling directory
+      # for `legere/src-tauri/../../wraith/crates/*` to resolve. Requires a
+      # WRAITH_PAT repo secret (a fine-grained PAT, or deploy key, with
+      # read-only access to ritvijsrivastava/wraith) — this workflow cannot
+      # build without it.
+      - uses: actions/checkout@v7
+        with:
+          path: legere
+
+      - uses: actions/checkout@v7
+        with:
+          repository: ritvijsrivastava/wraith
+          path: wraith
+          token: ${{ secrets.WRAITH_PAT }}
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: legere/frontend/package-lock.json
+
+      # Keeps the version baked into the binary (what Settings displays and
+      # what the Android updater compares against) in sync with the tag
+      # being built, so it doesn't silently drift.
+      - name: Sync app version with release tag
+        working-directory: legere
+        run: .github/scripts/sync-version.sh "${{ github.ref_name }}"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: 'legere -> target'
+          shared-key: desktop-linux
+
+      - name: Install frontend dependencies
+        working-directory: legere/frontend
+        run: npm ci
+
+      # Creates/updates a draft release tagged with this tag and uploads the
+      # .deb, .rpm and .AppImage (this runner has FUSE, so unlike local dev
+      # sandboxes AppImage bundling works here — see bundle.targets override
+      # below). Left as a draft so a later Android build failure doesn't
+      # leave a half-finished release publicly visible; publish-release
+      # flips it to published once everything succeeds.
+      - name: Build and attach desktop bundles
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NO_STRIP: '1'
+          # Signs the AppImage bundle and generates+uploads latest.json, which
+          # the in-app updater (Settings page) reads to check for updates.
+          # Generate a keypair with `npm run tauri signer generate`.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: legere
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Legere ${{ github.ref_name }}'
+          releaseDraft: true
+          prerelease: false
+          args: --bundles deb,rpm,appimage
+
+      # tauri-action (above) only wraps the AppImage as an updater artifact
+      # and generates a "linux-x86_64" latest.json entry for it — .deb/.rpm
+      # are uploaded as plain release assets with no update-manifest entry of
+      # their own. Patch in "linux-x86_64-deb"/"linux-x86_64-rpm" entries so
+      # the in-app updater (Settings page) can self-update those installs too
+      # (see src-tauri/src/commands/update_linux.rs). Mirrors the
+      # "Upload APK and patch update manifest" step in publish-android below,
+      # except the .deb/.rpm files are already built locally and already
+      # uploaded by tauri-action in this same job.
+      - name: Patch update manifest for deb/rpm
+        working-directory: legere
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${{ github.ref_name }}"
+          repo="${{ github.repository }}"
+
+          # Bundles land in the cargo *workspace* target dir (legere/target),
+          # not src-tauri/target — legere's Cargo.toml is a workspace member,
+          # unlike jot's single-crate layout.
+          deb=$(find target/release/bundle/deb -name '*.deb' -print -quit)
+          rpm=$(find target/release/bundle/rpm -name '*.rpm' -print -quit)
+          deb_sha256=$(sha256sum "$deb" | cut -d' ' -f1)
+          rpm_sha256=$(sha256sum "$rpm" | cut -d' ' -f1)
+
+          # Matched by name suffix rather than a "#label" (unlike the Android
+          # step below, tauri-action doesn't set one on these uploads).
+          deb_url=$(gh api "repos/${repo}/releases" \
+            --jq "[.[] | select(.tag_name == \"${tag}\")][0].assets[] | select(.name | endswith(\".deb\")) | .url")
+          rpm_url=$(gh api "repos/${repo}/releases" \
+            --jq "[.[] | select(.tag_name == \"${tag}\")][0].assets[] | select(.name | endswith(\".rpm\")) | .url")
+
+          gh release download "$tag" --repo "$repo" \
+            --pattern latest.json --output latest.json --clobber
+          jq --arg deb_url "$deb_url" --arg deb_sha "$deb_sha256" \
+             --arg rpm_url "$rpm_url" --arg rpm_sha "$rpm_sha256" \
+            '.platforms["linux-x86_64-deb"] = {"url": $deb_url, "sha256": $deb_sha}
+             | .platforms["linux-x86_64-rpm"] = {"url": $rpm_url, "sha256": $rpm_sha}' \
+            latest.json > latest.json.patched
+          mv latest.json.patched latest.json
+          gh release upload "$tag" latest.json --clobber --repo "$repo"
+
+  build-android:
+    # No `needs: build-desktop` — this build shares nothing with the desktop
+    # job (different Rust target, no shared release state), so it runs
+    # concurrently with it instead of waiting for it to finish first. Only
+    # publish-android (which patches the shared latest.json) actually needs
+    # both builds done.
+    permissions:
+      contents: write
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: legere
+
+      - uses: actions/checkout@v7
+        with:
+          repository: ritvijsrivastava/wraith
+          path: wraith
+          token: ${{ secrets.WRAITH_PAT }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: legere/frontend/package-lock.json
+
+      - name: Sync app version with release tag
+        working-directory: legere
+        run: .github/scripts/sync-version.sh "${{ github.ref_name }}"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: 'legere -> target'
+          shared-key: android-aarch64
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      # Caches the Gradle wrapper distribution and dependency/transform cache
+      # so this job isn't re-downloading gradle-8.14.3-bin.zip and
+      # re-resolving AndroidX deps on every release. Same per-ref cache
+      # scoping as the Rust caches above: this job never runs on
+      # refs/heads/main, so it can only restore (not usefully populate) —
+      # warm-release-cache.yml's warm-android job is what actually seeds it.
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: true
+
+      # ubuntu-22.04 runners ship the Android SDK preinstalled; only the NDK
+      # needs an explicit, pinned install for reproducible builds.
+      - name: Install Android NDK
+        run: |
+          echo "yes" | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-36" "ndk;${{ env.ANDROID_NDK_VERSION }}"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/${{ env.ANDROID_NDK_VERSION }}" >> "$GITHUB_ENV"
+
+      - name: Install frontend dependencies
+        working-directory: legere/frontend
+        run: npm ci
+
+      # See https://v2.tauri.app/distribute/sign/android/ for how to generate
+      # the keystore. Requires repo secrets ANDROID_KEY_ALIAS,
+      # ANDROID_KEY_PASSWORD and ANDROID_KEY_BASE64 (base64-encoded .jks).
+      - name: Set up Android signing
+        working-directory: legere/src-tauri/gen/android
+        run: |
+          echo "keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}" > keystore.properties
+          echo "password=${{ secrets.ANDROID_KEY_PASSWORD }}" >> keystore.properties
+          base64 -d <<< "${{ secrets.ANDROID_KEY_BASE64 }}" > "$RUNNER_TEMP/keystore.jks"
+          echo "storeFile=$RUNNER_TEMP/keystore.jks" >> keystore.properties
+
+      - name: Build Android APK (arm64)
+        # --features apk-self-update opts this sideload/GitHub-release build
+        # into the in-app updater (see src-tauri/Cargo.toml); a plain build
+        # with no feature flag has no self-update mechanism at all.
+        working-directory: legere
+        run: npm run tauri android build -- --target aarch64 --apk --ci --features apk-self-update
+
+      # Renamed up front since the release-side job (publish-android) that
+      # actually uploads this to the release can't reconstruct a meaningful
+      # name from gradle's default APK output filename.
+      - name: Rename APK for upload
+        working-directory: legere
+        run: |
+          tag="${{ github.ref_name }}"
+          apk=$(find src-tauri/gen/android/app/build/outputs/apk -name '*.apk' -print -quit)
+          renamed="$RUNNER_TEMP/com.ritvijsrivastava.legere-android-arm64_${tag}.apk"
+          cp "$apk" "$renamed"
+          echo "APK_PATH=$renamed" >> "$GITHUB_ENV"
+
+      # Hands the built APK off to publish-android as a workflow artifact
+      # rather than uploading straight to the release here — the release
+      # (and its latest.json) is created by build-desktop's tauri-action
+      # step, which this job no longer waits on, so it may not exist yet.
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-apk-aarch64
+          path: ${{ env.APK_PATH }}
+          retention-days: 1
+
+  # Split out from build-android so build-desktop and build-android can run
+  # concurrently: this is the only part that actually needs both of them
+  # done (it attaches the APK to the release build-desktop created, and
+  # patches the same latest.json build-desktop already populated).
+  publish-android:
+    needs: [build-desktop, build-android]
+    permissions:
+      contents: write
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: android-apk-aarch64
+          path: apk
+
+      - name: Upload APK and patch update manifest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${{ github.ref_name }}"
+          repo="${{ github.repository }}"
+          asset_name="Legere-${tag}-android-arm64.apk"
+
+          apk=$(find apk -name '*.apk' -print -quit)
+          gh release upload "$tag" \
+            "$apk#${asset_name}" \
+            --clobber \
+            --repo "$repo"
+
+          # Add an "android-aarch64" entry to the latest.json build-desktop's
+          # tauri-action step already generated and uploaded, so the in-app
+          # updater (Settings page) can find this APK too. Uses the
+          # api.github.com asset URL (not browser_download_url) since that's
+          # the form documented to work with a bare Authorization header
+          # against a private repo.
+          apk_sha256=$(sha256sum "$apk" | cut -d' ' -f1)
+          apk_url=$(gh api "repos/${repo}/releases" \
+            --jq "[.[] | select(.tag_name == \"${tag}\")][0].assets[] | select(.label == \"${asset_name}\") | .url")
+
+          gh release download "$tag" --repo "$repo" \
+            --pattern latest.json --output latest.json --clobber
+          jq --arg url "$apk_url" --arg sha256 "$apk_sha256" \
+            '.platforms["android-aarch64"] = {"url": $url, "sha256": $sha256}' \
+            latest.json > latest.json.patched
+          mv latest.json.patched latest.json
+          gh release upload "$tag" latest.json --clobber --repo "$repo"
+
+  publish-release:
+    needs: [build-desktop, build-android, publish-android]
+    permissions:
+      contents: write
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Full history + tags, needed to diff this tag against the
+          # previous one for the changelog below.
+          fetch-depth: 0
+
+      - name: Generate changelog and publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${{ github.ref_name }}"
+          # Empty on the very first release (tag has no parent tag), in
+          # which case the changelog falls back to every commit in $tag.
+          previous_tag=$(git describe --tags --abbrev=0 "${tag}^" 2>/dev/null || true)
+          range="${previous_tag:+${previous_tag}..}${tag}"
+
+          {
+            echo "<details>"
+            echo "<summary>Changelog</summary>"
+            echo
+            git log --pretty=format:'- %s' "$range"
+            echo
+            echo
+            echo "</details>"
+          } > notes.md
+
+          gh release edit "$tag" \
+            --draft=false \
+            --notes-file notes.md \
+            --repo "${{ github.repository }}"

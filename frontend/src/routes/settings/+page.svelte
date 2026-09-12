@@ -1,12 +1,174 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { settingsStore } from '$lib/stores/settings.svelte';
 	import { sourcesStore } from '$lib/stores/sources.svelte';
 	import ChevronRight from '$lib/icons/ChevronRight.svelte';
 	import type { FontSize, LibraryView, ReaderMeasure, ReaderTheme } from '$lib/types';
+	import { isTauri } from '$lib/platform';
+	import { errorMessage } from '$lib/api';
+	import {
+		currentVersion,
+		hasToken,
+		saveToken,
+		clearToken,
+		checkForUpdate,
+		installUpdate,
+		shouldShowLinuxUpdateWarning,
+		getReleaseNotes,
+		parseChangelog,
+		type UpdateCheckResult,
+		type UpdateInfo,
+		type InstallProgress
+	} from '$lib/update';
 
 	$effect(() => {
 		sourcesStore.refresh();
 	});
+
+	// The web build has no installer to update, and the underlying Tauri
+	// plugin calls throw outside a Tauri context, so gate all of this off.
+	const tauri = isTauri();
+
+	let version = $state('');
+	let tokenSaved = $state(false);
+	let tokenInput = $state('');
+	let savingToken = $state(false);
+
+	let checkState = $state<'idle' | 'checking' | 'error'>('idle');
+	let checkError = $state('');
+	let updateResult = $state<UpdateCheckResult | null>(null);
+	let updateDetailsExpanded = $state(false);
+	let updateDetailsState = $state<'idle' | 'loading' | 'loaded' | 'error'>('idle');
+	let updateDetailsError = $state('');
+	let updateChangelog = $state<string[]>([]);
+
+	let changelogState = $state<'idle' | 'loading' | 'error' | 'none'>('idle');
+	let changelogError = $state('');
+	let changelog = $state<UpdateInfo | null>(null);
+
+	let installing = $state(false);
+	let installPhase = $state<'downloading' | 'installing'>('downloading');
+	let installProgress = $state<{ downloaded: number; total: number | null } | null>(null);
+	let installError = $state('');
+	let installDone = $state(false);
+
+	let showLinuxWarning = $state(false);
+
+	onMount(async () => {
+		if (!tauri) return;
+		version = await currentVersion();
+		tokenSaved = await hasToken();
+		shouldShowLinuxUpdateWarning().then((show) => (showLinuxWarning = show));
+		if (tokenSaved) {
+			handleCheck();
+			loadChangelog();
+		}
+	});
+
+	async function loadChangelog() {
+		changelogState = 'loading';
+		changelogError = '';
+		try {
+			const notes = await getReleaseNotes(version);
+			changelog = notes;
+			changelogState = notes ? 'idle' : 'none';
+		} catch (e) {
+			changelogError = errorMessage(e);
+			changelogState = 'error';
+		}
+	}
+
+	/** Lazily fetch the real changelog for a pending update the first time
+	 *  "Details" is expanded — `updateResult.notes` can't be used here, see
+	 *  `getReleaseNotes()`'s doc comment. */
+	async function toggleUpdateDetails() {
+		updateDetailsExpanded = !updateDetailsExpanded;
+		const alreadyFetched = updateDetailsState === 'loading' || updateDetailsState === 'loaded';
+		if (!updateDetailsExpanded || alreadyFetched || !updateResult?.available) return;
+		updateDetailsState = 'loading';
+		try {
+			const notes = await getReleaseNotes(updateResult.version);
+			updateChangelog = parseChangelog(notes?.notes);
+			updateDetailsState = 'loaded';
+		} catch (e) {
+			updateDetailsError = errorMessage(e);
+			updateDetailsState = 'error';
+		}
+	}
+
+	async function handleSaveToken() {
+		if (!tokenInput.trim()) return;
+		savingToken = true;
+		try {
+			await saveToken(tokenInput.trim());
+			tokenSaved = true;
+			tokenInput = '';
+			loadChangelog();
+			handleCheck();
+		} finally {
+			savingToken = false;
+		}
+	}
+
+	async function handleClearToken() {
+		await clearToken();
+		tokenSaved = false;
+		updateResult = null;
+		changelog = null;
+		changelogState = 'idle';
+	}
+
+	async function handleCheck() {
+		checkState = 'checking';
+		checkError = '';
+		updateResult = null;
+		updateDetailsExpanded = false;
+		updateDetailsState = 'idle';
+		updateChangelog = [];
+		try {
+			updateResult = await checkForUpdate();
+			checkState = 'idle';
+		} catch (e) {
+			checkError = errorMessage(e);
+			checkState = 'error';
+		}
+	}
+
+	async function handleInstall() {
+		installing = true;
+		installPhase = 'downloading';
+		installError = '';
+		installDone = false;
+		installProgress = { downloaded: 0, total: null };
+		try {
+			await installUpdate((p: InstallProgress) => {
+				if (p.event === 'started') {
+					installProgress = { downloaded: 0, total: p.data.contentLength };
+				} else if (p.event === 'progress') {
+					installProgress = {
+						downloaded: (installProgress?.downloaded ?? 0) + p.data.chunkLength,
+						total: installProgress?.total ?? null
+					};
+				} else if (p.event === 'installing') {
+					installPhase = 'installing';
+				} else if (p.event === 'finished') {
+					installDone = true;
+				}
+			});
+			// Desktop relaunches automatically inside installUpdate(); Android hands
+			// off to the OS package installer. Either way, nothing left to do here.
+		} catch (e) {
+			installError = errorMessage(e);
+		} finally {
+			installing = false;
+		}
+	}
+
+	const installPct = $derived(
+		installProgress?.total
+			? Math.min(100, Math.round((installProgress.downloaded / installProgress.total) * 100))
+			: null
+	);
 
 	function setFontSize(size: FontSize) {
 		settingsStore.update({ default_font_size: size });
@@ -198,6 +360,147 @@
 	</section>
 
 	<section>
+		<h4>Updates</h4>
+		{#if !tauri}
+			<p class="text-muted section-desc">
+				Not available in the web build — install the desktop or Android app to get in-app updates.
+			</p>
+		{:else}
+			<div class="row">
+				<span class="row-label">Version</span>
+				<span class="text-muted">{version || '—'}</span>
+			</div>
+
+			{#if !tokenSaved}
+				<p class="text-muted section-desc">
+					Legere's repo is private, so checking for updates needs a GitHub access token. Create a
+					fine-grained token with read-only access to this repo's contents, then paste it here —
+					it's stored locally and only needs to be entered once.
+				</p>
+				<div class="token-row">
+					<input
+						type="password"
+						placeholder="ghp_..."
+						autocomplete="off"
+						bind:value={tokenInput}
+						class="input"
+					/>
+					<button
+						class="btn btn-primary"
+						disabled={!tokenInput.trim() || savingToken}
+						onclick={handleSaveToken}
+					>
+						{savingToken ? 'Saving…' : 'Save'}
+					</button>
+				</div>
+			{:else}
+				<div class="row">
+					<span class="row-label">GitHub access token</span>
+					<button class="btn btn-secondary" onclick={handleClearToken}>Clear</button>
+				</div>
+
+				<div class="row">
+					<span class="row-label">Check for updates</span>
+					<button
+						class="btn btn-secondary"
+						disabled={checkState === 'checking'}
+						onclick={handleCheck}
+					>
+						{checkState === 'checking' ? 'Checking…' : 'Check now'}
+					</button>
+				</div>
+
+				{#if checkState === 'error'}
+					<p class="error-text">{checkError}</p>
+				{:else if updateResult?.available}
+					<div class="update-block">
+						<p class="update-available">Update available — v{updateResult.version}</p>
+						<button class="btn btn-ghost details-btn" onclick={toggleUpdateDetails}>
+							{updateDetailsExpanded ? 'Hide details' : 'Details'}
+						</button>
+						{#if updateDetailsExpanded}
+							{#if updateDetailsState === 'loading'}
+								<p class="text-muted">Loading…</p>
+							{:else if updateDetailsState === 'error'}
+								<p class="error-text">{updateDetailsError}</p>
+							{:else if updateChangelog.length}
+								<ul class="changelog text-muted">
+									{#each updateChangelog as change}
+										<li>{change}</li>
+									{/each}
+								</ul>
+							{:else if updateResult.notes}
+								<p class="changelog-fallback text-muted">{updateResult.notes}</p>
+							{:else}
+								<p class="text-muted">No changelog available.</p>
+							{/if}
+						{/if}
+
+						{#if installDone}
+							<p class="done-text">Installed — relaunching…</p>
+						{:else if installing}
+							<div class="progress-wrap">
+								<div class="progress-track">
+									<div
+										class="progress-fill"
+										class:indeterminate={installPhase === 'installing'}
+										style:width="{installPhase === 'installing' ? 100 : (installPct ?? 20)}%"
+									></div>
+								</div>
+								<p class="text-muted progress-label">
+									{installPhase === 'installing'
+										? 'Installing… confirm the prompt if one appears'
+										: (installPct !== null ? `${installPct}%` : 'Downloading…')}
+								</p>
+							</div>
+						{:else}
+							<button class="btn btn-primary install-btn" onclick={handleInstall}>
+								Download &amp; install
+							</button>
+						{/if}
+
+						{#if installError}
+							<p class="error-text">{installError}</p>
+						{/if}
+					</div>
+				{:else if updateResult && !updateResult.available}
+					<p class="text-muted">You're up to date{version ? ` (v${version})` : ''}.</p>
+				{/if}
+
+				{#if showLinuxWarning}
+					<p class="text-muted linux-note">
+						Legere couldn't detect how it was installed, so auto-update isn't available. Check for
+						updates manually, or reinstall from the latest GitHub release.
+					</p>
+				{/if}
+
+				<div class="row">
+					<span class="row-label">What's new</span>
+				</div>
+				{#if changelogState === 'loading'}
+					<p class="text-muted">Loading…</p>
+				{:else if changelogState === 'error'}
+					<p class="error-text">{changelogError}</p>
+				{:else if changelogState === 'none'}
+					<p class="text-muted">No release notes found for v{version}.</p>
+				{:else if changelog}
+					{#if parseChangelog(changelog.notes).length}
+						<ul class="changelog text-muted">
+							{#each parseChangelog(changelog.notes) as change}
+								<li>{change}</li>
+							{/each}
+						</ul>
+					{:else if changelog.notes}
+						<p class="changelog-fallback text-muted">{changelog.notes}</p>
+					{:else}
+						<p class="text-muted">No changelog available.</p>
+					{/if}
+				{/if}
+			{/if}
+		{/if}
+	</section>
+
+	<section>
 		<h4>About</h4>
 		<p class="text-muted version">Legere — offline article reader.</p>
 	</section>
@@ -265,6 +568,95 @@
 		margin: 0;
 	}
 
+	.token-row {
+		display: flex;
+		gap: 8px;
+		margin-top: 4px;
+	}
+	.token-row .input {
+		flex: 1;
+	}
+	.update-block {
+		margin-top: 10px;
+		padding-top: 10px;
+		border-top: 1px solid var(--color-divider);
+	}
+	.update-available {
+		font-family: var(--font-heading);
+		font-weight: var(--font-heading-weight);
+		font-size: 14px;
+		color: var(--color-accent);
+		margin: 0;
+	}
+	.details-btn {
+		margin-top: 6px;
+	}
+	.install-btn {
+		margin-top: 10px;
+	}
+	.changelog {
+		list-style: disc;
+		font-size: 12px;
+		line-height: 1.6;
+		margin: 8px 0 0;
+		padding-left: 18px;
+	}
+	.changelog li {
+		margin-bottom: 2px;
+	}
+	.changelog-fallback {
+		font-size: 12px;
+		margin: 8px 0 0;
+		white-space: pre-wrap;
+	}
+	.error-text {
+		font-size: 12px;
+		color: var(--color-danger);
+		margin: 6px 0 0;
+	}
+	.done-text {
+		font-size: 12px;
+		font-weight: 600;
+		color: var(--color-accent);
+		margin: 10px 0 0;
+	}
+	.progress-wrap {
+		margin-top: 10px;
+	}
+	.progress-track {
+		height: 5px;
+		border-radius: 3px;
+		background: var(--color-divider);
+		overflow: hidden;
+	}
+	.progress-fill {
+		height: 100%;
+		background: var(--color-accent);
+		transition: width 0.2s ease;
+	}
+	.progress-fill.indeterminate {
+		animation: progress-pulse 1.4s ease-in-out infinite;
+	}
+	@keyframes progress-pulse {
+		0%,
+		100% {
+			opacity: 0.4;
+		}
+		50% {
+			opacity: 1;
+		}
+	}
+	.progress-label {
+		font-size: 11px;
+		margin: 6px 0 0;
+	}
+	.linux-note {
+		font-size: 12px;
+		margin: 10px 0 0;
+		padding-top: 10px;
+		border-top: 1px solid var(--color-divider);
+		line-height: 1.5;
+	}
 
 	@media (max-width: 768px) {
 		.settings-page {

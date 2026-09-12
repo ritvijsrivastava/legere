@@ -1,0 +1,7 @@
+[default]
+description = "Default permissions for the plugin"
+permissions = [
+    "allow-can-request-installs",
+    "allow-request-install-permission",
+    "allow-install",
+]

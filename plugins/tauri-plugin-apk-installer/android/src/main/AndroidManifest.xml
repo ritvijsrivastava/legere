@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!--
+      Lets the app launch Android's package installer for a downloaded APK.
+      The app's own AndroidManifest.xml (gen/android) already declares the
+      FileProvider used to hand the installer a content:// URI — reused as-is,
+      not redeclared here, since a duplicate <provider> at the same authority
+      would fail Android's manifest merge.
+    -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+</manifest>
