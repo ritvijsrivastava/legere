@@ -118,8 +118,9 @@ mod tests {
             http_client: test_support::plain_client(),
             data_dir: data_dir.path().to_path_buf(),
             autosync_handle: Mutex::new(None),
-            zim_cache: crate::zim_server::ZimCache::new(),
             last_foreground_sync: std::sync::Mutex::new(None),
+            pending_update: Default::default(),
+            pending_linux_update: Default::default(),
         };
 
         let source = {
@@ -165,8 +166,9 @@ mod tests {
             http_client: test_support::plain_client(),
             data_dir: data_dir.path().to_path_buf(),
             autosync_handle: Mutex::new(None),
-            zim_cache: crate::zim_server::ZimCache::new(),
             last_foreground_sync: std::sync::Mutex::new(None),
+            pending_update: Default::default(),
+            pending_linux_update: Default::default(),
         };
 
         let feed_url = format!("{base_url}/feed.xml");

@@ -1,5 +1,6 @@
 mod capture;
 mod commands;
+mod content_server;
 mod db;
 mod error;
 mod events;
@@ -11,13 +12,24 @@ mod state;
 mod sync;
 #[cfg(test)]
 mod test_support;
-mod zim_server;
+mod urlx;
 
 use std::time::Duration;
 
 use tauri::Manager;
 use tokio::sync::Mutex;
 
+use commands::update::update_channel;
+use commands::update::{
+    clear_github_token, get_last_dismissed_version, get_release_notes, has_github_token,
+    save_github_token, set_last_dismissed_version,
+};
+#[cfg(not(target_os = "android"))]
+use commands::update::{check_for_update, install_update};
+#[cfg(not(target_os = "android"))]
+use commands::update_linux::{linux_check_for_update, linux_install_kind, linux_install_update};
+#[cfg(all(target_os = "android", feature = "apk-self-update"))]
+use commands::update_android::{android_check_for_update, android_download_and_install};
 use state::AppState;
 
 const AUTOSYNC_INTERVAL: Duration = Duration::from_secs(15 * 60);
@@ -33,21 +45,33 @@ pub fn run() {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    let builder = tauri::Builder::default().plugin(tauri_plugin_opener::init());
+    let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_store::Builder::default().build())
+        .plugin(tauri_plugin_os::init());
+
+    #[cfg(not(target_os = "android"))]
+    let builder = builder
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init());
+
+    #[cfg(all(target_os = "android", feature = "apk-self-update"))]
+    let builder = builder.plugin(tauri_plugin_apk_installer::init());
 
     builder
-        // Serves archived pages out of an article's own ZIM file — see
-        // `zim_server`'s module docs. Runs the actual read on a plain OS
-        // thread, matching Tauri's own documented pattern for this API: a
-        // protocol handler can be invoked from a webview thread with no
-        // Tokio runtime entered on it, so `tokio::spawn`/`spawn_blocking`
-        // aren't safe to call here the way they are from inside a command.
-        .register_asynchronous_uri_scheme_protocol("zim", |ctx, request, responder| {
+        // Serves an article's own localized content images out of its
+        // `content/<id>/` directory — see `content_server`'s module docs.
+        // Runs the actual read on a plain OS thread, matching Tauri's own
+        // documented pattern for this API: a protocol handler can be
+        // invoked from a webview thread with no Tokio runtime entered on
+        // it, so `tokio::spawn`/`spawn_blocking` aren't safe to call here
+        // the way they are from inside a command.
+        .register_asynchronous_uri_scheme_protocol("legere-content", |ctx, request, responder| {
             let app_handle = ctx.app_handle().clone();
             let path = request.uri().path().to_string();
             std::thread::spawn(move || {
                 let state = app_handle.state::<AppState>();
-                responder.respond(zim_server::serve(state.inner(), &path));
+                responder.respond(content_server::serve(state.inner(), &path));
             });
         })
         .setup(|app| {
@@ -70,8 +94,13 @@ pub fn run() {
                 http_client: capture::fetch::build_client(),
                 data_dir,
                 autosync_handle: Mutex::new(None),
-                zim_cache: zim_server::ZimCache::new(),
                 last_foreground_sync: std::sync::Mutex::new(None),
+                #[cfg(not(target_os = "android"))]
+                pending_update: Default::default(),
+                #[cfg(not(target_os = "android"))]
+                pending_linux_update: Default::default(),
+                #[cfg(all(target_os = "android", feature = "apk-self-update"))]
+                pending_android_update: Default::default(),
             };
             app.manage(state);
 
@@ -123,6 +152,27 @@ pub fn run() {
             commands::settings::get_settings,
             commands::settings::update_settings,
             commands::system::get_data_dir,
+            save_github_token,
+            has_github_token,
+            clear_github_token,
+            get_last_dismissed_version,
+            set_last_dismissed_version,
+            get_release_notes,
+            update_channel,
+            #[cfg(not(target_os = "android"))]
+            check_for_update,
+            #[cfg(not(target_os = "android"))]
+            install_update,
+            #[cfg(not(target_os = "android"))]
+            linux_install_kind,
+            #[cfg(not(target_os = "android"))]
+            linux_check_for_update,
+            #[cfg(not(target_os = "android"))]
+            linux_install_update,
+            #[cfg(all(target_os = "android", feature = "apk-self-update"))]
+            android_check_for_update,
+            #[cfg(all(target_os = "android", feature = "apk-self-update"))]
+            android_download_and_install,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

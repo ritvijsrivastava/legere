@@ -97,18 +97,18 @@ export async function assetUrl(relativePath: string | null): Promise<string | nu
 	return convertFileSrc(`${dataDir}${separator}${relativePath}`);
 }
 
-/** The `legere-zim:/` token prefix capture writes into readable-view
+/** The `legere-content:/` token prefix capture writes into readable-view
  *  `content_html` (see `capture::rewrite` on the Rust side) — a
- *  platform-neutral placeholder since the real `zim://` URL shape differs
- *  across desktop and Android. */
-const ZIM_TOKEN_PREFIX = 'legere-zim:/';
+ *  platform-neutral placeholder since the real `legere-content://` URL
+ *  shape differs across desktop and Android. */
+const CONTENT_TOKEN_PREFIX = 'legere-content:/';
 
-/** Rewrites every `legere-zim:/<id>/<path>` token in `html` into a real,
- *  platform-correct `zim://` URL. Call once on an article's `content_html`
- *  before rendering it with `{@html}`. */
-export function resolveZimTokens(html: string): string {
-	const base = convertFileSrc('', 'zim');
-	return html.replaceAll(ZIM_TOKEN_PREFIX, base);
+/** Rewrites every `legere-content:/<id>/<path>` token in `html` into a
+ *  real, platform-correct `legere-content://` URL. Call once on an
+ *  article's `content_html` before rendering it with `{@html}`. */
+export function resolveContentTokens(html: string): string {
+	const base = convertFileSrc('', 'legere-content');
+	return html.replaceAll(CONTENT_TOKEN_PREFIX, base);
 }
 
 /** Tauri command errors reject with `{kind, message}` (see the Rust side's

@@ -98,8 +98,8 @@ pub async fn save_reading_progress(
     .await?
 }
 
-/// Deletes an article and its files (content ZIM + hero thumbnail, if
-/// any). Deleting an id that no longer exists is treated as success —
+/// Deletes an article and its files (content directory + hero thumbnail,
+/// if any). Deleting an id that no longer exists is treated as success —
 /// idempotent, so a double-click or a stale UI state can't surface an
 /// error for something that's already gone.
 #[tauri::command]
@@ -117,13 +117,10 @@ pub async fn delete_article(
     .await??;
 
     if let Some(files) = deleted {
-        if let Some(content_zim_path) = &files.content_zim_path {
-            let _ = tokio::fs::remove_file(state.data_dir.join(content_zim_path)).await;
-        }
+        let _ = tokio::fs::remove_dir_all(state.data_dir.join("content").join(&id)).await;
         if let Some(hero) = &files.hero_image_path {
             let _ = tokio::fs::remove_file(state.data_dir.join(hero)).await;
         }
-        state.zim_cache.evict(&id);
         events::emit_articles_changed(&app);
     }
 
@@ -131,7 +128,8 @@ pub async fn delete_article(
 }
 
 /// Re-runs the capture pipeline for an existing article against its
-/// already-stored link, refreshing the readable view/content zim locally.
+/// already-stored link, refreshing the readable view/content images
+/// locally.
 #[tauri::command]
 pub async fn recapture_article(
     app: AppHandle,
@@ -163,10 +161,6 @@ pub async fn recapture_article(
     })
     .await??;
 
-    // The content zim at this article's path was just overwritten — a
-    // cached reader from before the recapture must not keep serving
-    // stale content.
-    state.zim_cache.evict(&id);
     events::emit_articles_changed(&app);
 
     let pool = state.pool.clone();

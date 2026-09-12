@@ -1,15 +1,20 @@
 # Legere
 
 A local-first, offline-first article reader. Add RSS feeds or paste a
-direct link; Legere extracts a readable version, cleans tracking params
-off the link, and stores that readable view's own images in a small,
-self-contained ZIM file so it stays readable with no network at all. The
-original page itself is never archived — "view original" just opens the
-live link in your browser.
+direct link; Legere extracts a readable version (via `dom_smoothie`,
+a Rust port of Mozilla's Readability), cleans tracking params off the
+link, and localizes that readable view's own images into a plain
+per-article directory (`content/<id>/`) so it stays readable with no
+network at all. The original page itself is never archived — "view
+original" just opens the live link in your browser.
 
-Built with Tauri 2 (Rust) + SvelteKit (Svelte 5 runes), SQLite storage,
-and the [wraith](../wraith) crates (sanitize/asset-localize/ZIM) as path
-dependencies. See `PLAN.md` for the phase-by-phase remodel history.
+Built with Tauri 2 (Rust) + SvelteKit (Svelte 5 runes), SQLite storage.
+The HTML sanitizer, SSRF guard, and URL/local-path utilities were
+originally sourced from the [wraith](../wraith) workspace but are now
+vendored directly into `src-tauri/src/` (see `capture::sanitize`,
+`capture::ssrf`, `urlx`) rather than depended on — legere has no ZIM
+archiving and no wraith path dependency. See `PLAN.md` for the
+phase-by-phase remodel history.
 
 ## Desktop
 

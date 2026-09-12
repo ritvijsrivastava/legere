@@ -19,22 +19,18 @@ const PHOTO_JPG: &[u8] = include_bytes!("../tests/fixtures/photo.jpg");
 /// Starts the fixture server on an OS-assigned loopback port and returns
 /// its base URL, e.g. `http://localhost:54321` — deliberately `localhost`
 /// rather than the literal `127.0.0.1` the socket is actually bound to:
-/// `wraith_assets::fetch_one` has its own pre-flight SSRF check
-/// (independent of which `reqwest::Client` is used) that rejects a URL
-/// naming a literal loopback/private IP whenever `FetchPolicy`'s
-/// `allow_private_network` is `false` — which `capture::localize` always
-/// passes, correctly, for real captures. `localhost` isn't a *literal* IP
-/// string, so it sails past that syntactic check and resolves normally
-/// via the OS resolver; this is the same trick wraith's own
-/// `assets/tests/live_localize.rs` fixture server uses for exactly this
-/// reason.
+/// `capture::localize`'s fetch has its own pre-flight SSRF check (see
+/// `capture::ssrf::literal_ip_is_blocked`) that rejects a URL naming a
+/// literal loopback/private IP. `localhost` isn't a *literal* IP string,
+/// so it sails past that syntactic check and resolves normally via the OS
+/// resolver.
 ///
 /// The server task is intentionally never joined — it simply runs for the
 /// rest of the test binary's process lifetime, which is fine for a
 /// short-lived test run.
 ///
 /// A plain (non-SSRF-guarded) `reqwest::Client` must still be used against
-/// this server for the *page* fetch: `wraith_assets::ssrf_guarded_client_builder`'s
+/// this server for the *page* fetch: `capture::ssrf::ssrf_guarded_client_builder`'s
 /// custom DNS resolver would otherwise block `localhost` at the
 /// connection level regardless of the literal-IP check above.
 pub(crate) async fn spawn() -> String {

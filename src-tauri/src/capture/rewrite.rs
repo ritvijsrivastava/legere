@@ -2,13 +2,14 @@ use std::collections::HashMap;
 
 use lol_html::{RewriteStrSettings, element, errors::RewritingError, rewrite_str};
 use url::Url;
-use wraith_urlx::LocalPath;
+
+use crate::urlx::LocalPath;
 
 /// Rewrites `img`/`source`/`video` asset references in an already-sanitized
-/// readable-content fragment to `legere-zim:/<article_id>/<local_path>`
-/// tokens, using the same URL -> [`LocalPath`] resolution `wraith_assets`
-/// built while localizing the full page into the article's ZIM archive
-/// (see [`crate::capture::localize::localize_page`]).
+/// readable-content fragment to `legere-content:/<article_id>/<local_path>`
+/// tokens, using the URL -> [`LocalPath`] resolution
+/// [`super::localize::localize_content`] built while fetching and saving
+/// this article's own content images.
 ///
 /// `content_html` is a bare content fragment (Readability's output, not a
 /// full `<html>` document), so this runs `rewrite_str` directly over it
@@ -17,8 +18,7 @@ use wraith_urlx::LocalPath;
 /// A reference whose resolved URL has no entry in `url_map` (the asset
 /// fetch failed, or Readability's DOM transform introduced a URL never
 /// discovered on the raw page) is left pointing at its original remote
-/// URL — the same graceful-degradation behavior
-/// `wraith_assets::rewrite_html_assets` uses for the full-page rewrite.
+/// URL — a graceful-degradation fallback rather than a broken local link.
 pub fn rewrite_readable_asset_urls(
     content_html: &str,
     base: &Url,
@@ -60,12 +60,13 @@ pub fn rewrite_readable_asset_urls(
 }
 
 /// Resolves a raw HTML attribute value against `base`, returning `None`
-/// for values that can never be a localizable asset reference. Mirrors
-/// `wraith_assets`'s own (private) `resolve_asset_reference`: HTML
+/// for values that can never be a localizable asset reference: HTML
 /// entities must be decoded before resolution — `get_attribute` returns
 /// the raw, still-encoded attribute text — and only `http`/`https`
 /// results are ever meaningful lookups into a `url_map` built the same
-/// way.
+/// way. Also reused by [`super::localize::discover_references`], so
+/// discovery and rewriting can never disagree about what a reference
+/// resolves to.
 ///
 /// Exposed at `pub(crate)` so [`crate::capture`]'s pipeline can reuse the
 /// exact same resolution when looking up the hero image among
@@ -91,7 +92,22 @@ fn rewrite_reference(
 ) -> Option<String> {
     let url = resolve_reference(raw, base)?;
     let local = url_map.get(&url)?;
-    Some(format!("legere-zim:/{article_id}/{}", local.as_str()))
+    Some(format!("legere-content:/{article_id}/{}", local.as_str()))
+}
+
+/// Splits a `srcset` attribute value into its comma-separated entries,
+/// yielding just each entry's URL part (its width/pixel-density
+/// descriptor, if any, dropped) — shared between [`rewrite_srcset`]
+/// (rewriting) and [`super::localize`] (discovering what to fetch), so the
+/// two passes can never disagree about which URLs a `srcset` references.
+pub(crate) fn srcset_url_parts(raw: &str) -> impl Iterator<Item = &str> {
+    raw.split(',').map(|entry| {
+        entry
+            .trim()
+            .splitn(2, char::is_whitespace)
+            .next()
+            .unwrap_or("")
+    })
 }
 
 /// Rewrites every URL in a `srcset` attribute value, preserving each
@@ -126,7 +142,7 @@ fn rewrite_srcset(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wraith_urlx::{canonicalize, local_path_for};
+    use crate::urlx::{canonicalize, local_path_for};
 
     fn base() -> Url {
         Url::parse("https://example.com/article").unwrap()
@@ -137,7 +153,7 @@ mod tests {
     }
 
     #[test]
-    fn rewrites_img_src_to_legere_zim_token() {
+    fn rewrites_img_src_to_legere_content_token() {
         let mut url_map = HashMap::new();
         url_map.insert(
             Url::parse("https://example.com/hero.jpg").unwrap(),
@@ -153,7 +169,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             out,
-            r#"<img src="legere-zim:/article-1/https/example.com/hero.jpg">"#
+            r#"<img src="legere-content:/article-1/https/example.com/hero.jpg">"#
         );
     }
 
@@ -190,11 +206,11 @@ mod tests {
         )
         .unwrap();
         assert!(
-            out.contains("legere-zim:/article-1/https/example.com/a.png 1x"),
+            out.contains("legere-content:/article-1/https/example.com/a.png 1x"),
             "got: {out}"
         );
         assert!(
-            out.contains("legere-zim:/article-1/https/example.com/b.png 2x"),
+            out.contains("legere-content:/article-1/https/example.com/b.png 2x"),
             "got: {out}"
         );
     }
@@ -215,7 +231,7 @@ mod tests {
         )
         .unwrap();
         assert!(
-            out.contains(r#"poster="legere-zim:/article-1/https/example.com/poster.jpg""#),
+            out.contains(r#"poster="legere-content:/article-1/https/example.com/poster.jpg""#),
             "got: {out}"
         );
     }

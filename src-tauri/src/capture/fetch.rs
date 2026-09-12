@@ -17,9 +17,9 @@ pub struct FetchedPage {
     pub html: String,
 }
 
-/// Fetches `url` through the SSRF-guarded client shared with `wraith-assets`,
-/// following redirects and returning the final resolved URL alongside the raw
-/// HTML body.
+/// Fetches `url` through the SSRF-guarded client (see [`super::ssrf`]),
+/// following redirects and returning the final resolved URL alongside the
+/// raw HTML body.
 pub async fn fetch_page(client: &reqwest::Client, url: &str) -> Result<FetchedPage, FetchError> {
     let response = client.get(url).send().await?;
     let final_url = response.url().clone();
@@ -32,7 +32,7 @@ pub async fn fetch_page(client: &reqwest::Client, url: &str) -> Result<FetchedPa
 }
 
 pub fn build_client() -> reqwest::Client {
-    wraith_assets::ssrf_guarded_client_builder()
+    super::ssrf::ssrf_guarded_client_builder()
         .build()
         .expect("SSRF-guarded reqwest client builder should always be constructible")
 }

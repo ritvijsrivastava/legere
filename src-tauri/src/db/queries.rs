@@ -57,7 +57,7 @@ pub fn article_link_exists(conn: &Connection, link: &str) -> rusqlite::Result<bo
 }
 
 /// Inserts a freshly captured article under the given `id` (the same id
-/// `capture_local` was called with, since that's what its content-zim/
+/// `capture_local` was called with, since that's what its content/
 /// hero-image file paths are named after). `source_id` is `None` for
 /// direct-link captures (they aren't tied to a recurring source).
 ///
@@ -80,9 +80,9 @@ pub fn insert_captured_article(
         "INSERT OR IGNORE INTO articles (
             id, source_id, source_name, source_type, title, link, excerpt,
             content_html, hero_image_path, published_at, fetched_at,
-            read_time_min, favorited, content_zim_path,
+            read_time_min, favorited,
             extraction_confident, tags, updated_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 0, ?13, ?14, ?15, ?16)",
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 0, ?13, ?14, ?15)",
         params![
             id,
             source_id,
@@ -96,7 +96,6 @@ pub fn insert_captured_article(
             output.published_at,
             now,
             output.read_time_min,
-            output.content_zim_path,
             output.extraction_confident,
             tags_to_json(tags),
             now,
@@ -113,18 +112,14 @@ pub fn insert_captured_article(
 
 /// Overwrites an existing article's *readable* content in place, for
 /// `recapture_article` — re-running the local capture pipeline against the
-/// same id (and thus the same on-disk content-zim/hero-image paths, which
-/// the caller has already overwritten by this point). `reading_state`/
+/// same id (and thus the same on-disk content/hero-image paths, which the
+/// caller has already overwritten by this point). `reading_state`/
 /// `favorited`/`reading_progress` are deliberately left untouched: a
 /// re-capture refreshes the *content*, not the reader's relationship to
 /// it. `link` is updated too — if that collides with another article's
 /// `UNIQUE(link)`, this fails with a constraint error rather than
 /// silently corrupting either row, which is the right outcome for a
 /// manual, occasional action.
-///
-/// The caller is responsible for evicting any stale content-zim cache
-/// entry (the on-disk file at this id's `content_zim_path` was already
-/// overwritten by this point).
 pub fn update_captured_article(
     conn: &Connection,
     id: &str,
@@ -134,8 +129,8 @@ pub fn update_captured_article(
         "UPDATE articles SET
             title = ?2, link = ?3, excerpt = ?4, content_html = ?5,
             hero_image_path = ?6, published_at = ?7, read_time_min = ?8,
-            content_zim_path = ?9, extraction_confident = ?10,
-            updated_at = ?11
+            extraction_confident = ?9,
+            updated_at = ?10
          WHERE id = ?1",
         params![
             id,
@@ -146,7 +141,6 @@ pub fn update_captured_article(
             output.hero_image_path,
             output.published_at,
             output.read_time_min,
-            output.content_zim_path,
             output.extraction_confident,
             Utc::now().to_rfc3339(),
         ],
@@ -209,18 +203,15 @@ pub fn get_article_summary_by_link(
     .optional()
 }
 
-/// An article's persistent, never-evicted content zim path (relative to
-/// `data_dir`), nullable. Looking this up by id doubles as the `zim://`
-/// protocol handler's traversal guard — only an id that's actually a
-/// stored article's row resolves to a real file, so an arbitrary/forged
-/// id in a `zim://` request can't reach any other file under `content/`.
-pub fn get_article_content_zim_path(conn: &Connection, id: &str) -> rusqlite::Result<Option<Option<String>>> {
-    conn.query_row(
-        "SELECT content_zim_path FROM articles WHERE id = ?1",
-        params![id],
-        |row| row.get(0),
-    )
-    .optional()
+/// Whether `id` names a real, currently-stored article row — the
+/// `legere-content://` protocol handler's traversal guard (see
+/// `content_server::serve`): only an id that's actually a stored
+/// article's row resolves to a real file, so an arbitrary/forged id in a
+/// request can't reach any other file under `content/`.
+pub fn article_exists(conn: &Connection, id: &str) -> rusqlite::Result<bool> {
+    conn.query_row("SELECT 1 FROM articles WHERE id = ?1", params![id], |_| Ok(()))
+        .optional()
+        .map(|r| r.is_some())
 }
 
 /// Persists the reader's scroll-fraction progress for an article, called
@@ -233,11 +224,9 @@ pub fn save_reading_progress(conn: &Connection, id: &str, progress: f64) -> rusq
     Ok(())
 }
 
-/// On-disk file paths (relative to `data_dir`) an about-to-be-deleted
-/// article owns, so the caller can remove them after the row itself is
-/// gone.
+/// On-disk file/directory paths an about-to-be-deleted article owns, so
+/// the caller can remove them after the row itself is gone.
 pub struct DeletedArticleFiles {
-    pub content_zim_path: Option<String>,
     pub hero_image_path: Option<String>,
 }
 
@@ -248,22 +237,25 @@ pub struct DeletedArticleFiles {
 /// (`ON DELETE SET NULL` — read-later semantics: removing a feed doesn't
 /// discard what you already saved from it), so this is the only path that
 /// ever deletes an article row.
+///
+/// The caller is also responsible for removing this id's `content/<id>/`
+/// directory — deterministic by id, so it isn't tracked in the returned
+/// struct the way `hero_image_path` (which varies) needs to be.
 pub fn delete_article(conn: &Connection, id: &str) -> rusqlite::Result<Option<DeletedArticleFiles>> {
     let row = conn
         .query_row(
-            "SELECT source_id, content_zim_path, hero_image_path FROM articles WHERE id = ?1",
+            "SELECT source_id, hero_image_path FROM articles WHERE id = ?1",
             params![id],
             |row| {
                 Ok((
                     row.get::<_, Option<String>>("source_id")?,
-                    row.get::<_, Option<String>>("content_zim_path")?,
                     row.get::<_, Option<String>>("hero_image_path")?,
                 ))
             },
         )
         .optional()?;
 
-    let Some((source_id, content_zim_path, hero_image_path)) = row else {
+    let Some((source_id, hero_image_path)) = row else {
         return Ok(None);
     };
 
@@ -276,32 +268,38 @@ pub fn delete_article(conn: &Connection, id: &str) -> rusqlite::Result<Option<De
         )?;
     }
 
-    Ok(Some(DeletedArticleFiles {
-        content_zim_path,
-        hero_image_path,
-    }))
+    Ok(Some(DeletedArticleFiles { hero_image_path }))
 }
 
-/// Every `content_zim_path`/`hero_image_path` currently referenced by a
-/// live article row — the startup orphan sweep (`gc::sweep_orphaned_files`)
-/// diffs this against what's actually on disk under `content/`/`media/`
-/// and removes whatever isn't in this set.
-pub fn list_referenced_files(conn: &Connection) -> rusqlite::Result<HashSet<String>> {
-    let mut stmt = conn.prepare("SELECT content_zim_path, hero_image_path FROM articles")?;
+/// Every live article's id, plus every `hero_image_path` currently
+/// referenced — the startup orphan sweep (`gc::sweep_orphaned_files`)
+/// diffs this against what's actually on disk under `content/`/`media/`:
+/// a `content/<id>/` directory survives only if `<id>` is in
+/// `live_article_ids`, a flat `media/` file only if it's in
+/// `hero_image_paths`.
+pub struct ReferencedFiles {
+    pub live_article_ids: HashSet<String>,
+    pub hero_image_paths: HashSet<String>,
+}
+
+pub fn list_referenced_files(conn: &Connection) -> rusqlite::Result<ReferencedFiles> {
+    let mut stmt = conn.prepare("SELECT id, hero_image_path FROM articles")?;
     let rows = stmt.query_map([], |row| {
-        Ok((
-            row.get::<_, Option<String>>(0)?,
-            row.get::<_, Option<String>>(1)?,
-        ))
+        Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
     })?;
-    let mut referenced = HashSet::new();
+    let mut live_article_ids = HashSet::new();
+    let mut hero_image_paths = HashSet::new();
     for row in rows {
-        let (content_zim_path, hero_image_path) = row?;
-        for path in [content_zim_path, hero_image_path].into_iter().flatten() {
-            referenced.insert(path);
+        let (id, hero_image_path) = row?;
+        live_article_ids.insert(id);
+        if let Some(path) = hero_image_path {
+            hero_image_paths.insert(path);
         }
     }
-    Ok(referenced)
+    Ok(ReferencedFiles {
+        live_article_ids,
+        hero_image_paths,
+    })
 }
 
 /// Transitions an article into `reading` — called when the reader opens
@@ -542,7 +540,6 @@ mod tests {
             published_at: None,
             read_time_min: 3,
             hero_image_path: None,
-            content_zim_path: "content/x.zim".to_string(),
             extraction_confident: true,
         }
     }
@@ -586,7 +583,6 @@ mod tests {
         assert_eq!(get_source(&conn, &source.id).unwrap().unwrap().article_count, 1);
 
         let deleted = delete_article(&conn, "art-1").unwrap().expect("row existed");
-        assert_eq!(deleted.content_zim_path.as_deref(), Some("content/x.zim"));
         assert_eq!(deleted.hero_image_path, None);
 
         assert!(get_article(&conn, "art-1").unwrap().is_none());

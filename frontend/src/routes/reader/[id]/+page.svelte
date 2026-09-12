@@ -79,7 +79,7 @@
 		});
 	});
 
-	let resolvedContentHtml = $derived(article ? api.resolveZimTokens(article.content_html) : '');
+	let resolvedContentHtml = $derived(article ? api.resolveContentTokens(article.content_html) : '');
 	let minutesLeft = $derived(
 		article ? Math.max(1, Math.round(article.read_time_min * (1 - scrollProgress))) : 0
 	);

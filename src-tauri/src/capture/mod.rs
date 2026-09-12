@@ -4,26 +4,25 @@ pub mod fetch;
 pub mod hero_image;
 pub mod localize;
 pub mod rewrite;
+pub mod sanitize;
+mod ssrf;
 
 use std::path::Path;
 
 use thiserror::Error;
-use wraith_urlx::{canonicalize, strip_tracking_params};
 
+use crate::urlx::{canonicalize, strip_tracking_params};
 use fetch::FetchError;
+use localize::LocalizeError;
 
 #[derive(Debug, Error)]
 pub enum CaptureError {
     #[error(transparent)]
     Fetch(#[from] FetchError),
-    #[error("failed to sanitize captured HTML: {0}")]
-    Sanitize(#[from] wraith_sanitize::SanitizeError),
-    #[error("failed to localize page assets: {0}")]
-    Localize(#[from] wraith_assets::AssetsError),
+    #[error("failed to localize content images: {0}")]
+    Localize(#[from] LocalizeError),
     #[error("failed to rewrite readable content: {0}")]
     Rewrite(#[from] lol_html::errors::RewritingError),
-    #[error("failed to write ZIM archive: {0}")]
-    Zim(#[from] wraith_zim::ZimError),
     #[error("filesystem error: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -31,7 +30,7 @@ pub enum CaptureError {
 /// Everything needed to insert a freshly captured article into SQLite. Both
 /// the RSS-poll path and the direct-link-submit path converge on
 /// [`capture_local`] so they share one
-/// fetch->extract->sanitize->localize->content-zim pipeline. There is no
+/// fetch->extract->sanitize->localize->store pipeline. There is no
 /// full-page archive of the original site — offline reading is the
 /// readable view above, and the original page is always just a plain
 /// link out to the live site (see `link`).
@@ -52,16 +51,14 @@ pub struct LocalCaptureOutput {
     pub final_url: String,
     pub excerpt: String,
     /// Readable-view HTML: sanitized, with image references rewritten to
-    /// `legere-zim:/<id>/<path>` tokens that resolve into this article's
-    /// own content zim (see [`rewrite::rewrite_readable_asset_urls`]).
+    /// `legere-content:/<id>/<path>` tokens that resolve into this
+    /// article's own `content/<id>/` directory (see
+    /// [`rewrite::rewrite_readable_asset_urls`]).
     pub content_html: String,
     pub published_at: Option<String>,
     pub read_time_min: i64,
     /// Relative to `data_dir`, e.g. `media/<id>.jpg`.
     pub hero_image_path: Option<String>,
-    /// Relative to `data_dir`, e.g. `content/<id>.zim`. Holds only the
-    /// images `content_html` references — persistent, never evicted.
-    pub content_zim_path: String,
     /// `false` when extraction fell back to naive extraction — the
     /// readable view may be lower quality for such an article.
     pub extraction_confident: bool,
@@ -69,16 +66,17 @@ pub struct LocalCaptureOutput {
 
 /// Fast local capture: fetch -> readability extraction -> sanitize ->
 /// localize *only the assets the readable content references* -> write
-/// the small, persistent content zim -> rewrite readable HTML to point
-/// into it. `id` is the article's pre-generated uuid, used to name its
-/// on-disk files. `data_dir` is `{app_local_data_dir}/legere`; `media/`
-/// and `content/` subdirectories are created if missing.
+/// them to this article's own `content/<id>/` directory -> rewrite
+/// readable HTML to point into it. `id` is the article's pre-generated
+/// uuid, used to name its on-disk files. `data_dir` is
+/// `{app_local_data_dir}/legere`; `media/` and `content/` subdirectories
+/// are created if missing.
 ///
 /// `client` is used both for fetching the page itself and for every asset
-/// fetch downstream — hero image resize, and anything `wraith_assets`
-/// still needs to fetch while localizing the content fragment. Every
-/// request this function makes therefore goes through `client`'s own SSRF
-/// guard (see `fetch::build_client`).
+/// fetch downstream — hero image resize, and anything [`localize`] still
+/// needs to fetch while localizing the content fragment. Every request
+/// this function makes therefore goes through `client`'s own SSRF guard
+/// (see `fetch::build_client`).
 pub async fn capture_local(
     client: &reqwest::Client,
     data_dir: &Path,
@@ -87,7 +85,7 @@ pub async fn capture_local(
 ) -> Result<LocalCaptureOutput, CaptureError> {
     let page = fetch::fetch_page(client, url).await?;
     let extracted = extract::extract(&page.html, page.final_url.as_str());
-    let sanitized_content = wraith_sanitize::sanitize(&extracted.content_html)?;
+    let sanitized_content = sanitize::sanitize(&extracted.content_html).map_err(CaptureError::Rewrite)?;
 
     let localized = localize::localize_content(client, &sanitized_content, &page.final_url).await?;
 
@@ -95,9 +93,8 @@ pub async fn capture_local(
     let cleaned_link = strip_tracking_params(canonical_final_url.as_url()).to_string();
 
     let media_dir = data_dir.join("media");
-    let content_dir = data_dir.join("content");
+    let content_dir = data_dir.join("content").join(id);
     tokio::fs::create_dir_all(&media_dir).await?;
-    tokio::fs::create_dir_all(&content_dir).await?;
 
     let hero_image_path = match &extracted.hero_image_url {
         Some(hero_url) => {
@@ -135,14 +132,7 @@ pub async fn capture_local(
         &localized.url_map,
     )?;
 
-    let content_zim_rel_path = format!("content/{id}.zim");
-    let content_zim_abs_path = data_dir.join(&content_zim_rel_path);
-    let content_zim_id = id.to_string();
-    tokio::task::spawn_blocking(move || {
-        archive::write_content_zim(&content_zim_abs_path, &content_zim_id, &localized)
-    })
-    .await
-    .expect("content zim writer task panicked")?;
+    archive::write_content_files(&content_dir, &localized).await?;
 
     Ok(LocalCaptureOutput {
         title: extracted.title,
@@ -153,7 +143,6 @@ pub async fn capture_local(
         published_at: extracted.published_at,
         read_time_min: extracted.read_time_min,
         hero_image_path,
-        content_zim_path: content_zim_rel_path,
         extraction_confident: extracted.extraction_confident,
     })
 }
@@ -165,14 +154,13 @@ mod tests {
 
     /// Exercises the real local-capture pipeline end-to-end against a
     /// local fixture server (no live network): fetch -> extract ->
-    /// sanitize -> scoped localize -> content-zim write -> rewrite
-    /// readable HTML -> read the content zim back. The key assertion this
-    /// pipeline split exists to prove: the content zim contains only the
+    /// sanitize -> scoped localize -> content write -> rewrite readable
+    /// HTML -> read the content files back. The key assertion this
+    /// pipeline split exists to prove: `content/<id>/` contains only the
     /// images the readable fragment actually references (`photo.jpg`) and
     /// *not* page-level assets the readable view never touches
     /// (`style.css`) — confirming `capture_local` really did narrow the
-    /// fetch set down from the old whole-page localization, not just
-    /// rename it.
+    /// fetch set down to just what's shown, not the whole page.
     #[tokio::test]
     async fn captures_only_the_readable_content_and_its_own_images() {
         let data_dir = tempfile::tempdir().expect("tempdir");
@@ -193,10 +181,10 @@ mod tests {
         );
         assert_eq!(output.final_url, url, "final_url should be the post-redirect fetched URL");
 
-        // The readable view must reference the photo via a legere-zim
+        // The readable view must reference the photo via a legere-content
         // token, never the fixture server directly.
         assert!(
-            output.content_html.contains("legere-zim:/test-article/"),
+            output.content_html.contains("legere-content:/test-article/"),
             "got: {}",
             output.content_html
         );
@@ -206,31 +194,22 @@ mod tests {
             output.content_html
         );
 
-        let content_zim_path = data_dir.path().join(&output.content_zim_path);
-        assert!(content_zim_path.exists(), "content ZIM file should exist on disk");
-        let reader =
-            wraith_zim::ZimReader::open(&content_zim_path).expect("content ZIM should be readable back");
-
-        let zim_local_path = |url_str: &str| -> String {
+        let content_dir = data_dir.path().join("content/test-article");
+        let local_path = |url_str: &str| -> String {
             let url = url::Url::parse(url_str).unwrap();
-            wraith_urlx::local_path_for(&wraith_urlx::canonicalize(&url)).as_str().to_string()
+            crate::urlx::local_path_for(&crate::urlx::canonicalize(&url)).as_str().to_string()
         };
 
-        let photo_path = format!("C{}", zim_local_path(&format!("{base_url}/photo.jpg")));
-        let (photo_bytes, photo_mime) = reader
-            .get_entry_by_full_path(&photo_path)
-            .expect("reading photo should not error")
-            .expect("photo entry should be present — the readable content references it");
-        assert_eq!(photo_mime, "image/jpeg");
+        let photo_path = content_dir.join(local_path(&format!("{base_url}/photo.jpg")));
+        let photo_bytes = tokio::fs::read(&photo_path)
+            .await
+            .expect("photo should be present on disk — the readable content references it");
         assert!(!photo_bytes.is_empty());
 
-        let css_path = format!("C{}", zim_local_path(&format!("{base_url}/style.css")));
-        let css_entry = reader
-            .get_entry_by_full_path(&css_path)
-            .expect("reading stylesheet lookup should not error");
+        let css_path = content_dir.join(local_path(&format!("{base_url}/style.css")));
         assert!(
-            css_entry.is_none(),
-            "content zim must not contain page-level assets the readable view never references"
+            !css_path.exists(),
+            "content dir must not contain page-level assets the readable view never references"
         );
 
         // Capturing the same (cleaned) link again must be a dedup no-op

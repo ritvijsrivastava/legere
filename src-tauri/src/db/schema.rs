@@ -300,8 +300,28 @@ const V5: &str = "
 ALTER TABLE articles ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';
 ";
 
+// Drops `content_zim_path`: content images are no longer packed into a
+// per-article ZIM archive (see `capture::archive`), just written as plain
+// files under `content/<id>/` — a path convention, not something that
+// needs its own column. `content/<id>/` is served by the `legere-content`
+// protocol (`content_server.rs`), which validates `<id>` against the
+// `articles` table directly rather than reading this column.
+//
+// Existing rows' `content_html` still has `legere-zim:/<id>/<path>` tokens
+// pointing at the old (now-defunct) `zim://` protocol, and their
+// `content/<id>.zim` files are now orphans. Left broken rather than
+// migrated: this is a personal, pre-remodel database, same call V2's
+// dup-collapse and V4's `zim_path` drop already made, rather than
+// engineered around with a migration-time re-fetch of every old article's
+// images. `gc::sweep_orphaned_files` still removes the stale `.zim` files
+// themselves (see its own updated sweep logic) — they just aren't
+// re-localized into the new format.
+const V6: &str = "
+ALTER TABLE articles DROP COLUMN content_zim_path;
+";
+
 pub fn migrations() -> Migrations<'static> {
-    Migrations::new(vec![M::up(V1), M::up(V2), M::up(V3), M::up(V4), M::up(V5)])
+    Migrations::new(vec![M::up(V1), M::up(V2), M::up(V3), M::up(V4), M::up(V5), M::up(V6)])
 }
 
 pub fn migrate(conn: &mut Connection) -> Result<(), rusqlite_migration::Error> {
@@ -480,11 +500,13 @@ mod tests {
     /// (`zim_path`, `archive_source`, `archive_status`, ...) entirely —
     /// the app no longer stores a server-captured full-page snapshot at
     /// all, only the readable view (and its own small, persistent
-    /// `content_zim_path`, which this proves survives untouched).
+    /// `content_zim_path`, which this proves survives V4 specifically —
+    /// V6 is what eventually drops that one too, see
+    /// `v6_drops_content_zim_path_column`).
     #[test]
     fn v4_drops_full_archive_columns_but_keeps_content_zim_path() {
         let mut conn = v2_conn_with_test_data();
-        migrate(&mut conn).expect("migrate to latest");
+        migrations().to_version(&mut conn, 4).expect("migrate to V4");
 
         let content_zim_path: Option<String> = conn
             .query_row(
@@ -533,6 +555,22 @@ mod tests {
             .query_row("SELECT tags FROM articles WHERE id = 'art-unread'", [], |row| row.get(0))
             .unwrap();
         assert_eq!(tags, "[]");
+    }
+
+    #[test]
+    fn v6_drops_content_zim_path_column() {
+        let mut conn = v2_conn_with_test_data();
+        migrate(&mut conn).expect("migrate to latest");
+
+        let column_gone = conn.query_row(
+            "SELECT content_zim_path FROM articles WHERE id = 'art-unread'",
+            [],
+            |row| row.get::<_, Option<String>>(0),
+        );
+        assert!(
+            column_gone.is_err(),
+            "content_zim_path column should no longer exist after V6"
+        );
     }
 
     #[test]
