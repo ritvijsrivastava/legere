@@ -51,6 +51,13 @@ export interface Source {
 	created_at: string;
 }
 
+/** Result of `add_source_auto`: the backend fetches the submitted URL once
+ *  and sniffs whether it's a feed or a plain page, so the frontend never
+ *  asks the user to choose up front. */
+export type AddSourceAutoResult =
+	| { kind: 'rss'; value: Source }
+	| { kind: 'direct'; value: ArticleSummary };
+
 export interface Settings {
 	default_font_size: FontSize;
 	default_library_view: LibraryView;

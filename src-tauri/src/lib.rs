@@ -145,6 +145,7 @@ pub fn run() {
             commands::articles::add_direct_link_article,
             commands::sources::list_sources,
             commands::sources::add_source,
+            commands::sources::add_source_auto,
             commands::sources::toggle_source_pause,
             commands::sources::remove_source,
             commands::sources::sync_source,

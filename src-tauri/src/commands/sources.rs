@@ -3,7 +3,7 @@ use tauri::{AppHandle, State};
 use crate::db::queries;
 use crate::error::AppError;
 use crate::events::{self, SyncError, SyncFinished};
-use crate::models::{Source, SyncResult};
+use crate::models::{AddSourceAutoResult, Source, SyncResult};
 use crate::sources::rss;
 use crate::state::AppState;
 use crate::sync::sync_all_sources;
@@ -30,29 +30,73 @@ pub async fn add_source(
     value: String,
 ) -> Result<Source, AppError> {
     match source_type.as_str() {
-        "rss" => {
-            let pool = state.pool.clone();
-            let feed_url = value;
-            let name = feed_url.clone();
-            let source = tokio::task::spawn_blocking(move || {
-                let conn = pool.get()?;
-                Ok::<_, AppError>(queries::insert_rss_source(&conn, &name, &feed_url)?)
-            })
-            .await??;
-
-            if let Err(err) = sync_source_by_id(&app, &state, &source.id).await {
-                tracing::warn!(source_id = %source.id, %err, "initial sync after add_source failed");
-            }
-
-            let pool = state.pool.clone();
-            let id = source.id.clone();
-            tokio::task::spawn_blocking(move || {
-                let conn = pool.get()?;
-                queries::get_source(&conn, &id)?.ok_or_else(|| AppError::not_found("source"))
-            })
-            .await?
-        }
+        "rss" => insert_rss_source_and_sync(&app, &state, value).await,
         other => Err(AppError::Internal(format!("unknown source type: {other}"))),
+    }
+}
+
+/// Shared by `add_source("rss", ...)` and `add_source_auto`'s feed branch:
+/// registers the recurring source, runs its first sync inline (best-effort
+/// — a failure here just leaves the source in its error state rather than
+/// failing the add), and returns the row as stored.
+async fn insert_rss_source_and_sync(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+    feed_url: String,
+) -> Result<Source, AppError> {
+    let pool = state.pool.clone();
+    let name = feed_url.clone();
+    let source = tokio::task::spawn_blocking(move || {
+        let conn = pool.get()?;
+        Ok::<_, AppError>(queries::insert_rss_source(&conn, &name, &feed_url)?)
+    })
+    .await??;
+
+    if let Err(err) = sync_source_by_id(app, state, &source.id).await {
+        tracing::warn!(source_id = %source.id, %err, "initial sync after add_source failed");
+    }
+
+    let pool = state.pool.clone();
+    let id = source.id.clone();
+    tokio::task::spawn_blocking(move || {
+        let conn = pool.get()?;
+        queries::get_source(&conn, &id)?.ok_or_else(|| AppError::not_found("source"))
+    })
+    .await?
+}
+
+/// Single entry point for the "Add a source" dialog: the user pastes one
+/// URL with no up-front RSS-vs-article choice, and this sniffs which it is
+/// by fetching it once and trying to parse it as a feed. A parse failure
+/// isn't distinguished from "is a webpage, not a feed" — both fall back
+/// to the direct-link capture path, which is exactly the behavior a plain
+/// article URL needs anyway.
+#[tauri::command]
+pub async fn add_source_auto(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    value: String,
+) -> Result<AddSourceAutoResult, AppError> {
+    let value = value.trim().to_string();
+    let bytes = state
+        .http_client
+        .get(&value)
+        .send()
+        .await
+        .map_err(|e| AppError::Network(e.to_string()))?
+        .bytes()
+        .await
+        .map_err(|e| AppError::Network(e.to_string()))?;
+
+    if feed_rs::parser::parse(&bytes[..]).is_ok() {
+        let source = insert_rss_source_and_sync(&app, &state, value).await?;
+        Ok(AddSourceAutoResult::Rss(source))
+    } else {
+        let article = crate::sources::direct_link::capture_direct_link(&state, &value)
+            .await
+            .map_err(AppError::from)?;
+        events::emit_articles_changed(&app);
+        Ok(AddSourceAutoResult::Direct(article))
     }
 }
 

@@ -96,6 +96,19 @@ pub struct SyncResult {
     pub new_article_count: u32,
 }
 
+/// Result of `add_source_auto`, which sniffs a user-submitted URL rather
+/// than asking them to pick RSS-feed vs. article-link up front: a feed
+/// registers a recurring `Source`, anything else is captured once as a
+/// standalone article. `kind` lets the frontend branch (navigate into the
+/// reader for `direct`, stay on the sources list for `rss`) without
+/// re-deriving it from shape.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+pub enum AddSourceAutoResult {
+    Rss(Source),
+    Direct(ArticleSummary),
+}
+
 /// Metadata about an available update, sent to the frontend.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateInfo {

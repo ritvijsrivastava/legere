@@ -3,46 +3,27 @@
 	import { uiStore } from '$lib/stores/ui.svelte';
 	import { sourcesStore } from '$lib/stores/sources.svelte';
 	import * as api from '$lib/api';
-	import SegmentedControl from './SegmentedControl.svelte';
-	import type { SourceType } from '$lib/types';
 
-	let newSourceType = $state<SourceType>('rss');
 	let newSourceValue = $state('');
 	let submitting = $state(false);
 	let error = $state<string | null>(null);
 
-	const typeLabelMap: Record<SourceType, string> = {
-		rss: 'RSS feed URL',
-		direct: 'Article URL'
-	};
-	const placeholderMap: Record<SourceType, string> = {
-		rss: 'https://example.com/feed.xml',
-		direct: 'https://example.com/article'
-	};
-	const helpMap: Record<SourceType, string> = {
-		rss: 'Legere checks this feed periodically and stores new entries for offline reading.',
-		direct: 'Paste a link and Legere scrapes the page once and saves a clean copy.'
-	};
-
 	function close() {
 		uiStore.closeAddSource();
 		newSourceValue = '';
-		newSourceType = 'rss';
 		error = null;
 	}
 
 	async function submit() {
-		if (!newSourceValue.trim()) return;
+		const value = newSourceValue.trim();
+		if (!value) return;
 		submitting = true;
 		error = null;
 		try {
-			if (newSourceType === 'rss') {
-				await sourcesStore.add('rss', newSourceValue.trim());
-				close();
-			} else {
-				const article = await api.addDirectLinkArticle(newSourceValue.trim());
-				close();
-				await goto(`/reader/${article.id}`);
+			const result = await sourcesStore.addAuto(value);
+			close();
+			if (result.kind === 'direct') {
+				await goto(`/reader/${result.value.id}`);
 			}
 		} catch (e) {
 			error = api.errorMessage(e);
@@ -70,34 +51,33 @@
 			onkeydown={(e) => e.stopPropagation()}
 		>
 			<div class="dialog-title" id="add-source-title">Add a source</div>
-			<SegmentedControl
-				name="newtype"
-				bind:value={newSourceType}
-				options={[
-					{ value: 'rss', label: 'RSS feed' },
-					{ value: 'direct', label: 'Article URL' }
-				]}
-			/>
 			<div class="field">
-				<label for="new-source-value">{typeLabelMap[newSourceType]}</label>
+				<label for="new-source-value">Feed or article URL</label>
 				<input
 					id="new-source-value"
 					class="input"
 					type="text"
-					placeholder={placeholderMap[newSourceType]}
+					placeholder="https://example.com/feed-or-article"
+					autocomplete="off"
+					spellcheck="false"
+					autofocus
 					bind:value={newSourceValue}
+					onkeydown={(e) => {
+						if (e.key === 'Enter' && !submitting && newSourceValue.trim()) submit();
+					}}
 				/>
 			</div>
 			<div class="dialog-body">
-				{helpMap[newSourceType]}
+				Legere figures out which kind of link this is. A feed is checked periodically for new
+				entries; anything else is captured once as a standalone article.
 			</div>
 			{#if error}
-				<div class="dialog-body">{error}</div>
+				<div class="dialog-body dialog-body-error">{error}</div>
 			{/if}
 			<div class="dialog-actions">
 				<button class="btn btn-secondary" onclick={close}>Cancel</button>
 				<button class="btn btn-primary" onclick={submit} disabled={submitting || !newSourceValue.trim()}>
-					Add source
+					{submitting ? 'Adding\u2026' : 'Add source'}
 				</button>
 			</div>
 		</div>

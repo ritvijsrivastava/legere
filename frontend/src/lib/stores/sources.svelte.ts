@@ -1,5 +1,5 @@
 import * as api from '../api';
-import type { Source, SourceType, SyncResult } from '../types';
+import type { AddSourceAutoResult, Source, SourceType, SyncResult } from '../types';
 
 class SourcesStore {
 	items = $state<Source[]>([]);
@@ -18,6 +18,17 @@ class SourcesStore {
 		const source = await api.addSource(sourceType, value);
 		this.items = [source, ...this.items];
 		return source;
+	}
+
+	/** Backs the "Add a source" dialog's single auto-detecting field. Only
+	 *  the `rss` branch touches this store's list — a `direct` result is a
+	 *  one-shot article with no recurring source row to track. */
+	async addAuto(value: string): Promise<AddSourceAutoResult> {
+		const result = await api.addSourceAuto(value);
+		if (result.kind === 'rss') {
+			this.items = [result.value, ...this.items];
+		}
+		return result;
 	}
 
 	async togglePause(id: string) {

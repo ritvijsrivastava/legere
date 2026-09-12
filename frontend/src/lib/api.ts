@@ -1,5 +1,6 @@
 import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import type {
+	AddSourceAutoResult,
 	ArticleDetail,
 	ArticleSummary,
 	Settings,
@@ -54,6 +55,12 @@ export function listSources(): Promise<Source[]> {
 
 export function addSource(sourceType: SourceType, value: string): Promise<Source> {
 	return invoke<Source>('add_source', { sourceType, value });
+}
+
+/** Sniffs whether `value` is a feed or a plain article URL and adds it
+ *  accordingly — the single entry point behind the "Add a source" dialog. */
+export function addSourceAuto(value: string): Promise<AddSourceAutoResult> {
+	return invoke<AddSourceAutoResult>('add_source_auto', { value });
 }
 
 export function toggleSourcePause(id: string): Promise<Source> {
