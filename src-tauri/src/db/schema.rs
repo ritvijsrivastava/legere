@@ -363,6 +363,39 @@ const V8: &str = "
  );
 ";
 
+// Introduces real, user-managed categories — flat, like folders, no
+// nesting — replacing the sidebar's old stand-in of grouping by
+// `source_name` (see `queries::list_categories`' pre-V9 doc comment,
+// since rewritten). A category is a first-class row so it can exist with
+// zero articles (e.g. after every article in it is reassigned), which a
+// `SELECT DISTINCT` over `articles` could never represent.
+//
+// `articles.category_id` is nullable with `ON DELETE SET NULL`: deleting
+// a category un-categorizes its articles rather than deleting them, and
+// an article with no category is a real, permitted state ("Uncategorized"
+// in the UI) — not a migration artifact to backfill away. Existing rows
+// deliberately get `category_id = NULL` rather than a category synthesized
+// from their old `source_name` (e.g. no auto-created "Raindrop import"
+// category): `source_name` was never a real category, just this table's
+// placeholder for one, so carrying it forward as if it were real would
+// reintroduce the exact default the UI is being changed to stop assuming.
+//
+// `name` is unique case-insensitively (`COLLATE NOCASE`) so "Recipes" and
+// "recipes" can't both exist as distinct categories a user would have to
+// notice and merge by hand.
+const V9: &str = "
+CREATE TABLE categories (
+    id         TEXT PRIMARY KEY,
+    name       TEXT NOT NULL COLLATE NOCASE,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX idx_categories_name ON categories(name);
+
+ALTER TABLE articles ADD COLUMN category_id TEXT REFERENCES categories(id) ON DELETE SET NULL;
+CREATE INDEX idx_articles_category_id ON articles(category_id);
+";
+
 pub fn migrations() -> Migrations<'static> {
     Migrations::new(vec![
         M::up(V1),
@@ -373,6 +406,7 @@ pub fn migrations() -> Migrations<'static> {
         M::up(V6),
         M::up(V7),
         M::up(V8),
+        M::up(V9),
     ])
 }
 
@@ -643,6 +677,78 @@ mod tests {
             )
             .unwrap();
         assert_eq!(tags, r#"["rust","webdev"]"#);
+    }
+
+    #[test]
+    fn v9_existing_articles_start_uncategorized() {
+        let mut conn = v2_conn_with_test_data();
+        migrate(&mut conn).expect("migrate to latest");
+
+        let category_id: Option<String> = conn
+            .query_row(
+                "SELECT category_id FROM articles WHERE id = 'art-unread'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            category_id, None,
+            "pre-existing rows must not be backfilled onto a synthesized category"
+        );
+    }
+
+    #[test]
+    fn v9_category_name_is_unique_case_insensitively() {
+        let mut conn = v2_conn_with_test_data();
+        migrate(&mut conn).expect("migrate to latest");
+
+        conn.execute(
+            "INSERT INTO categories (id, name, created_at, updated_at)
+             VALUES ('cat-1', 'Recipes', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .expect("first insert should succeed");
+
+        let dup = conn.execute(
+            "INSERT INTO categories (id, name, created_at, updated_at)
+             VALUES ('cat-2', 'recipes', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        );
+        assert!(
+            dup.is_err(),
+            "a case-insensitive duplicate name must be rejected"
+        );
+    }
+
+    #[test]
+    fn v9_deleting_a_category_uncategorizes_its_articles_instead_of_deleting_them() {
+        let mut conn = v2_conn_with_test_data();
+        migrate(&mut conn).expect("migrate to latest");
+
+        conn.execute(
+            "INSERT INTO categories (id, name, created_at, updated_at)
+             VALUES ('cat-1', 'Recipes', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .expect("insert category");
+        conn.execute(
+            "UPDATE articles SET category_id = 'cat-1' WHERE id = 'art-unread'",
+            [],
+        )
+        .expect("assign category");
+
+        conn.execute("DELETE FROM categories WHERE id = 'cat-1'", [])
+            .expect("delete category");
+
+        let (still_exists, category_id): (i64, Option<String>) = conn
+            .query_row(
+                "SELECT 1, category_id FROM articles WHERE id = 'art-unread'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(still_exists, 1, "the article itself must survive");
+        assert_eq!(category_id, None, "its category_id must be cleared");
     }
 
     #[test]

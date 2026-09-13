@@ -39,6 +39,13 @@ pub fn emit_source_changed(app: &AppHandle) {
     let _ = app.emit("source:changed", ());
 }
 
+/// A category was created, renamed, or deleted, or an article's category
+/// assignment changed — a cue for the sidebar's category list
+/// (`commands::categories::get_categories`) to refetch.
+pub fn emit_category_changed(app: &AppHandle) {
+    let _ = app.emit("category:changed", ());
+}
+
 /// One row `raindrop_import::run_import` couldn't capture — a dead link,
 /// timeout, or DB error. Collected rather than aborting the whole import,
 /// since a multi-thousand-row, years-old export is expected to contain

@@ -5,7 +5,7 @@ use rusqlite::{Connection, OptionalExtension, Row, params};
 use uuid::Uuid;
 
 use crate::capture::LocalCaptureOutput;
-use crate::models::{ArticleDetail, ArticleSummary, Settings, Source};
+use crate::models::{ArticleDetail, ArticleSummary, Category, Settings, Source};
 
 /// `tags` is stored as a JSON array string; a row with anything other
 /// than a valid JSON array (shouldn't happen — only this module writes
@@ -413,6 +413,12 @@ pub fn count_favorited(conn: &Connection) -> rusqlite::Result<i64> {
 }
 
 /// Distinct `source_name`s with their article counts, for the sidebar's
+/// Superseded by the real, user-managed `categories` table (`fetch_categories`
+/// and friends, below) — kept only until the sidebar/library filters are
+/// cut over to `category_id` (see `PLAN.md`'s categories addendum). Groups
+/// by `source_name`, which was never a real category, just this table's
+/// placeholder for one before the `categories` table existed.
+///
 /// Categories section and the mobile category-chip row — the SQL
 /// equivalent of the old `deriveCategories(articlesStore.items)`, which
 /// stopped being viable once the frontend no longer holds every article
@@ -439,6 +445,134 @@ pub fn list_tags(conn: &Connection) -> rusqlite::Result<Vec<(String, i64)>> {
         Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
     })?;
     rows.collect()
+}
+
+fn category_from_row(row: &Row) -> rusqlite::Result<Category> {
+    Ok(Category {
+        id: row.get("id")?,
+        name: row.get("name")?,
+        article_count: row.get("article_count")?,
+    })
+}
+
+/// Every category ("folder") with its live article count, including ones
+/// with zero articles — unlike the old `source_name`-grouped
+/// [`list_categories`], a category is its own row (see `db::schema`'s
+/// `V9`) so it doesn't disappear from this list just because its last
+/// article was reassigned elsewhere. Ordered case-insensitively by name,
+/// same convention as [`list_tags`].
+pub fn fetch_categories(conn: &Connection) -> rusqlite::Result<Vec<Category>> {
+    let mut stmt = conn.prepare(
+        "SELECT c.id AS id, c.name AS name, COUNT(a.id) AS article_count
+         FROM categories c
+         LEFT JOIN articles a ON a.category_id = c.id
+         GROUP BY c.id
+         ORDER BY c.name COLLATE NOCASE",
+    )?;
+    let rows = stmt.query_map([], category_from_row)?;
+    rows.collect()
+}
+
+pub fn get_category(conn: &Connection, id: &str) -> rusqlite::Result<Option<Category>> {
+    conn.query_row(
+        "SELECT c.id AS id, c.name AS name, COUNT(a.id) AS article_count
+         FROM categories c
+         LEFT JOIN articles a ON a.category_id = c.id
+         WHERE c.id = ?1
+         GROUP BY c.id",
+        params![id],
+        category_from_row,
+    )
+    .optional()
+}
+
+/// Creates a new, empty category named `name` (trimmed). `name`'s
+/// uniqueness is enforced case-insensitively by `idx_categories_name`
+/// (`COLLATE NOCASE`) — a collision surfaces as a plain
+/// `rusqlite::Error::SqliteFailure` with `ConstraintViolation`, which
+/// `commands::categories::create_category` matches on to return a clean
+/// "already exists" error instead of a raw SQLite message.
+pub fn create_category(conn: &Connection, name: &str) -> rusqlite::Result<Category> {
+    let name = name.trim();
+    let id = Uuid::new_v4().to_string();
+    let now = Utc::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO categories (id, name, created_at, updated_at) VALUES (?1, ?2, ?3, ?3)",
+        params![id, name, now],
+    )?;
+    Ok(Category {
+        id,
+        name: name.to_string(),
+        article_count: 0,
+    })
+}
+
+/// Finds an existing category by case-insensitive name, or creates one —
+/// the Raindrop-import path's folder-to-category resolution (a folder
+/// name reused across import runs, or one that happens to already match
+/// a manually-created category, should land in the same category rather
+/// than erroring or duplicating). Unlike [`create_category`], never fails
+/// on a name collision.
+pub fn find_or_create_category(conn: &Connection, name: &str) -> rusqlite::Result<Category> {
+    let name = name.trim();
+    if let Some(existing) = conn
+        .query_row(
+            "SELECT id, name, 0 AS article_count FROM categories WHERE name = ?1 COLLATE NOCASE",
+            params![name],
+            category_from_row,
+        )
+        .optional()?
+    {
+        return Ok(existing);
+    }
+    create_category(conn, name)
+}
+
+/// Renames an existing category (still subject to the same case-
+/// insensitive uniqueness as [`create_category`]). Returns `None` if `id`
+/// doesn't match any row; the rest of this module's "missing id" convention
+/// (see e.g. [`set_article_tags`]).
+pub fn rename_category(
+    conn: &Connection,
+    id: &str,
+    name: &str,
+) -> rusqlite::Result<Option<Category>> {
+    let name = name.trim();
+    let changed = conn.execute(
+        "UPDATE categories SET name = ?2, updated_at = ?3 WHERE id = ?1",
+        params![id, name, Utc::now().to_rfc3339()],
+    )?;
+    if changed == 0 {
+        return Ok(None);
+    }
+    get_category(conn, id)
+}
+
+/// Deletes a category outright. Its articles are **not** deleted —
+/// `articles.category_id`'s `ON DELETE SET NULL` (see `db::schema`'s
+/// `V9`) un-categorizes them instead, same as the "move to an empty
+/// collection" choice the Raindrop-import conflict UI offers. Returns
+/// `true` if a row was actually deleted.
+pub fn delete_category(conn: &Connection, id: &str) -> rusqlite::Result<bool> {
+    let changed = conn.execute("DELETE FROM categories WHERE id = ?1", params![id])?;
+    Ok(changed > 0)
+}
+
+/// Sets (or clears, for `category_id = None`) a single article's
+/// category. Returns `false` if `id` doesn't match any article; a
+/// `category_id` that doesn't match any category is rejected by the
+/// `REFERENCES categories(id)` foreign key instead of silently
+/// succeeding (surfaces as a `rusqlite::Error`).
+pub fn set_article_category(
+    conn: &Connection,
+    id: &str,
+    category_id: Option<&str>,
+) -> rusqlite::Result<bool> {
+    let changed = conn.execute(
+        "UPDATE articles SET category_id = ?2, updated_at = ?3 WHERE id = ?1",
+        params![id, category_id, Utc::now().to_rfc3339()],
+    )?;
+    Ok(changed > 0)
 }
 
 pub fn get_article(conn: &Connection, id: &str) -> rusqlite::Result<Option<ArticleDetail>> {
@@ -1007,6 +1141,145 @@ mod tests {
             set_article_tags(&conn, "does-not-exist", &[]).unwrap(),
             None
         );
+    }
+
+    #[test]
+    fn create_category_and_fetch_categories_reflect_live_article_counts() {
+        let conn = migrated_conn();
+        let recipes = create_category(&conn, "Recipes").unwrap();
+        create_category(&conn, "Travel").unwrap();
+
+        let output = sample_capture_output("https://example.com/recipe-1");
+        insert_captured_article(&conn, "art-1", None, "Direct link", "direct", &output, &[])
+            .unwrap();
+        set_article_category(&conn, "art-1", Some(&recipes.id)).unwrap();
+
+        let categories = fetch_categories(&conn).unwrap();
+        assert_eq!(
+            categories
+                .iter()
+                .map(|c| (c.name.as_str(), c.article_count))
+                .collect::<Vec<_>>(),
+            vec![("Recipes", 1), ("Travel", 0)],
+            "a category with zero articles must still be listed"
+        );
+    }
+
+    #[test]
+    fn create_category_rejects_a_case_insensitive_duplicate_name() {
+        let conn = migrated_conn();
+        create_category(&conn, "Recipes").unwrap();
+        let err = create_category(&conn, "recipes").unwrap_err();
+        assert!(matches!(
+            err,
+            rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error {
+                    code: rusqlite::ErrorCode::ConstraintViolation,
+                    ..
+                },
+                _
+            )
+        ));
+    }
+
+    #[test]
+    fn find_or_create_category_reuses_an_existing_case_insensitive_match() {
+        let conn = migrated_conn();
+        let first = create_category(&conn, "Recipes").unwrap();
+
+        let found = find_or_create_category(&conn, "recipes").unwrap();
+        assert_eq!(
+            found.id, first.id,
+            "must reuse the existing row, not create a new one"
+        );
+        assert_eq!(fetch_categories(&conn).unwrap().len(), 1);
+
+        let created = find_or_create_category(&conn, "Travel").unwrap();
+        assert_ne!(created.id, first.id);
+        assert_eq!(fetch_categories(&conn).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn rename_category_returns_none_for_a_missing_id() {
+        let conn = migrated_conn();
+        assert_eq!(
+            rename_category(&conn, "does-not-exist", "New Name").unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn rename_category_updates_the_name_in_place() {
+        let conn = migrated_conn();
+        let category = create_category(&conn, "Recipes").unwrap();
+
+        let renamed = rename_category(&conn, &category.id, "Cooking")
+            .unwrap()
+            .expect("row existed");
+        assert_eq!(renamed.name, "Cooking");
+        assert_eq!(renamed.id, category.id);
+    }
+
+    #[test]
+    fn delete_category_orphans_its_articles_instead_of_deleting_them() {
+        let conn = migrated_conn();
+        let category = create_category(&conn, "Recipes").unwrap();
+        let output = sample_capture_output("https://example.com/recipe-2");
+        insert_captured_article(&conn, "art-1", None, "Direct link", "direct", &output, &[])
+            .unwrap();
+        set_article_category(&conn, "art-1", Some(&category.id)).unwrap();
+
+        let deleted = delete_category(&conn, &category.id).unwrap();
+        assert!(deleted);
+        assert!(get_category(&conn, &category.id).unwrap().is_none());
+
+        let article = get_article(&conn, "art-1").unwrap().unwrap();
+        assert!(
+            article.id == "art-1",
+            "article must survive its category's deletion"
+        );
+    }
+
+    #[test]
+    fn delete_category_returns_false_for_a_missing_id() {
+        let conn = migrated_conn();
+        assert!(!delete_category(&conn, "does-not-exist").unwrap());
+    }
+
+    #[test]
+    fn set_article_category_returns_false_for_a_missing_article() {
+        let conn = migrated_conn();
+        let category = create_category(&conn, "Recipes").unwrap();
+        assert!(!set_article_category(&conn, "does-not-exist", Some(&category.id)).unwrap());
+    }
+
+    #[test]
+    fn set_article_category_rejects_an_unknown_category_id() {
+        let conn = migrated_conn();
+        let output = sample_capture_output("https://example.com/recipe-3");
+        insert_captured_article(&conn, "art-1", None, "Direct link", "direct", &output, &[])
+            .unwrap();
+
+        let result = set_article_category(&conn, "art-1", Some("does-not-exist"));
+        assert!(
+            result.is_err(),
+            "the foreign key should reject a category_id that doesn't exist"
+        );
+    }
+
+    #[test]
+    fn set_article_category_can_clear_back_to_uncategorized() {
+        let conn = migrated_conn();
+        let category = create_category(&conn, "Recipes").unwrap();
+        let output = sample_capture_output("https://example.com/recipe-4");
+        insert_captured_article(&conn, "art-1", None, "Direct link", "direct", &output, &[])
+            .unwrap();
+        set_article_category(&conn, "art-1", Some(&category.id)).unwrap();
+
+        set_article_category(&conn, "art-1", None).unwrap();
+
+        let categories = fetch_categories(&conn).unwrap();
+        assert_eq!(categories[0].article_count, 0);
     }
 
     #[test]

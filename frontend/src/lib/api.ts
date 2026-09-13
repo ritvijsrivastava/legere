@@ -5,6 +5,7 @@ import type {
 	ArticlePage,
 	ArticlePageRequest,
 	ArticleSummary,
+	Category,
 	NamedCount,
 	Settings,
 	Source,
@@ -43,6 +44,30 @@ export function listCategories(): Promise<NamedCount[]> {
 
 export function listTags(): Promise<NamedCount[]> {
 	return invoke<NamedCount[]>('list_tags');
+}
+
+/** Real, user-managed categories (`categories` table) — named
+ *  `getCategories` on the frontend too, to keep it visually distinct
+ *  from the soon-to-be-superseded `listCategories` above. */
+export function getCategories(): Promise<Category[]> {
+	return invoke<Category[]>('get_categories');
+}
+
+export function createCategory(name: string): Promise<Category> {
+	return invoke<Category>('create_category', { name });
+}
+
+export function renameCategory(id: string, name: string): Promise<Category> {
+	return invoke<Category>('rename_category', { id, name });
+}
+
+export function deleteCategory(id: string): Promise<void> {
+	return invoke<void>('delete_category', { id });
+}
+
+/** `categoryId: null` clears an article's category (Uncategorized). */
+export function setArticleCategory(id: string, categoryId: string | null): Promise<void> {
+	return invoke<void>('set_article_category', { id, categoryId });
 }
 
 export function getArticle(id: string): Promise<ArticleDetail> {

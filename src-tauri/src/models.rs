@@ -80,6 +80,20 @@ pub struct ArticlePage {
     pub next_cursor: Option<(String, String)>,
 }
 
+/// A user-managed, flat category ("folder") an article can belong to
+/// — distinct from `ArticleSummary::source_name` (which records
+/// *provenance*: "Direct link", "Raindrop import", or an RSS feed's
+/// name, and is never shown as this concept). `article_count` is
+/// computed at query time, not stored, and can legitimately be `0` — a
+/// category persists after its last article is reassigned elsewhere
+/// (see `db::schema`'s `V9` migration doc comment).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Category {
+    pub id: String,
+    pub name: String,
+    pub article_count: i64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Source {
     pub id: String,

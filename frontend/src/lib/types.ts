@@ -103,6 +103,16 @@ export interface ArticlePage {
 /** `[name, count]` pairs, as returned by `list_categories`/`list_tags`. */
 export type NamedCount = [string, number];
 
+/** A user-managed, flat category ("folder") an article can belong to —
+ *  distinct from `ArticleSummary.source_name` (provenance: "Direct link",
+ *  "Raindrop import", or an RSS feed's name). `article_count` can be `0`:
+ *  a category persists after its last article is reassigned elsewhere. */
+export interface Category {
+	id: string;
+	name: string;
+	article_count: number;
+}
+
 export interface ImportFailure {
 	url: string;
 	title: string;
