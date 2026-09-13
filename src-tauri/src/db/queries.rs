@@ -173,7 +173,53 @@ pub fn insert_imported_article(
             now,
         ],
     )? > 0;
+    if !inserted {
+        merge_tags_by_link(conn, &output.link, tags)?;
+    }
     Ok(inserted)
+}
+
+/// Unions `incoming` tags into whatever's already stored on the article
+/// at `link`, so re-importing a CSV whose rows now carry tags that
+/// weren't there (or weren't yet applied) on a previous run still picks
+/// those up on an otherwise-duplicate row instead of silently discarding
+/// them. A no-op — no `UPDATE` at all — when every incoming tag (after
+/// [`normalize_tags`]) is already present, so a plain re-import of an
+/// unchanged CSV doesn't bump `updated_at` on every single row. Existing
+/// tag order is preserved; new tags are appended in their normalized
+/// order. Silently does nothing if `link` doesn't match any row (the
+/// caller only reaches here when it already knows the link duplicated
+/// *something*, but doesn't hold that row's id).
+fn merge_tags_by_link(conn: &Connection, link: &str, incoming: &[String]) -> rusqlite::Result<()> {
+    let incoming = normalize_tags(incoming);
+    if incoming.is_empty() {
+        return Ok(());
+    }
+    let Some((existing_id, existing_tags)) = conn
+        .query_row(
+            "SELECT id, tags FROM articles WHERE link = ?1",
+            params![link],
+            |row| Ok((row.get::<_, String>(0)?, parse_tags(row.get(1)?))),
+        )
+        .optional()?
+    else {
+        return Ok(());
+    };
+    let existing_set: HashSet<&str> = existing_tags.iter().map(String::as_str).collect();
+    let mut merged = existing_tags.clone();
+    for tag in &incoming {
+        if !existing_set.contains(tag.as_str()) {
+            merged.push(tag.clone());
+        }
+    }
+    if merged.len() == existing_tags.len() {
+        return Ok(());
+    }
+    conn.execute(
+        "UPDATE articles SET tags = ?2, updated_at = ?3 WHERE id = ?1",
+        params![existing_id, tags_to_json(&merged), Utc::now().to_rfc3339()],
+    )?;
+    Ok(())
 }
 
 /// Overwrites an existing article's *readable* content in place, for
@@ -1026,6 +1072,90 @@ mod tests {
             "UNIQUE(link) should silently absorb the duplicate insert"
         );
         assert!(get_article(&conn, "art-2").unwrap().is_none());
+    }
+
+    #[test]
+    fn reimporting_a_duplicate_link_merges_new_tags_into_the_existing_article() {
+        let conn = migrated_conn();
+        let output = sample_capture_output("https://example.com/retag-import");
+        insert_imported_article(
+            &conn,
+            "art-1",
+            "Raindrop import",
+            &output,
+            &["pdf".to_string()],
+            "2024-01-01T00:00:00Z",
+            false,
+        )
+        .unwrap();
+
+        // Re-"importing" the same link with an overlapping-plus-new tag
+        // set: the duplicate insert is absorbed as before, but the
+        // *existing* row should pick up the new tag without losing the
+        // one it already had.
+        let second = insert_imported_article(
+            &conn,
+            "art-2",
+            "Raindrop import",
+            &output,
+            &["PDF".to_string(), "file-system".to_string()],
+            "2024-01-02T00:00:00Z",
+            false,
+        )
+        .unwrap();
+        assert!(!second);
+
+        let article = get_article(&conn, "art-1").unwrap().unwrap();
+        assert_eq!(
+            article.tags,
+            vec!["pdf".to_string(), "file-system".to_string()]
+        );
+    }
+
+    #[test]
+    fn reimporting_a_duplicate_link_with_no_new_tags_is_a_true_no_op() {
+        let conn = migrated_conn();
+        let output = sample_capture_output("https://example.com/retag-noop");
+        insert_imported_article(
+            &conn,
+            "art-1",
+            "Raindrop import",
+            &output,
+            &["pdf".to_string()],
+            "2024-01-01T00:00:00Z",
+            false,
+        )
+        .unwrap();
+        let updated_at_before: String = conn
+            .query_row(
+                "SELECT updated_at FROM articles WHERE id = 'art-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        insert_imported_article(
+            &conn,
+            "art-2",
+            "Raindrop import",
+            &output,
+            &["pdf".to_string()],
+            "2024-01-02T00:00:00Z",
+            false,
+        )
+        .unwrap();
+
+        let updated_at_after: String = conn
+            .query_row(
+                "SELECT updated_at FROM articles WHERE id = 'art-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            updated_at_before, updated_at_after,
+            "no new tags means no UPDATE at all"
+        );
     }
 
     #[test]
