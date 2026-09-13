@@ -96,7 +96,7 @@ pub async fn preview_raindrop_csv(
     path: String,
 ) -> Result<ImportPreview, AppError> {
     let csv_bytes = tokio::fs::read(&path).await?;
-    Ok(raindrop_import::preview_csv(&state, &csv_bytes)?)
+    raindrop_import::preview_csv(&state, &csv_bytes)
 }
 
 /// Cancels the in-flight import, if any. Returns `true` if there was one

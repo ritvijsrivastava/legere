@@ -101,7 +101,7 @@ export interface ArticlePage {
 	next_cursor: [string, string] | null;
 }
 
-/** `[name, count]` pairs, as returned by `list_categories`/`list_tags`. */
+/** `[name, count]` pairs, used for the tag aggregate endpoint. */
 export type NamedCount = [string, number];
 
 /** A user-managed, flat category ("folder") an article can belong to —
@@ -126,6 +126,7 @@ export interface FolderPreview {
 	folder: string;
 	name: string;
 	row_count: number;
+	duplicate_count: number;
 	existing_categories: string[];
 }
 

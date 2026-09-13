@@ -219,7 +219,7 @@ Consistently soft, never sharp and never maximal. Radius scales with the size an
 - **Focus:** border shifts to Ledger Pine; no glow/ring, the border color change is the whole affordance.
 
 ### Navigation
-- Sidebar (desktop) / bottom tab bar (mobile): plain-sans labels, active item takes a Card-Stock-tinted pill background and Ledger Pine text/weight. Bottom bar items are full 44px+ touch targets with icon-over-label.
+- Sidebar (desktop) / bottom tab bar (mobile): plain-sans labels, active item takes a Card-Stock-tinted pill background and Ledger Pine text/weight. Bottom bar items are full 44px+ touch targets with icon-over-label. The sidebar's Categories section lists user-managed flat folders (including Uncategorized when populated), never provenance labels such as Direct link or Raindrop import.
 
 ### Dialogs
 - **Style:** 20px radius, Bright Stock background (a step brighter than the page for real overlay separation), `--shadow-lg`.

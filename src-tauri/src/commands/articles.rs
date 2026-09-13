@@ -80,16 +80,6 @@ pub async fn count_favorited(state: State<'_, AppState>) -> Result<i64, AppError
 }
 
 #[tauri::command]
-pub async fn list_categories(state: State<'_, AppState>) -> Result<Vec<(String, i64)>, AppError> {
-    let pool = state.pool.clone();
-    tokio::task::spawn_blocking(move || {
-        let conn = pool.get()?;
-        Ok(queries::list_categories(&conn)?)
-    })
-    .await?
-}
-
-#[tauri::command]
 pub async fn list_tags(state: State<'_, AppState>) -> Result<Vec<(String, i64)>, AppError> {
     let pool = state.pool.clone();
     tokio::task::spawn_blocking(move || {

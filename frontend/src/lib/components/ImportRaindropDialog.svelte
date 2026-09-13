@@ -217,7 +217,7 @@
 				<div class="dialog-body">
 					Importing {importStore.processed} of {importStore.total}
 					<div class="progress-track">
-						<div class="progress-fill" style:width="{progressPct}%"></div>
+						<div class="progress-fill" style:transform={`scaleX(${progressPct / 100})`}></div>
 					</div>
 					<p class="text-muted counts">
 						{importStore.imported} imported · {importStore.skippedDuplicate} already saved · {importStore.failedCount}
@@ -289,7 +289,11 @@
 							<section class="folder-row">
 								<div class="folder-heading">
 									<strong>{folder.name}</strong>
-									<span>{folder.row_count} {folder.row_count === 1 ? 'bookmark' : 'bookmarks'}</span>
+									<span>
+										{folder.row_count} {folder.row_count === 1 ? 'bookmark' : 'bookmarks'}
+										· {folder.row_count - folder.duplicate_count} new
+										· {folder.duplicate_count} already saved
+									</span>
 								</div>
 								{#if folder.existing_categories.length > 0}
 									<p class="conflict-note">
@@ -500,9 +504,11 @@
 		margin-top: 10px;
 	}
 	.progress-fill {
+		width: 100%;
 		height: 100%;
 		background: var(--color-accent);
-		transition: width 0.2s ease;
+		transform-origin: left;
+		transition: transform 0.2s ease;
 	}
 	.failure-actions {
 		display: flex;

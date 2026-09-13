@@ -424,7 +424,7 @@
 						: 0}
 				<div class="import-progress">
 					<div class="import-progress-track">
-						<div class="import-progress-fill" style:width="{pct}%"></div>
+						<div class="import-progress-fill" style:transform={`scaleX(${pct / 100})`}></div>
 					</div>
 					<p class="text-muted import-progress-label">
 						Importing {importStore.processed} of {importStore.total}
@@ -546,7 +546,7 @@
 									<div
 										class="progress-fill"
 										class:indeterminate={installPhase === 'installing'}
-										style:width="{installPhase === 'installing' ? 100 : (installPct ?? 20)}%"
+										style:transform={`scaleX(${(installPhase === 'installing' ? 100 : (installPct ?? 20)) / 100})`}
 									></div>
 								</div>
 								<p class="text-muted progress-label">
@@ -651,9 +651,11 @@
 		overflow: hidden;
 	}
 	.import-progress-fill {
+		width: 100%;
 		height: 100%;
 		background: var(--color-accent);
-		transition: width 0.2s ease;
+		transform-origin: left;
+		transition: transform 0.2s ease;
 	}
 	.import-progress-label {
 		font-size: 12px;
@@ -804,9 +806,11 @@
 		overflow: hidden;
 	}
 	.progress-fill {
+		width: 100%;
 		height: 100%;
 		background: var(--color-accent);
-		transition: width 0.2s ease;
+		transform-origin: left;
+		transition: transform 0.2s ease;
 	}
 	.progress-fill.indeterminate {
 		animation: progress-pulse 1.4s ease-in-out infinite;

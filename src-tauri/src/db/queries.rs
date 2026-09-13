@@ -139,6 +139,7 @@ pub fn insert_captured_article(
 /// `false`. Always `source_id = NULL` — an import isn't tied to a
 /// recurring source. Returns `true`/`false` on insert/duplicate exactly
 /// like `insert_captured_article`.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn insert_imported_article(
     conn: &Connection,
     id: &str,
@@ -165,6 +166,7 @@ pub fn insert_imported_article(
 /// `insert_imported_article` wrapper above intentionally keeps the old
 /// call shape for non-import callers and tests that create uncategorized
 /// imported fixtures.
+#[allow(clippy::too_many_arguments)]
 pub fn insert_imported_article_with_category(
     conn: &Connection,
     id: &str,
@@ -467,27 +469,6 @@ pub fn count_favorited(conn: &Connection) -> rusqlite::Result<i64> {
     )
 }
 
-/// Distinct `source_name`s with their article counts, for the sidebar's
-/// Superseded by the real, user-managed `categories` table (`fetch_categories`
-/// and friends, below) — kept only until the sidebar/library filters are
-/// cut over to `category_id` (see `PLAN.md`'s categories addendum). Groups
-/// by `source_name`, which was never a real category, just this table's
-/// placeholder for one before the `categories` table existed.
-///
-/// Categories section and the mobile category-chip row — the SQL
-/// equivalent of the old `deriveCategories(articlesStore.items)`, which
-/// stopped being viable once the frontend no longer holds every article
-/// in memory.
-pub fn list_categories(conn: &Connection) -> rusqlite::Result<Vec<(String, i64)>> {
-    let mut stmt = conn.prepare(
-        "SELECT source_name, COUNT(*) FROM articles GROUP BY source_name ORDER BY source_name COLLATE NOCASE",
-    )?;
-    let rows = stmt.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-    })?;
-    rows.collect()
-}
-
 /// Distinct tags (from every article's `tags` JSON array) with counts,
 /// for the sidebar's Tags section — the SQL equivalent of the old
 /// `deriveTags(articlesStore.items)`.
@@ -568,27 +549,6 @@ pub fn create_category(conn: &Connection, name: &str) -> rusqlite::Result<Catego
         name: name.to_string(),
         article_count: 0,
     })
-}
-
-/// Finds an existing category by case-insensitive name, or creates one —
-/// the Raindrop-import path's folder-to-category resolution (a folder
-/// name reused across import runs, or one that happens to already match
-/// a manually-created category, should land in the same category rather
-/// than erroring or duplicating). Unlike [`create_category`], never fails
-/// on a name collision.
-pub fn find_or_create_category(conn: &Connection, name: &str) -> rusqlite::Result<Category> {
-    let name = name.trim();
-    if let Some(existing) = conn
-        .query_row(
-            "SELECT id, name, 0 AS article_count FROM categories WHERE name = ?1 COLLATE NOCASE",
-            params![name],
-            category_from_row,
-        )
-        .optional()?
-    {
-        return Ok(existing);
-    }
-    create_category(conn, name)
 }
 
 /// Renames an existing category (still subject to the same case-
@@ -1313,23 +1273,6 @@ mod tests {
     }
 
     #[test]
-    fn find_or_create_category_reuses_an_existing_case_insensitive_match() {
-        let conn = migrated_conn();
-        let first = create_category(&conn, "Recipes").unwrap();
-
-        let found = find_or_create_category(&conn, "recipes").unwrap();
-        assert_eq!(
-            found.id, first.id,
-            "must reuse the existing row, not create a new one"
-        );
-        assert_eq!(fetch_categories(&conn).unwrap().len(), 1);
-
-        let created = find_or_create_category(&conn, "Travel").unwrap();
-        assert_ne!(created.id, first.id);
-        assert_eq!(fetch_categories(&conn).unwrap().len(), 2);
-    }
-
-    #[test]
     fn rename_category_returns_none_for_a_missing_id() {
         let conn = migrated_conn();
         assert_eq!(
@@ -1914,10 +1857,7 @@ mod tests {
         // transitioned to `read`.
         assert_eq!(count_unread(&conn).unwrap(), 1);
 
-        assert_eq!(
-            list_categories(&conn).unwrap(),
-            vec![("Feed A".to_string(), 1), ("Feed B".to_string(), 1)]
-        );
+        assert_eq!(count_uncategorized(&conn).unwrap(), 2);
         assert_eq!(
             list_tags(&conn).unwrap(),
             vec![("tag-x".to_string(), 2), ("tag-y".to_string(), 1)]

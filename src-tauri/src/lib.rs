@@ -141,7 +141,6 @@ pub fn run() {
             commands::articles::count_all_articles,
             commands::articles::count_unread,
             commands::articles::count_favorited,
-            commands::articles::list_categories,
             commands::articles::list_tags,
             commands::categories::count_uncategorized,
             commands::categories::get_categories,

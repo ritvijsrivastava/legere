@@ -1,8 +1,6 @@
 //! Real, user-managed categories ("folders") — see `db::schema`'s `V9`
-//! migration and `models::Category`'s doc comment for what distinguishes
-//! this from the old `source_name`-grouped sidebar list
-//! (`commands::articles::list_categories`, superseded but not yet
-//! removed — see that function's own doc comment).
+//! migration and `models::Category`'s doc comment. These are separate
+//! from article provenance (`source_name`) and persist even when empty.
 
 use tauri::{AppHandle, State};
 
@@ -12,12 +10,9 @@ use crate::events;
 use crate::models::Category;
 use crate::state::AppState;
 
-/// Named `get_categories` rather than `list_categories` — that name is
-/// already taken by `commands::articles::list_categories` (the
-/// `source_name`-grouped sidebar list, still in use until the library/
-/// sidebar cut over to real categories), and Tauri commands are
-/// dispatched by function name, not module path, so the two can't
-/// collide.
+/// Named `get_categories` to distinguish the category-table query from
+/// source management commands. Tauri commands are dispatched by function
+/// name, not module path.
 #[tauri::command]
 pub async fn count_uncategorized(state: State<'_, AppState>) -> Result<i64, AppError> {
     let pool = state.pool.clone();

@@ -52,9 +52,10 @@ const CONCURRENCY: usize = 5;
 /// row import, not a less-live-feeling one.
 const LIBRARY_REFRESH_BATCH: u32 = 100;
 
-/// `source_name` stored on every imported article — lets the library UI
-/// (which groups/labels by `source_name`) distinguish these from
-/// manually-added direct links.
+/// `source_name` stored on every imported article — provenance metadata
+/// that distinguishes these from manually-added direct links. It is not a
+/// category; folder/category assignment is stored separately in
+/// `articles.category_id`.
 const SOURCE_NAME: &str = "Raindrop import";
 
 /// [`run_import`]'s progress/lifecycle notifications, decoupled from
@@ -130,6 +131,7 @@ pub struct FolderPreview {
     /// Human-readable name for the preview UI.
     pub name: String,
     pub row_count: u32,
+    pub duplicate_count: u32,
     /// Existing category names found among duplicate links in this folder.
     /// These are shown once per folder, not once per article.
     pub existing_categories: Vec<String>,
@@ -278,15 +280,18 @@ pub fn preview_csv(state: &AppState, csv_bytes: &[u8]) -> Result<ImportPreview, 
         .filter(|row| !row.url.trim().is_empty())
         .collect();
 
-    let mut folders: BTreeMap<String, (u32, BTreeSet<String>)> = BTreeMap::new();
+    let mut folders: BTreeMap<String, (u32, u32, BTreeSet<String>)> = BTreeMap::new();
     let conn = state.pool.get()?;
     for row in &rows {
         let key = folder_key(&row.folder);
         let entry = folders.entry(key.clone()).or_default();
         entry.0 += 1;
         if let Some(link) = precheck_link(&row.url) {
+            if queries::article_link_exists(&conn, &link)? {
+                entry.1 += 1;
+            }
             if let Some((_, category_name)) = queries::get_article_category_by_link(&conn, &link)? {
-                entry.1.insert(category_name);
+                entry.2.insert(category_name);
             }
         }
     }
@@ -295,12 +300,15 @@ pub fn preview_csv(state: &AppState, csv_bytes: &[u8]) -> Result<ImportPreview, 
         total: rows.len() as u32,
         folders: folders
             .into_iter()
-            .map(|(folder, (row_count, existing_categories))| FolderPreview {
-                name: folder_display_name(&folder),
-                folder,
-                row_count,
-                existing_categories: existing_categories.into_iter().collect(),
-            })
+            .map(
+                |(folder, (row_count, duplicate_count, existing_categories))| FolderPreview {
+                    name: folder_display_name(&folder),
+                    folder,
+                    row_count,
+                    duplicate_count,
+                    existing_categories: existing_categories.into_iter().collect(),
+                },
+            )
             .collect(),
     })
 }
@@ -320,6 +328,7 @@ pub fn preview_csv(state: &AppState, csv_bytes: &[u8]) -> Result<ImportPreview, 
 /// function; `csv::Reader::deserialize` surfaces both as `Err` items in
 /// the same iterator, and both are treated as fatal here rather than
 /// silently dropping rows a user might expect to see reported.
+#[cfg_attr(not(test), allow(dead_code))]
 pub async fn run_import(
     state: &AppState,
     csv_bytes: Vec<u8>,
@@ -621,8 +630,10 @@ mod tests {
         assert_eq!(preview.folders.len(), 2);
         assert_eq!(preview.folders[0].name, "Uncategorized");
         assert_eq!(preview.folders[0].row_count, 1);
+        assert_eq!(preview.folders[0].duplicate_count, 0);
         assert_eq!(preview.folders[1].name, "New folder");
         assert_eq!(preview.folders[1].row_count, 2);
+        assert_eq!(preview.folders[1].duplicate_count, 1);
         assert_eq!(preview.folders[1].existing_categories, vec!["Old folder"]);
     }
 

@@ -323,11 +323,10 @@ ALTER TABLE articles DROP COLUMN content_zim_path;
 // Supports the keyset-paginated `list_articles_page` query (replacing the
 // old "fetch every article" `list_articles`, which stopped scaling once
 // libraries reached hundreds/thousands of rows): the library and
-// favorites views, plus the sidebar's category filter, now query with a
-// `WHERE favorited = ...`/`WHERE source_name = ...` predicate on every
+// favorites views query with a `WHERE favorited = ...` predicate on every
 // page fetch rather than filtering an already-fully-loaded array in the
-// frontend, so these need their own indexes rather than riding along on
-// `idx_articles_fetched_at`.
+// frontend. The real category/folder filter is added with its own index in
+// V9 rather than riding along on `idx_articles_fetched_at`.
 const V7: &str = "
 CREATE INDEX idx_articles_favorited ON articles(favorited);
 CREATE INDEX idx_articles_source_name ON articles(source_name);

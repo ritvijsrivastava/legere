@@ -77,7 +77,7 @@ unless revisited later.)
   persisted and restored (scroll position, "X min left", library-card
   progress bar).
 - Library: card view and list view, search-by-title, filter by
-  source/category and by tag, unread/favorite counts, delete with
+  user-managed folder/category and by tag, unread/favorite counts, delete with
   confirm, "Favorites" as its own view.
 - **Highlights is a stub today** — the nav item and route exist, the
   reader shows "Tap a marked passage to highlight it and add a note,"
@@ -85,7 +85,7 @@ unless revisited later.)
   a real near-term surface, not decoration to hide, but don't invent
   interaction details for it beyond what's asked.
 - Settings: reading defaults, library default view, autosync on/off,
-  source management, in-app update check/install, about.
+  source and folder/category management, in-app update check/install, about.
 - Constraint: fully offline-capable by design — no remote fonts/icons,
   vendored fonts only (`@fontsource*`), a real (non-null) CSP, SSRF-
   guarded fetches. Any new visual asset (fonts, icons, the app icon)

@@ -32,6 +32,22 @@ cells at capture time, plus manual add/remove in the reader
 semantics). Consumed by an any-of tag filter in the library/favorites
 views and a sidebar tag list with counts (`list_tags`).
 
+## Addendum — categories/folders (implemented)
+
+Categories are flat, user-managed folders stored in the `categories`
+table (migration V9), with nullable `articles.category_id`. They are
+separate from `source_name`, which remains provenance such as `Direct
+link`, `Raindrop import`, or an RSS feed title. Categories can be empty;
+deleting one preserves its articles and moves them to Uncategorized.
+
+Raindrop CSV imports preview folder names and row counts before capture.
+The user explicitly maps every folder to an existing/new category or
+Uncategorized. Duplicate links show existing category names once per
+folder and support keeping the current category or moving all duplicates
+to the selected category. Re-imports merge newly available tags without
+recapturing duplicate links. Direct-link captures use the same explicit
+category choice and never default to a `Direct link` category.
+
 ## Context
 
 Legere (`~/Code/legere`, Tauri 2 + SvelteKit/Svelte 5) is an existing MVP scaffold (~1k lines Rust, ~2.1k frontend, 2 commits) for an offline article reader. The user wants RSS/Atom + direct-URL ingestion where each article stores three things: (1) extracted readable HTML, (2) a self-contained single-page **.zim** archive (reusing the sibling `~/Code/wraith` crates, consumed as path deps), and (3) the original link with tracking params stripped. Reading experience anchored on **Matter**. Exploration found the scaffold sound but with structural gaps: the ZIM is write-only and not self-contained (raw HTML, zero assets), extracted articles reference remote images (offline reading is broken), `wraith-urlx` is imported but never called (and wraith has **no** tracking-param stripping anywhere — new work), there is no event system (library never refreshes after autosync), errored sources are unrecoverable, and archive/media files leak forever.

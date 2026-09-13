@@ -44,17 +44,11 @@ export function countUncategorized(): Promise<number> {
 	return invoke<number>('count_uncategorized');
 }
 
-export function listCategories(): Promise<NamedCount[]> {
-	return invoke<NamedCount[]>('list_categories');
-}
-
 export function listTags(): Promise<NamedCount[]> {
 	return invoke<NamedCount[]>('list_tags');
 }
 
-/** Real, user-managed categories (`categories` table) — named
- *  `getCategories` on the frontend too, to keep it visually distinct
- *  from the soon-to-be-superseded `listCategories` above. */
+/** Real, user-managed categories stored in the `categories` table. */
 export function getCategories(): Promise<Category[]> {
 	return invoke<Category[]>('get_categories');
 }
