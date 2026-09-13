@@ -153,7 +153,10 @@ async fn fetch_one(client: &reqwest::Client, url: &Url) -> Option<Vec<u8>> {
 
 /// `Ok(None)` for a deterministic, non-retryable failure (oversized
 /// asset); `Err` for a transient `reqwest` failure the caller may retry.
-async fn fetch_one_attempt(client: &reqwest::Client, url: &Url) -> Result<Option<Vec<u8>>, reqwest::Error> {
+async fn fetch_one_attempt(
+    client: &reqwest::Client,
+    url: &Url,
+) -> Result<Option<Vec<u8>>, reqwest::Error> {
     let response = client.get(url.clone()).send().await?;
     let response = response.error_for_status()?;
 

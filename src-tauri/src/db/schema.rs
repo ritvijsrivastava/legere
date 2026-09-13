@@ -444,14 +444,20 @@ mod tests {
                        'x', '<p>x</p>', '2026-01-03T00:00:00Z', '2026-01-03T00:00:00Z')",
             [],
         );
-        assert!(duplicate_insert.is_err(), "UNIQUE(link) should reject this insert");
+        assert!(
+            duplicate_insert.is_err(),
+            "UNIQUE(link) should reject this insert"
+        );
 
         let mail_source_insert = conn.execute(
             "INSERT INTO sources (id, name, type, feed_url, status, article_count, created_at, updated_at)
              VALUES ('src-mail', 'Bad', 'mail', NULL, 'active', 0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
             [],
         );
-        assert!(mail_source_insert.is_err(), "sources.type CHECK should reject 'mail'");
+        assert!(
+            mail_source_insert.is_err(),
+            "sources.type CHECK should reject 'mail'"
+        );
     }
 
     #[test]
@@ -527,7 +533,9 @@ mod tests {
     #[test]
     fn v4_drops_full_archive_columns_but_keeps_content_zim_path() {
         let mut conn = v2_conn_with_test_data();
-        migrations().to_version(&mut conn, 4).expect("migrate to V4");
+        migrations()
+            .to_version(&mut conn, 4)
+            .expect("migrate to V4");
 
         let content_zim_path: Option<String> = conn
             .query_row(
@@ -573,7 +581,11 @@ mod tests {
         migrate(&mut conn).expect("migrate to latest");
 
         let tags: String = conn
-            .query_row("SELECT tags FROM articles WHERE id = 'art-unread'", [], |row| row.get(0))
+            .query_row(
+                "SELECT tags FROM articles WHERE id = 'art-unread'",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(tags, "[]");
     }
@@ -602,6 +614,9 @@ mod tests {
         let fk_enabled: i64 = conn
             .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(fk_enabled, 1, "foreign_keys must be restored to ON after migrating");
+        assert_eq!(
+            fk_enabled, 1,
+            "foreign_keys must be restored to ON after migrating"
+        );
     }
 }

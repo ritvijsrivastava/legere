@@ -1,5 +1,5 @@
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use tauri::{AppHandle, Manager, State};
 
@@ -20,11 +20,17 @@ use crate::state::AppState;
 /// its own doc comment) and rejects a file that isn't even a parseable
 /// CSV up front, before anything is reported as started.
 #[tauri::command]
-pub async fn import_raindrop_csv(app: AppHandle, state: State<'_, AppState>, path: String) -> Result<(), AppError> {
+pub async fn import_raindrop_csv(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<(), AppError> {
     {
         let guard = state.import_cancel.lock().await;
         if guard.is_some() {
-            return Err(AppError::Internal("an import is already running".to_string()));
+            return Err(AppError::Internal(
+                "an import is already running".to_string(),
+            ));
         }
     }
 
@@ -36,13 +42,14 @@ pub async fn import_raindrop_csv(app: AppHandle, state: State<'_, AppState>, pat
 
     tauri::async_runtime::spawn(async move {
         let app_state = app.state::<AppState>();
-        let result = raindrop_import::run_import(&app_state, csv_bytes, cancel, |event| match event {
-            ImportEvent::Started { total } => events::emit_import_started(&app, total),
-            ImportEvent::Progress(progress) => events::emit_import_progress(&app, &progress),
-            ImportEvent::LibraryChanged => events::emit_articles_changed(&app),
-            ImportEvent::Finished(finished) => events::emit_import_finished(&app, &finished),
-        })
-        .await;
+        let result =
+            raindrop_import::run_import(&app_state, csv_bytes, cancel, |event| match event {
+                ImportEvent::Started { total } => events::emit_import_started(&app, total),
+                ImportEvent::Progress(progress) => events::emit_import_progress(&app, &progress),
+                ImportEvent::LibraryChanged => events::emit_articles_changed(&app),
+                ImportEvent::Finished(finished) => events::emit_import_finished(&app, &finished),
+            })
+            .await;
 
         // `validate_csv` above already rejects a malformed file before
         // this task is even spawned, so reaching an `Err` here would mean

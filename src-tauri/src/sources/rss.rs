@@ -138,7 +138,10 @@ mod tests {
         let second_sync_count = sync_rss_source(&state, &source)
             .await
             .expect("second sync should also succeed");
-        assert_eq!(second_sync_count, 0, "already-captured entries must not be recaptured");
+        assert_eq!(
+            second_sync_count, 0,
+            "already-captured entries must not be recaptured"
+        );
 
         let conn = pool.get().expect("get conn");
         let articles = queries::list_articles(&conn).expect("list articles");
@@ -182,7 +185,9 @@ mod tests {
         };
         assert_eq!(source.name, feed_url);
 
-        sync_rss_source(&state, &source).await.expect("sync should succeed");
+        sync_rss_source(&state, &source)
+            .await
+            .expect("sync should succeed");
 
         let conn = pool.get().expect("get conn");
         let renamed = queries::get_source(&conn, &source.id).unwrap().unwrap();

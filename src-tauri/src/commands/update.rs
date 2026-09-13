@@ -32,7 +32,9 @@ pub(crate) fn read_token(app: &AppHandle) -> Result<String, AppError> {
         .get(TOKEN_KEY)
         .and_then(|v| v.as_str().map(str::to_string))
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| AppError::NotFound("No GitHub token configured. Add one in Settings.".to_string()))
+        .ok_or_else(|| {
+            AppError::NotFound("No GitHub token configured. Add one in Settings.".to_string())
+        })
 }
 
 #[tauri::command]
@@ -121,7 +123,10 @@ struct GithubRelease {
 /// time a user would see it. This hits the release API directly instead, so
 /// it works identically on desktop and Android.
 #[tauri::command]
-pub async fn get_release_notes(app: AppHandle, version: String) -> Result<Option<UpdateInfo>, AppError> {
+pub async fn get_release_notes(
+    app: AppHandle,
+    version: String,
+) -> Result<Option<UpdateInfo>, AppError> {
     let token = read_token(&app)?;
     let tag = format!("v{version}");
 
@@ -162,7 +167,7 @@ mod desktop {
     use crate::models::UpdateInfo;
     use crate::state::AppState;
     use serde::Serialize;
-    use tauri::{ipc::Channel, AppHandle, State};
+    use tauri::{AppHandle, State, ipc::Channel};
     use tauri_plugin_updater::UpdaterExt;
 
     /// Download progress, streamed to the frontend while `install_update` runs.
@@ -210,12 +215,9 @@ mod desktop {
         state: State<'_, AppState>,
         on_progress: Channel<DownloadProgress>,
     ) -> Result<(), AppError> {
-        let update = state
-            .pending_update
-            .lock()
-            .await
-            .take()
-            .ok_or_else(|| AppError::Internal("No pending update. Check for updates first.".to_string()))?;
+        let update = state.pending_update.lock().await.take().ok_or_else(|| {
+            AppError::Internal("No pending update. Check for updates first.".to_string())
+        })?;
 
         let mut started = false;
         update

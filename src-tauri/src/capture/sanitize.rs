@@ -26,8 +26,8 @@
 //! Implemented as a single streaming pass over the HTML with [`lol_html`] —
 //! no full DOM tree is built, keeping memory flat even on large pages.
 
-use lol_html::html_content::ContentType;
 use lol_html::errors::RewritingError;
+use lol_html::html_content::ContentType;
 use lol_html::{RewriteStrSettings, element, rewrite_str};
 
 /// URL-bearing attributes checked for dangerous (`javascript:`,
@@ -116,7 +116,9 @@ pub fn sanitize(html: &str) -> Result<String, RewritingError> {
 /// tokens) contains `token`, compared case-insensitively as the HTML
 /// Living Standard requires for keyword attributes.
 fn has_rel_token(rel_value: &str, token: &str) -> bool {
-    rel_value.split_ascii_whitespace().any(|t| t.eq_ignore_ascii_case(token))
+    rel_value
+        .split_ascii_whitespace()
+        .any(|t| t.eq_ignore_ascii_case(token))
 }
 
 fn escape_html(input: &str) -> String {
@@ -145,7 +147,8 @@ fn iframe_placeholder(src: Option<&str>) -> String {
                 r#"<div class="legere-iframe-placeholder">Embedded content not archived: <a href="{escaped}">{escaped}</a></div>"#
             )
         }
-        None => r#"<div class="legere-iframe-placeholder">Embedded content not archived</div>"#.to_string(),
+        None => r#"<div class="legere-iframe-placeholder">Embedded content not archived</div>"#
+            .to_string(),
     }
 }
 
@@ -162,13 +165,18 @@ fn iframe_placeholder(src: Option<&str>) -> String {
 fn is_dangerous_url(raw: &str) -> bool {
     let decoded = html_escape::decode_html_entities(raw);
     let trimmed = decoded.trim_matches(|c: char| c.is_control() || c == ' ');
-    let cleaned: String = trimmed.chars().filter(|c| !matches!(c, '\t' | '\n' | '\r')).collect();
+    let cleaned: String = trimmed
+        .chars()
+        .filter(|c| !matches!(c, '\t' | '\n' | '\r'))
+        .collect();
     let lower = cleaned.to_ascii_lowercase();
     lower.starts_with("javascript:") || lower.starts_with("data:text/html")
 }
 
 fn strip_prefix_ignore_ascii_case<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
-    if s.len() >= prefix.len() && s.as_bytes()[..prefix.len()].eq_ignore_ascii_case(prefix.as_bytes()) {
+    if s.len() >= prefix.len()
+        && s.as_bytes()[..prefix.len()].eq_ignore_ascii_case(prefix.as_bytes())
+    {
         Some(&s[prefix.len()..])
     } else {
         None
@@ -212,7 +220,9 @@ mod tests {
 
     #[test]
     fn strips_javascript_href_but_keeps_normal_href() {
-        let out = sanitized(r#"<a href="javascript:alert(1)">bad</a><a href="https://example.com">good</a>"#);
+        let out = sanitized(
+            r#"<a href="javascript:alert(1)">bad</a><a href="https://example.com">good</a>"#,
+        );
         assert!(!out.contains("javascript:"));
         assert!(out.contains(r#"href="https://example.com""#));
     }

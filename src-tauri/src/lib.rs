@@ -20,16 +20,16 @@ use tauri::Manager;
 use tokio::sync::Mutex;
 
 use commands::update::update_channel;
+#[cfg(not(target_os = "android"))]
+use commands::update::{check_for_update, install_update};
 use commands::update::{
     clear_github_token, get_last_dismissed_version, get_release_notes, has_github_token,
     save_github_token, set_last_dismissed_version,
 };
-#[cfg(not(target_os = "android"))]
-use commands::update::{check_for_update, install_update};
-#[cfg(not(target_os = "android"))]
-use commands::update_linux::{linux_check_for_update, linux_install_kind, linux_install_update};
 #[cfg(all(target_os = "android", feature = "apk-self-update"))]
 use commands::update_android::{android_check_for_update, android_download_and_install};
+#[cfg(not(target_os = "android"))]
+use commands::update_linux::{linux_check_for_update, linux_install_kind, linux_install_update};
 use state::AppState;
 
 const AUTOSYNC_INTERVAL: Duration = Duration::from_secs(15 * 60);
@@ -119,7 +119,8 @@ pub fn run() {
                 // see `last_foreground_sync`'s doc comment.
                 #[cfg(mobile)]
                 {
-                    *app_state.last_foreground_sync.lock().unwrap() = Some(std::time::Instant::now());
+                    *app_state.last_foreground_sync.lock().unwrap() =
+                        Some(std::time::Instant::now());
                 }
             }
 

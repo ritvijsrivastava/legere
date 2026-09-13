@@ -16,10 +16,10 @@ use std::collections::HashMap;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tauri::{ipc::Channel, AppHandle, Manager, State};
+use tauri::{AppHandle, Manager, State, ipc::Channel};
 use tauri_plugin_apk_installer::ApkInstallerExt;
 
-use super::update::{read_token, OWNER, REPO, USER_AGENT};
+use super::update::{OWNER, REPO, USER_AGENT, read_token};
 use crate::error::AppError;
 use crate::models::UpdateInfo;
 use crate::state::AppState;
@@ -93,7 +93,9 @@ pub async fn android_check_for_update(
         .iter()
         .find(|a| a.name == "latest.json")
         .map(|a| a.url.clone())
-        .ok_or_else(|| AppError::Internal("No latest.json found in the latest release.".to_string()))?;
+        .ok_or_else(|| {
+            AppError::Internal("No latest.json found in the latest release.".to_string())
+        })?;
 
     let manifest: Manifest = client
         .get(&manifest_asset_url)
@@ -110,17 +112,17 @@ pub async fn android_check_for_update(
         .map_err(|e| AppError::Network(e.to_string()))?;
 
     let current = app.package_info().version.clone();
-    let latest = semver::Version::parse(&manifest.version).map_err(|e| AppError::Internal(e.to_string()))?;
+    let latest =
+        semver::Version::parse(&manifest.version).map_err(|e| AppError::Internal(e.to_string()))?;
 
     if latest <= current {
         *state.pending_android_update.lock().await = None;
         return Ok(None);
     }
 
-    let platform = manifest
-        .platforms
-        .get("android-aarch64")
-        .ok_or_else(|| AppError::Internal("No Android build found in the latest release.".to_string()))?;
+    let platform = manifest.platforms.get("android-aarch64").ok_or_else(|| {
+        AppError::Internal("No Android build found in the latest release.".to_string())
+    })?;
 
     *state.pending_android_update.lock().await = Some(AndroidUpdate {
         url: platform.url.clone(),
@@ -145,7 +147,9 @@ pub async fn android_download_and_install(
         .lock()
         .await
         .take()
-        .ok_or_else(|| AppError::Internal("No pending update. Check for updates first.".to_string()))?;
+        .ok_or_else(|| {
+            AppError::Internal("No pending update. Check for updates first.".to_string())
+        })?;
 
     let installer = app.apk_installer();
     if !installer
@@ -198,13 +202,18 @@ pub async fn android_download_and_install(
     if let Some(expected) = &update.sha256 {
         let actual = format!("{:x}", hasher.finalize());
         if &actual != expected {
-            return Err(AppError::Internal("Downloaded APK failed its integrity check.".to_string()));
+            return Err(AppError::Internal(
+                "Downloaded APK failed its integrity check.".to_string(),
+            ));
         }
     }
 
     // The app's FileProvider (gen/android) covers the whole cache dir, so any
     // path under here is safe to hand to the installer.
-    let cache_dir = app.path().app_cache_dir().map_err(|e| AppError::Internal(e.to_string()))?;
+    let cache_dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| AppError::Internal(e.to_string()))?;
     std::fs::create_dir_all(&cache_dir).map_err(|e| AppError::Internal(e.to_string()))?;
     let apk_path = cache_dir.join("legere-update.apk");
     std::fs::write(&apk_path, &bytes).map_err(|e| AppError::Internal(e.to_string()))?;

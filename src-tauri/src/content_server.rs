@@ -62,7 +62,11 @@ fn ok_response(bytes: Vec<u8>, mimetype: &str) -> Response<Cow<'static, [u8]>> {
 /// extensions fall back to a generic binary type rather than guessing
 /// wrong.
 fn guess_content_type(entry_path: &str) -> &'static str {
-    let ext = entry_path.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+    let ext = entry_path
+        .rsplit('.')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
     match ext.as_str() {
         "jpg" | "jpeg" => "image/jpeg",
         "png" => "image/png",
@@ -89,7 +93,10 @@ fn guess_content_type(entry_path: &str) -> &'static str {
 /// defense in depth regardless.
 pub fn serve(state: &AppState, request_path: &str) -> Response<Cow<'static, [u8]>> {
     let Some((article_id, entry_path)) = parse_request_path(request_path) else {
-        return text_response(StatusCode::BAD_REQUEST, "malformed legere-content:// request path");
+        return text_response(
+            StatusCode::BAD_REQUEST,
+            "malformed legere-content:// request path",
+        );
     };
 
     let conn = match state.pool.get() {
@@ -125,7 +132,10 @@ pub fn serve(state: &AppState, request_path: &str) -> Response<Cow<'static, [u8]
         return text_response(StatusCode::NOT_FOUND, "no such entry");
     };
     if !canonical.starts_with(&root) {
-        return text_response(StatusCode::BAD_REQUEST, "malformed legere-content:// request path");
+        return text_response(
+            StatusCode::BAD_REQUEST,
+            "malformed legere-content:// request path",
+        );
     }
 
     match std::fs::read(&canonical) {
@@ -185,11 +195,19 @@ mod tests {
         let data_dir = tempfile::tempdir().expect("tempdir");
         let state = build_state(data_dir.path());
         insert_article(&state, "article-1");
-        write_entry(data_dir.path(), "article-1", "https/example.com/photo.jpg", b"jpeg-bytes");
+        write_entry(
+            data_dir.path(),
+            "article-1",
+            "https/example.com/photo.jpg",
+            b"jpeg-bytes",
+        );
 
         let resp = serve(&state, "/article-1/https/example.com/photo.jpg");
         assert_eq!(resp.status(), StatusCode::OK);
-        assert_eq!(resp.headers().get(header::CONTENT_TYPE).unwrap(), "image/jpeg");
+        assert_eq!(
+            resp.headers().get(header::CONTENT_TYPE).unwrap(),
+            "image/jpeg"
+        );
         assert_eq!(resp.body().as_ref(), b"jpeg-bytes");
     }
 
@@ -198,7 +216,12 @@ mod tests {
         let data_dir = tempfile::tempdir().expect("tempdir");
         let state = build_state(data_dir.path());
         insert_article(&state, "article-1");
-        write_entry(data_dir.path(), "article-1", "https/example.com/article.png", b"nested");
+        write_entry(
+            data_dir.path(),
+            "article-1",
+            "https/example.com/article.png",
+            b"nested",
+        );
 
         let resp = serve(&state, "/article-1%2Fhttps%2Fexample.com%2Farticle.png");
         assert_eq!(resp.status(), StatusCode::OK);

@@ -32,7 +32,9 @@ pub extern "system" fn Java_com_ritvijsrivastava_legere_MainActivity_initTls<'lo
             tracing::error!(%error, "failed to initialize rustls-platform-verifier's Android context")
         }
         jni::Outcome::Panic(_) => {
-            tracing::error!("panicked while initializing rustls-platform-verifier's Android context")
+            tracing::error!(
+                "panicked while initializing rustls-platform-verifier's Android context"
+            )
         }
     }
 }

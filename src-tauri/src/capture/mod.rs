@@ -85,7 +85,8 @@ pub async fn capture_local(
 ) -> Result<LocalCaptureOutput, CaptureError> {
     let page = fetch::fetch_page(client, url).await?;
     let extracted = extract::extract(&page.html, page.final_url.as_str());
-    let sanitized_content = sanitize::sanitize(&extracted.content_html).map_err(CaptureError::Rewrite)?;
+    let sanitized_content =
+        sanitize::sanitize(&extracted.content_html).map_err(CaptureError::Rewrite)?;
 
     let localized = localize::localize_content(client, &sanitized_content, &page.final_url).await?;
 
@@ -172,19 +173,27 @@ mod tests {
             .await
             .expect("capture_local should succeed against the fixture server");
 
-        assert!(output.extraction_confident, "fixture article should be readable");
+        assert!(
+            output.extraction_confident,
+            "fixture article should be readable"
+        );
         assert!(output.title.contains("Quiet Harbor"));
         assert_eq!(
             output.link,
             format!("{base_url}/article.html?id=7"),
             "utm_source should be stripped, id kept"
         );
-        assert_eq!(output.final_url, url, "final_url should be the post-redirect fetched URL");
+        assert_eq!(
+            output.final_url, url,
+            "final_url should be the post-redirect fetched URL"
+        );
 
         // The readable view must reference the photo via a legere-content
         // token, never the fixture server directly.
         assert!(
-            output.content_html.contains("legere-content:/test-article/"),
+            output
+                .content_html
+                .contains("legere-content:/test-article/"),
             "got: {}",
             output.content_html
         );
@@ -197,7 +206,9 @@ mod tests {
         let content_dir = data_dir.path().join("content/test-article");
         let local_path = |url_str: &str| -> String {
             let url = url::Url::parse(url_str).unwrap();
-            crate::urlx::local_path_for(&crate::urlx::canonicalize(&url)).as_str().to_string()
+            crate::urlx::local_path_for(&crate::urlx::canonicalize(&url))
+                .as_str()
+                .to_string()
         };
 
         let photo_path = content_dir.join(local_path(&format!("{base_url}/photo.jpg")));

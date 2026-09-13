@@ -311,13 +311,21 @@ mod tests {
     #[test]
     fn preserves_query_order() {
         let url = Url::parse("https://example.com/path?b=2&a=1").unwrap();
-        assert_eq!(canonicalize(&url).as_str(), "https://example.com/path?b=2&a=1");
+        assert_eq!(
+            canonicalize(&url).as_str(),
+            "https://example.com/path?b=2&a=1"
+        );
     }
 
     #[test]
     fn strips_utm_params() {
-        let url = Url::parse("https://example.com/post?utm_source=newsletter&utm_medium=email&id=42").unwrap();
-        assert_eq!(strip_tracking_params(&url).as_str(), "https://example.com/post?id=42");
+        let url =
+            Url::parse("https://example.com/post?utm_source=newsletter&utm_medium=email&id=42")
+                .unwrap();
+        assert_eq!(
+            strip_tracking_params(&url).as_str(),
+            "https://example.com/post?id=42"
+        );
     }
 
     #[test]
@@ -332,7 +340,10 @@ mod tests {
     #[test]
     fn drops_query_entirely_when_only_tracking_params_present() {
         let url = Url::parse("https://example.com/post?utm_source=x&fbclid=y").unwrap();
-        assert_eq!(strip_tracking_params(&url).as_str(), "https://example.com/post");
+        assert_eq!(
+            strip_tracking_params(&url).as_str(),
+            "https://example.com/post"
+        );
     }
 
     fn map(s: &str) -> LocalPath {
@@ -341,12 +352,18 @@ mod tests {
 
     #[test]
     fn simple_path_is_readable() {
-        assert_eq!(map("https://example.com/blog/post.html").as_str(), "https/example.com/blog/post.html");
+        assert_eq!(
+            map("https://example.com/blog/post.html").as_str(),
+            "https/example.com/blog/post.html"
+        );
     }
 
     #[test]
     fn root_maps_to_index() {
-        assert_eq!(map("https://example.com/").as_str(), "https/example.com/index.html");
+        assert_eq!(
+            map("https://example.com/").as_str(),
+            "https/example.com/index.html"
+        );
     }
 
     #[test]

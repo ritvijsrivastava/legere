@@ -36,7 +36,8 @@ fn article_summary_from_row(row: &Row) -> rusqlite::Result<ArticleSummary> {
     })
 }
 
-const ARTICLE_SUMMARY_COLUMNS: &str = "id, title, source_name, source_type, excerpt, hero_image_path,
+const ARTICLE_SUMMARY_COLUMNS: &str =
+    "id, title, source_name, source_type, excerpt, hero_image_path,
                 published_at, read_time_min, reading_state, favorited, reading_progress, tags";
 
 /// A cheap pre-check used to skip capturing (fetching + localizing +
@@ -214,7 +215,10 @@ pub fn list_articles(conn: &Connection) -> rusqlite::Result<Vec<ArticleSummary>>
 /// done` doesn't have `%` behave as a wildcard. Paired with `ESCAPE '\'`
 /// on the `LIKE` clause in [`list_articles_page`].
 fn escape_like(input: &str) -> String {
-    input.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")
+    input
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
 }
 
 /// Filters/cursor for [`list_articles_page`] — borrowed rather than
@@ -298,17 +302,27 @@ pub fn list_articles_page(
     let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
     let mut rows: Vec<(ArticleSummary, String)> = stmt
         .query_map(param_refs.as_slice(), |row| {
-            Ok((article_summary_from_row(row)?, row.get::<_, String>("fetched_at")?))
+            Ok((
+                article_summary_from_row(row)?,
+                row.get::<_, String>("fetched_at")?,
+            ))
         })?
         .collect::<rusqlite::Result<_>>()?;
 
     let has_more = rows.len() as i64 > query.limit;
     rows.truncate(query.limit.max(0) as usize);
     let next_cursor = has_more
-        .then(|| rows.last().map(|(item, fetched_at)| (fetched_at.clone(), item.id.clone())))
+        .then(|| {
+            rows.last()
+                .map(|(item, fetched_at)| (fetched_at.clone(), item.id.clone()))
+        })
         .flatten();
     let items = rows.into_iter().map(|(item, _)| item).collect();
-    Ok(ArticlePageResult { items, has_more, next_cursor })
+    Ok(ArticlePageResult {
+        items,
+        has_more,
+        next_cursor,
+    })
 }
 
 pub fn count_all_articles(conn: &Connection) -> rusqlite::Result<i64> {
@@ -324,7 +338,11 @@ pub fn count_unread(conn: &Connection) -> rusqlite::Result<i64> {
 }
 
 pub fn count_favorited(conn: &Connection) -> rusqlite::Result<i64> {
-    conn.query_row("SELECT COUNT(*) FROM articles WHERE favorited = 1", [], |row| row.get(0))
+    conn.query_row(
+        "SELECT COUNT(*) FROM articles WHERE favorited = 1",
+        [],
+        |row| row.get(0),
+    )
 }
 
 /// Distinct `source_name`s with their article counts, for the sidebar's
@@ -336,7 +354,9 @@ pub fn list_categories(conn: &Connection) -> rusqlite::Result<Vec<(String, i64)>
     let mut stmt = conn.prepare(
         "SELECT source_name, COUNT(*) FROM articles GROUP BY source_name ORDER BY source_name COLLATE NOCASE",
     )?;
-    let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))?;
+    let rows = stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+    })?;
     rows.collect()
 }
 
@@ -348,7 +368,9 @@ pub fn list_tags(conn: &Connection) -> rusqlite::Result<Vec<(String, i64)>> {
         "SELECT value, COUNT(*) FROM articles, json_each(articles.tags)
          GROUP BY value ORDER BY value COLLATE NOCASE",
     )?;
-    let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))?;
+    let rows = stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+    })?;
     rows.collect()
 }
 
@@ -405,9 +427,11 @@ pub fn get_article_summary_by_link(
 /// article's row resolves to a real file, so an arbitrary/forged id in a
 /// request can't reach any other file under `content/`.
 pub fn article_exists(conn: &Connection, id: &str) -> rusqlite::Result<bool> {
-    conn.query_row("SELECT 1 FROM articles WHERE id = ?1", params![id], |_| Ok(()))
-        .optional()
-        .map(|r| r.is_some())
+    conn.query_row("SELECT 1 FROM articles WHERE id = ?1", params![id], |_| {
+        Ok(())
+    })
+    .optional()
+    .map(|r| r.is_some())
 }
 
 /// Persists the reader's scroll-fraction progress for an article, called
@@ -437,7 +461,10 @@ pub struct DeletedArticleFiles {
 /// The caller is also responsible for removing this id's `content/<id>/`
 /// directory — deterministic by id, so it isn't tracked in the returned
 /// struct the way `hero_image_path` (which varies) needs to be.
-pub fn delete_article(conn: &Connection, id: &str) -> rusqlite::Result<Option<DeletedArticleFiles>> {
+pub fn delete_article(
+    conn: &Connection,
+    id: &str,
+) -> rusqlite::Result<Option<DeletedArticleFiles>> {
     let row = conn
         .query_row(
             "SELECT source_id, hero_image_path FROM articles WHERE id = ?1",
@@ -565,7 +592,11 @@ pub fn get_source(conn: &Connection, id: &str) -> rusqlite::Result<Option<Source
     .optional()
 }
 
-pub fn insert_rss_source(conn: &Connection, name: &str, feed_url: &str) -> rusqlite::Result<Source> {
+pub fn insert_rss_source(
+    conn: &Connection,
+    name: &str,
+    feed_url: &str,
+) -> rusqlite::Result<Source> {
     let id = Uuid::new_v4().to_string();
     let created_at = Utc::now().to_rfc3339();
     conn.execute(
@@ -745,7 +776,10 @@ mod tests {
         let conn = migrated_conn();
         let source = insert_rss_source(&conn, "Feed", "https://example.com/feed.xml").unwrap();
         mark_source_error(&conn, &source.id, "boom").unwrap();
-        assert_eq!(get_source(&conn, &source.id).unwrap().unwrap().status, "error");
+        assert_eq!(
+            get_source(&conn, &source.id).unwrap().unwrap().status,
+            "error"
+        );
 
         // Errored source must be pausable...
         let paused = toggle_source_pause(&conn, &source.id).unwrap();
@@ -775,14 +809,37 @@ mod tests {
         let conn = migrated_conn();
         let source = insert_rss_source(&conn, "Feed", "https://example.com/feed.xml").unwrap();
         let output = sample_capture_output("https://example.com/article");
-        insert_captured_article(&conn, "art-1", Some(&source.id), &source.name, "rss", &output, &[]).unwrap();
-        assert_eq!(get_source(&conn, &source.id).unwrap().unwrap().article_count, 1);
+        insert_captured_article(
+            &conn,
+            "art-1",
+            Some(&source.id),
+            &source.name,
+            "rss",
+            &output,
+            &[],
+        )
+        .unwrap();
+        assert_eq!(
+            get_source(&conn, &source.id)
+                .unwrap()
+                .unwrap()
+                .article_count,
+            1
+        );
 
-        let deleted = delete_article(&conn, "art-1").unwrap().expect("row existed");
+        let deleted = delete_article(&conn, "art-1")
+            .unwrap()
+            .expect("row existed");
         assert_eq!(deleted.hero_image_path, None);
 
         assert!(get_article(&conn, "art-1").unwrap().is_none());
-        assert_eq!(get_source(&conn, &source.id).unwrap().unwrap().article_count, 0);
+        assert_eq!(
+            get_source(&conn, &source.id)
+                .unwrap()
+                .unwrap()
+                .article_count,
+            0
+        );
     }
 
     #[test]
@@ -808,9 +865,11 @@ mod tests {
         assert_eq!(article.source_type, "direct");
 
         let fetched_at: String = conn
-            .query_row("SELECT fetched_at FROM articles WHERE id = ?1", ["art-imported"], |row| {
-                row.get(0)
-            })
+            .query_row(
+                "SELECT fetched_at FROM articles WHERE id = ?1",
+                ["art-imported"],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(fetched_at, "2024-10-02T16:40:49.533Z");
     }
@@ -841,7 +900,10 @@ mod tests {
             false,
         )
         .unwrap();
-        assert!(!second, "UNIQUE(link) should silently absorb the duplicate insert");
+        assert!(
+            !second,
+            "UNIQUE(link) should silently absorb the duplicate insert"
+        );
         assert!(get_article(&conn, "art-2").unwrap().is_none());
     }
 
@@ -859,13 +921,19 @@ mod tests {
         assert_eq!(source.name, feed_url);
 
         set_source_name_if_default(&conn, &source.id, "Real Feed Title", feed_url).unwrap();
-        assert_eq!(get_source(&conn, &source.id).unwrap().unwrap().name, "Real Feed Title");
+        assert_eq!(
+            get_source(&conn, &source.id).unwrap().unwrap().name,
+            "Real Feed Title"
+        );
 
         // A later call — even with a *different* title — must not
         // overwrite a name that's no longer the placeholder (this is also
         // what protects a future user-set custom name).
         set_source_name_if_default(&conn, &source.id, "Some Other Title", feed_url).unwrap();
-        assert_eq!(get_source(&conn, &source.id).unwrap().unwrap().name, "Real Feed Title");
+        assert_eq!(
+            get_source(&conn, &source.id).unwrap().unwrap().name,
+            "Real Feed Title"
+        );
     }
 
     fn titled_output(link: &str, title: &str) -> LocalCaptureOutput {
@@ -926,7 +994,11 @@ mod tests {
             // takes fetched_at/id strings) — re-fetch them the same way a
             // real caller would, from the row just returned.
             let fetched_at: String = conn
-                .query_row("SELECT fetched_at FROM articles WHERE id = ?1", [&last.id], |r| r.get(0))
+                .query_row(
+                    "SELECT fetched_at FROM articles WHERE id = ?1",
+                    [&last.id],
+                    |r| r.get(0),
+                )
                 .unwrap();
             cursor_owned = Some((fetched_at, last.id.clone()));
             if seen.len() > 10 {
@@ -971,7 +1043,10 @@ mod tests {
             tags: &[],
             favorited_only: false,
         });
-        assert_eq!(by_search.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(), vec!["rust-1"]);
+        assert_eq!(
+            by_search.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(),
+            vec!["rust-1"]
+        );
 
         let by_source = run(&ArticlePageQuery {
             cursor: None,
@@ -981,7 +1056,10 @@ mod tests {
             tags: &[],
             favorited_only: false,
         });
-        assert_eq!(by_source.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(), vec!["js-1"]);
+        assert_eq!(
+            by_source.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(),
+            vec!["js-1"]
+        );
 
         let by_tag = run(&ArticlePageQuery {
             cursor: None,
@@ -991,7 +1069,10 @@ mod tests {
             tags: &["systems".to_string()],
             favorited_only: false,
         });
-        assert_eq!(by_tag.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(), vec!["rust-1"]);
+        assert_eq!(
+            by_tag.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(),
+            vec!["rust-1"]
+        );
 
         let favorited = run(&ArticlePageQuery {
             cursor: None,
@@ -1001,7 +1082,10 @@ mod tests {
             tags: &[],
             favorited_only: true,
         });
-        assert_eq!(favorited.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(), vec!["rust-1"]);
+        assert_eq!(
+            favorited.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(),
+            vec!["rust-1"]
+        );
     }
 
     #[test]
@@ -1034,8 +1118,16 @@ mod tests {
             .items
         };
 
-        assert_eq!(run("BATTERIES").len(), 1, "search should be case-insensitive");
-        assert_eq!(run("50% capacity").len(), 1, "literal % in the query should not act as a wildcard");
+        assert_eq!(
+            run("BATTERIES").len(),
+            1,
+            "search should be case-insensitive"
+        );
+        assert_eq!(
+            run("50% capacity").len(),
+            1,
+            "literal % in the query should not act as a wildcard"
+        );
         assert_eq!(
             run("50x capacity").len(),
             0,

@@ -94,10 +94,10 @@ mod imp {
 
     use futures_util::StreamExt;
     use sha2::{Digest, Sha256};
-    use tauri::{ipc::Channel, AppHandle, State};
+    use tauri::{AppHandle, State, ipc::Channel};
 
     use super::{DownloadProgress, LinuxPackageKind, LinuxUpdate, Manifest, Release};
-    use crate::commands::update::{read_token, OWNER, REPO, USER_AGENT};
+    use crate::commands::update::{OWNER, REPO, USER_AGENT, read_token};
     use crate::error::AppError;
     use crate::models::UpdateInfo;
     use crate::state::AppState;
@@ -121,7 +121,8 @@ mod imp {
             .args(["-W", "-f=${db:Status-Status}", "legere"])
             .output()
         {
-            if output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == "installed"
+            if output.status.success()
+                && String::from_utf8_lossy(&output.stdout).trim() == "installed"
             {
                 return Some("deb");
             }
@@ -149,7 +150,11 @@ mod imp {
         let kind = match detect_linux_install_kind() {
             Some("deb") => LinuxPackageKind::Deb,
             Some("rpm") => LinuxPackageKind::Rpm,
-            _ => return Err(AppError::Internal("Not a .deb or .rpm install.".to_string())),
+            _ => {
+                return Err(AppError::Internal(
+                    "Not a .deb or .rpm install.".to_string(),
+                ));
+            }
         };
 
         let token = read_token(&app)?;
@@ -176,7 +181,9 @@ mod imp {
             .iter()
             .find(|a| a.name == "latest.json")
             .map(|a| a.url.clone())
-            .ok_or_else(|| AppError::Internal("No latest.json found in the latest release.".to_string()))?;
+            .ok_or_else(|| {
+                AppError::Internal("No latest.json found in the latest release.".to_string())
+            })?;
 
         let manifest: Manifest = client
             .get(&manifest_asset_url)
@@ -193,7 +200,8 @@ mod imp {
             .map_err(|e| AppError::Network(e.to_string()))?;
 
         let current = app.package_info().version.clone();
-        let latest = semver::Version::parse(&manifest.version).map_err(|e| AppError::Internal(e.to_string()))?;
+        let latest = semver::Version::parse(&manifest.version)
+            .map_err(|e| AppError::Internal(e.to_string()))?;
 
         if latest <= current {
             *state.pending_linux_update.lock().await = None;
@@ -235,7 +243,9 @@ mod imp {
             .lock()
             .await
             .take()
-            .ok_or_else(|| AppError::Internal("No pending update. Check for updates first.".to_string()))?;
+            .ok_or_else(|| {
+                AppError::Internal("No pending update. Check for updates first.".to_string())
+            })?;
 
         let token = read_token(&app)?;
         let response = reqwest::Client::new()
@@ -277,7 +287,8 @@ mod imp {
         // /tmp, not app_cache_dir(): apt/dpkg read the local file as the
         // low-privilege _apt user, which may not be able to traverse into the
         // app's ~/.cache directory.
-        let pkg_path = std::env::temp_dir().join(format!("legere-update.{}", update.kind.package_ext()));
+        let pkg_path =
+            std::env::temp_dir().join(format!("legere-update.{}", update.kind.package_ext()));
         std::fs::write(&pkg_path, &bytes).map_err(|e| AppError::Internal(e.to_string()))?;
         std::fs::set_permissions(&pkg_path, std::fs::Permissions::from_mode(0o644))
             .map_err(|e| AppError::Internal(e.to_string()))?;
@@ -322,15 +333,19 @@ mod imp {
                 return Err(AppError::Internal(format!(
                     "Install was cancelled or failed. You can update manually from the downloaded \
                      package: {pkg_path_display}"
-                )))
+                )));
             }
             Err(e) if e.kind() == ErrorKind::NotFound => {
                 return Err(AppError::Internal(format!(
                     "pkexec is not available on this system. Install polkit, or update the package \
                      manually: {pkg_path_display}"
-                )))
+                )));
             }
-            Err(e) => return Err(AppError::Internal(format!("Failed to launch the installer: {e}"))),
+            Err(e) => {
+                return Err(AppError::Internal(format!(
+                    "Failed to launch the installer: {e}"
+                )));
+            }
         }
 
         Command::new(&current_exe).spawn().map_err(|e| {
@@ -346,7 +361,7 @@ mod imp {
 
 #[cfg(not(target_os = "linux"))]
 mod imp {
-    use tauri::{ipc::Channel, State};
+    use tauri::{State, ipc::Channel};
 
     use super::DownloadProgress;
     use crate::error::AppError;
@@ -370,7 +385,9 @@ mod imp {
         _state: State<'_, AppState>,
         _on_progress: Channel<DownloadProgress>,
     ) -> Result<(), AppError> {
-        Err(AppError::Internal("Not supported on this platform.".to_string()))
+        Err(AppError::Internal(
+            "Not supported on this platform.".to_string(),
+        ))
     }
 }
 

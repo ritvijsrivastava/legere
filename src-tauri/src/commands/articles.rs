@@ -24,7 +24,11 @@ pub async fn list_articles_page(
             (Some(fetched_at), Some(id)) => Some((fetched_at.as_str(), id.as_str())),
             _ => None,
         };
-        let search = request.search.as_deref().map(str::trim).filter(|s| !s.is_empty());
+        let search = request
+            .search
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
         let result = queries::list_articles_page(
             &conn,
             &queries::ArticlePageQuery {
@@ -122,7 +126,8 @@ pub async fn open_for_reading(
     let detail = tokio::task::spawn_blocking(move || {
         let conn = pool.get()?;
         queries::transition_to_reading(&conn, &id_for_transition)?;
-        queries::get_article(&conn, &id_for_transition)?.ok_or_else(|| AppError::not_found("article"))
+        queries::get_article(&conn, &id_for_transition)?
+            .ok_or_else(|| AppError::not_found("article"))
     })
     .await??;
 
@@ -224,8 +229,8 @@ pub async fn recapture_article(
         .await??
     };
 
-    let output = capture::capture_local(&state.http_client, &state.data_dir, &id, &existing.link)
-        .await?;
+    let output =
+        capture::capture_local(&state.http_client, &state.data_dir, &id, &existing.link).await?;
 
     let pool = state.pool.clone();
     let id_for_update = id.clone();

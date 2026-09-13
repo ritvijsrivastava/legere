@@ -14,8 +14,8 @@
 //! export is expected to contain plenty of dead links — it's recorded in
 //! [`ImportSummary::failed`] instead.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::Deserialize;
 use url::Url;
@@ -60,7 +60,9 @@ const SOURCE_NAME: &str = "Raindrop import";
 /// keeps event-emitting command wrappers thin and untested in favor of
 /// testing the inner logic directly (see e.g. `sources::rss::sync_rss_source`).
 pub enum ImportEvent {
-    Started { total: u32 },
+    Started {
+        total: u32,
+    },
     Progress(ImportProgress),
     /// New articles have landed since the last one of these (or since
     /// `Started`, for the first) — a cue to refetch the library list.
@@ -126,7 +128,11 @@ async fn process_row(
     row: RaindropRow,
 ) -> RowOutcome {
     let url = row.url.trim().to_string();
-    let display_title = if row.title.trim().is_empty() { url.clone() } else { row.title.clone() };
+    let display_title = if row.title.trim().is_empty() {
+        url.clone()
+    } else {
+        row.title.clone()
+    };
 
     let id = uuid::Uuid::new_v4().to_string();
     let output = match capture::capture_local(&http_client, &data_dir, &id, &url).await {
@@ -154,7 +160,15 @@ async fn process_row(
             });
         }
     };
-    match queries::insert_imported_article(&conn, &id, SOURCE_NAME, &output, &tags, &saved_at, favorited) {
+    match queries::insert_imported_article(
+        &conn,
+        &id,
+        SOURCE_NAME,
+        &output,
+        &tags,
+        &saved_at,
+        favorited,
+    ) {
         Ok(true) => RowOutcome::Imported,
         Ok(false) => RowOutcome::SkippedDuplicate,
         Err(err) => RowOutcome::Failed(ImportFailure {
@@ -318,9 +332,13 @@ mod tests {
     use crate::test_support;
 
     fn csv_bytes(rows: &[(&str, &str, &str, &str, &str)]) -> Vec<u8> {
-        let mut out = String::from("id,title,note,excerpt,url,folder,tags,created,cover,highlights,favorite\n");
+        let mut out = String::from(
+            "id,title,note,excerpt,url,folder,tags,created,cover,highlights,favorite\n",
+        );
         for (title, url, tags, created, favorite) in rows {
-            out.push_str(&format!("1,{title},,,{url},Unsorted,\"{tags}\",{created},,,{favorite}\n"));
+            out.push_str(&format!(
+                "1,{title},,,{url},Unsorted,\"{tags}\",{created},,,{favorite}\n"
+            ));
         }
         out.into_bytes()
     }
@@ -373,7 +391,10 @@ mod tests {
         assert_eq!(articles[0].source_name, SOURCE_NAME);
         assert_eq!(articles[0].source_type, "direct");
         assert!(articles[0].favorited);
-        assert_eq!(articles[0].tags, vec!["tag-one".to_string(), "tag-two".to_string()]);
+        assert_eq!(
+            articles[0].tags,
+            vec!["tag-one".to_string(), "tag-two".to_string()]
+        );
     }
 
     /// Two rows racing on the *same* link within a single `run_import`
@@ -422,8 +443,20 @@ mod tests {
         let state = build_state(data_dir.path());
 
         let csv = csv_bytes(&[
-            ("Missing", &format!("{base_url}/does-not-exist.html"), "", "2024-01-01T00:00:00Z", "false"),
-            ("Real", &format!("{base_url}/article.html?ok=1"), "", "2024-01-01T00:00:00Z", "false"),
+            (
+                "Missing",
+                &format!("{base_url}/does-not-exist.html"),
+                "",
+                "2024-01-01T00:00:00Z",
+                "false",
+            ),
+            (
+                "Real",
+                &format!("{base_url}/article.html?ok=1"),
+                "",
+                "2024-01-01T00:00:00Z",
+                "false",
+            ),
         ]);
 
         let summary = run_import(&state, csv, Arc::new(AtomicBool::new(false)), |_| {})
@@ -444,14 +477,23 @@ mod tests {
 
         let csv = csv_bytes(&[
             ("No URL", "", "", "2024-01-01T00:00:00Z", "false"),
-            ("Real", &format!("{base_url}/article.html?empty-url-test=1"), "", "2024-01-01T00:00:00Z", "false"),
+            (
+                "Real",
+                &format!("{base_url}/article.html?empty-url-test=1"),
+                "",
+                "2024-01-01T00:00:00Z",
+                "false",
+            ),
         ]);
 
         let summary = run_import(&state, csv, Arc::new(AtomicBool::new(false)), |_| {})
             .await
             .expect("valid csv should parse");
 
-        assert_eq!(summary.total, 1, "the blank-url row must not count toward the total");
+        assert_eq!(
+            summary.total, 1,
+            "the blank-url row must not count toward the total"
+        );
         assert_eq!(summary.imported, 1);
     }
 

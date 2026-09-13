@@ -160,13 +160,9 @@ mod tests {
             local("https://example.com/hero.jpg"),
         );
 
-        let out = rewrite_readable_asset_urls(
-            r#"<img src="hero.jpg">"#,
-            &base(),
-            "article-1",
-            &url_map,
-        )
-        .unwrap();
+        let out =
+            rewrite_readable_asset_urls(r#"<img src="hero.jpg">"#, &base(), "article-1", &url_map)
+                .unwrap();
         assert_eq!(
             out,
             r#"<img src="legere-content:/article-1/https/example.com/hero.jpg">"#
@@ -183,7 +179,10 @@ mod tests {
             &url_map,
         )
         .unwrap();
-        assert!(out.contains(r#"src="https://example.com/missing.png""#), "got: {out}");
+        assert!(
+            out.contains(r#"src="https://example.com/missing.png""#),
+            "got: {out}"
+        );
     }
 
     #[test]

@@ -176,11 +176,17 @@ mod tests {
 
     #[test]
     fn literal_ip_precheck_catches_what_the_resolver_never_sees() {
-        assert!(literal_ip_is_blocked(&Url::parse("http://127.0.0.1:9999/x").unwrap()));
+        assert!(literal_ip_is_blocked(
+            &Url::parse("http://127.0.0.1:9999/x").unwrap()
+        ));
         assert!(literal_ip_is_blocked(
             &Url::parse("http://169.254.169.254/latest/meta-data/").unwrap()
         ));
-        assert!(!literal_ip_is_blocked(&Url::parse("http://93.184.216.34/x").unwrap()));
-        assert!(!literal_ip_is_blocked(&Url::parse("http://example.com/x").unwrap()));
+        assert!(!literal_ip_is_blocked(
+            &Url::parse("http://93.184.216.34/x").unwrap()
+        ));
+        assert!(!literal_ip_is_blocked(
+            &Url::parse("http://example.com/x").unwrap()
+        ));
     }
 }

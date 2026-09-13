@@ -102,7 +102,10 @@ async fn sweep_content(data_dir: &Path, live_article_ids: &HashSet<String>) {
                 continue;
             };
             if !live_article_ids.contains(article_id) {
-                tracing::info!(article_id, "orphan sweep: removing unreferenced content directory");
+                tracing::info!(
+                    article_id,
+                    "orphan sweep: removing unreferenced content directory"
+                );
                 let _ = tokio::fs::remove_dir_all(&path).await;
             }
         } else {
