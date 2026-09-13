@@ -32,6 +32,20 @@
 	} = $props();
 
 	let search = $state('');
+	// The `filtered` derived below re-scans the whole (unbounded, until it's
+	// paginated) items array on every dependency change — debounce so fast
+	// typing doesn't force a recompute + full re-render per keystroke.
+	let debouncedSearch = $state('');
+	let searchTimer: ReturnType<typeof setTimeout> | undefined;
+	$effect(() => {
+		const value = search;
+		clearTimeout(searchTimer);
+		searchTimer = setTimeout(() => {
+			debouncedSearch = value;
+		}, 120);
+		return () => clearTimeout(searchTimer);
+	});
+
 	let libraryView = $state<LibraryView>('cards');
 	let initializedFromSettings = false;
 
@@ -51,7 +65,10 @@
 
 	let filtered = $derived(
 		items.filter((a) => {
-			if (search.trim() && !a.title.toLowerCase().includes(search.trim().toLowerCase())) {
+			if (
+				debouncedSearch.trim() &&
+				!a.title.toLowerCase().includes(debouncedSearch.trim().toLowerCase())
+			) {
 				return false;
 			}
 			if (libraryFiltersStore.sourceName && a.source_name !== libraryFiltersStore.sourceName) {
