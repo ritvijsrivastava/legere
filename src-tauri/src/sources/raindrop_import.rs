@@ -37,7 +37,15 @@ const CONCURRENCY: usize = 5;
 /// once the whole run finishes. [`run_import`] always fires one more at
 /// the very end regardless of this cadence (including for a cancelled
 /// run), so nothing imported is ever left unreported.
-const LIBRARY_REFRESH_BATCH: u32 = 20;
+///
+/// Higher than it needs to be for responsiveness alone: each firing used
+/// to cost the frontend a full library refetch+re-render
+/// (`articlesStore.refresh()` over every article), so this was kept low.
+/// Now it's a cheap paginated "fetch page 1, prepend what's new" merge
+/// (see `libraryStatsStore`/`ArticleCollection` on the frontend), so a
+/// larger batch just means fewer redundant events during a multi-thousand-
+/// row import, not a less-live-feeling one.
+const LIBRARY_REFRESH_BATCH: u32 = 100;
 
 /// `source_name` stored on every imported article — lets the library UI
 /// (which groups/labels by `source_name`) distinguish these from
