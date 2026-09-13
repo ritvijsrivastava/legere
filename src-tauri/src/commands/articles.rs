@@ -181,6 +181,33 @@ pub async fn save_reading_progress(
     .await?
 }
 
+/// Replaces an article's whole tag set with `tags` (normalized to
+/// lowercase/trimmed/deduped by `queries::set_article_tags` regardless of
+/// what the reader's tag editor sends), returning the normalized list
+/// actually stored so the UI can reconcile optimistic local state with it.
+/// Emits `articles:changed` so the sidebar's tag list/counts (driven by
+/// `list_tags`) pick up new/removed tags without a manual refresh.
+#[tauri::command]
+pub async fn set_article_tags(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    tags: Vec<String>,
+) -> Result<Vec<String>, AppError> {
+    let pool = state.pool.clone();
+    let id_for_query = id.clone();
+    let updated = tokio::task::spawn_blocking(move || {
+        let conn = pool.get()?;
+        queries::set_article_tags(&conn, &id_for_query, &tags)?
+            .ok_or_else(|| AppError::not_found("article"))
+    })
+    .await??;
+
+    events::emit_articles_changed(&app);
+
+    Ok(updated)
+}
+
 /// Deletes an article and its files (content directory + hero thumbnail,
 /// if any). Deleting an id that no longer exists is treated as success —
 /// idempotent, so a double-click or a stale UI state can't surface an

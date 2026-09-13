@@ -69,6 +69,13 @@ export function saveReadingProgress(id: string, progress: number): Promise<void>
 	return invoke<void>('save_reading_progress', { id, progress });
 }
 
+/** Replaces an article's whole tag set. The backend normalizes to
+ *  lowercase/trimmed/deduped regardless of what's passed in and returns
+ *  the tags actually stored, for the caller to reconcile local state with. */
+export function setArticleTags(id: string, tags: string[]): Promise<string[]> {
+	return invoke<string[]>('set_article_tags', { id, tags });
+}
+
 export function addDirectLinkArticle(url: string): Promise<ArticleSummary> {
 	return invoke<ArticleSummary>('add_direct_link_article', { url });
 }
