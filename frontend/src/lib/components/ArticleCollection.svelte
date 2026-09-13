@@ -64,7 +64,7 @@
 
 	let hasActiveFilters = $derived(
 		debouncedSearch.trim().length > 0 ||
-			libraryFiltersStore.sourceName !== null ||
+			libraryFiltersStore.categoryId !== null ||
 			libraryFiltersStore.tags.length > 0
 	);
 
@@ -88,7 +88,7 @@
 		return {
 			limit: PAGE_SIZE,
 			search: debouncedSearch.trim() || null,
-			source_name: libraryFiltersStore.sourceName,
+			category_id: libraryFiltersStore.categoryId,
 			tags: [...libraryFiltersStore.tags],
 			favorited_only: favoritedOnly
 		};
@@ -146,7 +146,7 @@
 	// scroll to the top makes sense here.
 	$effect(() => {
 		void debouncedSearch;
-		void libraryFiltersStore.sourceName;
+		void libraryFiltersStore.categoryId;
 		void libraryFiltersStore.tags;
 		void favoritedOnly;
 		if (scrollAreaEl) scrollAreaEl.scrollTop = 0;
@@ -378,18 +378,18 @@
 		<div class="mobile-chips">
 			<button
 				class="chip"
-				class:active={!libraryFiltersStore.sourceName}
-				onclick={() => (libraryFiltersStore.sourceName = null)}
+				class:active={!libraryFiltersStore.categoryId}
+				onclick={() => (libraryFiltersStore.categoryId = null)}
 			>
 				All
 			</button>
-			{#each libraryStatsStore.categories as [name] (name)}
+			{#each libraryStatsStore.categories as category (category.id)}
 				<button
 					class="chip"
-					class:active={libraryFiltersStore.sourceName === name}
-					onclick={() => libraryFiltersStore.toggleSource(name)}
+					class:active={libraryFiltersStore.categoryId === category.id}
+					onclick={() => libraryFiltersStore.toggleCategory(category.id)}
 				>
-					{name}
+					{category.name}
 				</button>
 			{/each}
 		</div>

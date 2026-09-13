@@ -342,7 +342,9 @@ pub struct ArticlePageQuery<'a> {
     pub cursor: Option<(&'a str, &'a str)>,
     pub limit: i64,
     pub search: Option<&'a str>,
-    pub source_name: Option<&'a str>,
+    /// Real category/folder id. `__uncategorized__` means
+    /// `articles.category_id IS NULL`.
+    pub category_id: Option<&'a str>,
     /// Any-of match against the article's `tags` JSON array, via
     /// `json_each` (bundled SQLite has had the JSON functions built in,
     /// no extension needed, since 3.38 — comfortably covered by this
@@ -387,9 +389,13 @@ pub fn list_articles_page(
         sql.push_str(" AND title LIKE ? ESCAPE '\\'");
         params.push(Box::new(format!("%{}%", escape_like(search))));
     }
-    if let Some(source_name) = query.source_name {
-        sql.push_str(" AND source_name = ?");
-        params.push(Box::new(source_name.to_string()));
+    if let Some(category_id) = query.category_id {
+        if category_id == "__uncategorized__" {
+            sql.push_str(" AND category_id IS NULL");
+        } else {
+            sql.push_str(" AND category_id = ?");
+            params.push(Box::new(category_id.to_string()));
+        }
     }
     if !query.tags.is_empty() {
         let placeholders = vec!["?"; query.tags.len()].join(", ");
@@ -510,6 +516,14 @@ fn category_from_row(row: &Row) -> rusqlite::Result<Category> {
 /// `V9`) so it doesn't disappear from this list just because its last
 /// article was reassigned elsewhere. Ordered case-insensitively by name,
 /// same convention as [`list_tags`].
+pub fn count_uncategorized(conn: &Connection) -> rusqlite::Result<i64> {
+    conn.query_row(
+        "SELECT COUNT(*) FROM articles WHERE category_id IS NULL",
+        [],
+        |row| row.get(0),
+    )
+}
+
 pub fn fetch_categories(conn: &Connection) -> rusqlite::Result<Vec<Category>> {
     let mut stmt = conn.prepare(
         "SELECT c.id AS id, c.name AS name, COUNT(a.id) AS article_count
@@ -1658,7 +1672,7 @@ mod tests {
                     cursor,
                     limit: 2,
                     search: None,
-                    source_name: None,
+                    category_id: None,
                     tags: &[],
                     favorited_only: false,
                 },
@@ -1690,8 +1704,9 @@ mod tests {
     }
 
     #[test]
-    fn list_articles_page_filters_by_search_source_name_tags_and_favorited() {
+    fn list_articles_page_filters_by_search_category_tags_and_favorited() {
         let conn = migrated_conn();
+        let js_category = create_category(&conn, "JS folder").unwrap();
         insert_imported_article(
             &conn,
             "rust-1",
@@ -1712,6 +1727,7 @@ mod tests {
             false,
         )
         .unwrap();
+        set_article_category(&conn, "js-1", Some(&js_category.id)).unwrap();
 
         let run = |q: &ArticlePageQuery| list_articles_page(&conn, q).unwrap().items;
 
@@ -1719,7 +1735,7 @@ mod tests {
             cursor: None,
             limit: 10,
             search: Some("ownership"),
-            source_name: None,
+            category_id: None,
             tags: &[],
             favorited_only: false,
         });
@@ -1728,16 +1744,19 @@ mod tests {
             vec!["rust-1"]
         );
 
-        let by_source = run(&ArticlePageQuery {
+        let by_category = run(&ArticlePageQuery {
             cursor: None,
             limit: 10,
             search: None,
-            source_name: Some("JS Weekly"),
+            category_id: Some(&js_category.id),
             tags: &[],
             favorited_only: false,
         });
         assert_eq!(
-            by_source.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(),
+            by_category
+                .iter()
+                .map(|a| a.id.as_str())
+                .collect::<Vec<_>>(),
             vec!["js-1"]
         );
 
@@ -1745,7 +1764,7 @@ mod tests {
             cursor: None,
             limit: 10,
             search: None,
-            source_name: None,
+            category_id: None,
             tags: &["systems".to_string()],
             favorited_only: false,
         });
@@ -1758,7 +1777,7 @@ mod tests {
             cursor: None,
             limit: 10,
             search: None,
-            source_name: None,
+            category_id: None,
             tags: &[],
             favorited_only: true,
         });
@@ -1766,6 +1785,55 @@ mod tests {
             favorited.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(),
             vec!["rust-1"]
         );
+    }
+
+    #[test]
+    fn list_articles_page_filters_uncategorized_articles() {
+        let conn = migrated_conn();
+        let category = create_category(&conn, "Saved").unwrap();
+        insert_imported_article(
+            &conn,
+            "categorized",
+            "Feed",
+            &sample_capture_output("https://example.com/categorized"),
+            &[],
+            "2024-01-01T00:00:00Z",
+            false,
+        )
+        .unwrap();
+        insert_imported_article(
+            &conn,
+            "uncategorized",
+            "Feed",
+            &sample_capture_output("https://example.com/uncategorized"),
+            &[],
+            "2024-01-02T00:00:00Z",
+            false,
+        )
+        .unwrap();
+        set_article_category(&conn, "categorized", Some(&category.id)).unwrap();
+
+        let result = list_articles_page(
+            &conn,
+            &ArticlePageQuery {
+                cursor: None,
+                limit: 10,
+                search: None,
+                category_id: Some("__uncategorized__"),
+                tags: &[],
+                favorited_only: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            result
+                .items
+                .iter()
+                .map(|article| article.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["uncategorized"]
+        );
+        assert_eq!(count_uncategorized(&conn).unwrap(), 1);
     }
 
     #[test]
@@ -1789,7 +1857,7 @@ mod tests {
                     cursor: None,
                     limit: 10,
                     search: Some(search),
-                    source_name: None,
+                    category_id: None,
                     tags: &[],
                     favorited_only: false,
                 },

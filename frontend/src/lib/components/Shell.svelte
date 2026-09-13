@@ -77,16 +77,12 @@
 		settingsStore.update({ app_theme: next });
 	}
 
-	// Sidebar Categories/Tags: the design's mock data hardcodes a fixed
-	// Design/Technology/Culture taxonomy with no real analogue in this
-	// app. Categories here are derived from each article's real source
-	// instead (same dot+label+count shape, same click-to-filter
-	// behavior); tags are real, parsed from the source feed's
-	// `<category>` elements at capture time. Both come from
-	// `libraryStatsStore`'s SQL-computed `list_categories`/`list_tags`
-	// rather than scanning an in-memory copy of the whole library, which
-	// no longer exists once articles are paginated (see
-	// `ArticleCollection`).
+	// Sidebar Categories/Tags: categories are real user-managed folders,
+	// separate from source_name provenance. Empty categories remain visible;
+	// Uncategorized is a virtual entry for articles whose category_id is
+	// null. Both lists come from SQL-backed aggregate stores rather than
+	// scanning an in-memory copy of the whole library, which no longer
+	// exists once articles are paginated (see `ArticleCollection`).
 	let categories = $derived(libraryStatsStore.categories);
 	let tags = $derived(libraryStatsStore.tags);
 </script>
@@ -107,15 +103,15 @@
 	{#if categories.length > 0}
 		<div class="divider"></div>
 		<div class="section-label">Categories</div>
-		{#each categories as [name, count] (name)}
+		{#each categories as category (category.id)}
 			<button
 				class="row-item"
-				class:active={libraryFiltersStore.sourceName === name}
-				onclick={() => libraryFiltersStore.toggleSource(name)}
+				class:active={libraryFiltersStore.categoryId === category.id}
+				onclick={() => libraryFiltersStore.toggleCategory(category.id)}
 			>
-				<span class="dot" style:background={sourceDotColor(name)}></span>
-				<span class="row-label">{name}</span>
-				<span class="nav-count">{count}</span>
+				<span class="dot" style:background={sourceDotColor(category.name)}></span>
+				<span class="row-label">{category.name}</span>
+				<span class="nav-count">{category.article_count}</span>
 			</button>
 		{/each}
 	{/if}

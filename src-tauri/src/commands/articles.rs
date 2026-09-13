@@ -35,7 +35,7 @@ pub async fn list_articles_page(
                 cursor,
                 limit: request.limit.max(1),
                 search,
-                source_name: request.source_name.as_deref(),
+                category_id: request.category_id.as_deref(),
                 tags: &request.tags,
                 favorited_only: request.favorited_only,
             },

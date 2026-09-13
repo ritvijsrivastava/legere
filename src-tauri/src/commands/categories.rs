@@ -19,6 +19,16 @@ use crate::state::AppState;
 /// dispatched by function name, not module path, so the two can't
 /// collide.
 #[tauri::command]
+pub async fn count_uncategorized(state: State<'_, AppState>) -> Result<i64, AppError> {
+    let pool = state.pool.clone();
+    tokio::task::spawn_blocking(move || {
+        let conn = pool.get()?;
+        Ok(queries::count_uncategorized(&conn)?)
+    })
+    .await?
+}
+
+#[tauri::command]
 pub async fn get_categories(state: State<'_, AppState>) -> Result<Vec<Category>, AppError> {
     let pool = state.pool.clone();
     tokio::task::spawn_blocking(move || {

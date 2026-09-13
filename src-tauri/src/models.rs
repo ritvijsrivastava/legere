@@ -58,7 +58,9 @@ pub struct ArticlePageRequest {
     pub cursor_id: Option<String>,
     pub limit: i64,
     pub search: Option<String>,
-    pub source_name: Option<String>,
+    /// Real category/folder id. The reserved `__uncategorized__` value
+    /// filters articles whose nullable `category_id` is NULL.
+    pub category_id: Option<String>,
     /// Matches articles tagged with *any* of these (OR semantics) —
     /// mirrors the sidebar's multi-select tag filter.
     pub tags: Vec<String>,

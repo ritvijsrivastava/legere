@@ -44,6 +44,10 @@ export function registerBackendEvents() {
 		sourcesStore.refresh();
 	});
 
+	listen('category:changed', () => {
+		libraryStatsStore.notifyChanged();
+	});
+
 	listen<number>('import:started', (event) => {
 		importStore.started(event.payload);
 	});

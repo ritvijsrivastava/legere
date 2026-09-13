@@ -5,9 +5,15 @@
 	import { uiStore } from '$lib/stores/ui.svelte';
 	import { importStore } from '$lib/stores/import.svelte';
 	import ChevronRight from '$lib/icons/ChevronRight.svelte';
-	import type { LibraryView, ReaderMeasure, ReaderTheme } from '$lib/types';
+	import type { Category, LibraryView, ReaderMeasure, ReaderTheme } from '$lib/types';
 	import { isTauri } from '$lib/platform';
-	import { errorMessage } from '$lib/api';
+	import {
+		errorMessage,
+		getCategories,
+		createCategory,
+		renameCategory,
+		deleteCategory
+	} from '$lib/api';
 	import {
 		currentVersion,
 		hasToken,
@@ -55,6 +61,19 @@
 	let installDone = $state(false);
 
 	let showLinuxWarning = $state(false);
+
+	let categories = $state<Category[]>([]);
+	let categoryName = $state('');
+	let editingCategoryId = $state<string | null>(null);
+	let editingCategoryName = $state('');
+	let categoryError = $state('');
+	let categorySaving = $state(false);
+
+	$effect(() => {
+		getCategories()
+			.then((items) => (categories = items))
+			.catch((e) => (categoryError = errorMessage(e)));
+	});
 
 	onMount(async () => {
 		if (!tauri) return;
@@ -178,6 +197,56 @@
 	function setAutosync(enabled: boolean) {
 		settingsStore.update({ autosync: enabled });
 	}
+
+	async function addCategory() {
+		const name = categoryName.trim();
+		if (!name) return;
+		categorySaving = true;
+		categoryError = '';
+		try {
+			const created = await createCategory(name);
+			categories = [...categories, created].sort((a, b) => a.name.localeCompare(b.name));
+			categoryName = '';
+		} catch (e) {
+			categoryError = errorMessage(e);
+		} finally {
+			categorySaving = false;
+		}
+	}
+
+	function beginRename(category: Category) {
+		editingCategoryId = category.id;
+		editingCategoryName = category.name;
+		categoryError = '';
+	}
+
+	async function saveCategoryRename() {
+		if (!editingCategoryId || !editingCategoryName.trim()) return;
+		categorySaving = true;
+		categoryError = '';
+		try {
+			const updated = await renameCategory(editingCategoryId, editingCategoryName.trim());
+			categories = categories
+				.map((category) => (category.id === updated.id ? updated : category))
+				.sort((a, b) => a.name.localeCompare(b.name));
+			editingCategoryId = null;
+		} catch (e) {
+			categoryError = errorMessage(e);
+		} finally {
+			categorySaving = false;
+		}
+	}
+
+	async function removeCategory(category: Category) {
+		if (!confirm(`Delete the category "${category.name}"? Its articles will become Uncategorized.`)) return;
+		categoryError = '';
+		try {
+			await deleteCategory(category.id);
+			categories = categories.filter((item) => item.id !== category.id);
+		} catch (e) {
+			categoryError = errorMessage(e);
+		}
+	}
 	function setReaderTheme(theme: ReaderTheme) {
 		settingsStore.update({ reader_theme: theme });
 	}
@@ -289,6 +358,43 @@
 	</section>
 
 	<section>
+		<h4>Categories</h4>
+		<p class="text-muted section-desc">
+			Manage the flat folders used by your library. Deleting one keeps its articles and moves them to Uncategorized.
+		</p>
+		<div class="category-create-row">
+			<input
+				class="input"
+				placeholder="New category"
+				bind:value={categoryName}
+				onkeydown={(event) => event.key === 'Enter' && addCategory()}
+			/>
+			<button class="btn btn-secondary" onclick={addCategory} disabled={categorySaving || !categoryName.trim()}>
+				{categorySaving ? 'Saving…' : 'Add'}
+			</button>
+		</div>
+		{#if categories.length > 0}
+			<div class="category-list">
+				{#each categories as category (category.id)}
+					<div class="category-row">
+						{#if editingCategoryId === category.id}
+							<input class="input" bind:value={editingCategoryName} aria-label={`Rename ${category.name}`} />
+							<button class="btn btn-ghost" onclick={saveCategoryRename} disabled={categorySaving}>Save</button>
+							<button class="btn btn-ghost" onclick={() => (editingCategoryId = null)}>Cancel</button>
+						{:else}
+							<span class="category-name">{category.name}</span>
+							<span class="text-muted category-count">{category.article_count}</span>
+							<button class="btn btn-ghost category-action" onclick={() => beginRename(category)}>Rename</button>
+							<button class="btn btn-ghost category-action danger-action" onclick={() => removeCategory(category)}>Delete</button>
+						{/if}
+					</div>
+				{/each}
+			</div>
+		{/if}
+		{#if categoryError}<p class="error-text">{categoryError}</p>{/if}
+	</section>
+
+	<section>
 		<h4>Sources</h4>
 		<a href="/sources" class="sources-link">
 			<span>Manage sources</span>
@@ -305,8 +411,8 @@
 			</p>
 		{:else}
 			<p class="text-muted section-desc">
-				Import bookmarks from a Raindrop.io CSV export. Links and tags are imported; notes, folders,
-				and highlights are not.
+				Import bookmarks from a Raindrop.io CSV export. Links, tags, and folders are reviewed before capture;
+				notes and highlights are not imported.
 			</p>
 			<button class="btn btn-secondary" onclick={() => uiStore.openImportDialog()}>
 				Import from Raindrop
@@ -573,6 +679,46 @@
 		font-size: 12px;
 		font-variant-numeric: tabular-nums;
 	}
+	.category-create-row {
+		display: flex;
+		gap: 8px;
+		margin-bottom: 8px;
+	}
+	.category-create-row .input {
+		min-width: 0;
+		flex: 1;
+	}
+	.category-list {
+		border-top: 1px solid var(--color-divider);
+	}
+	.category-row {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		min-height: 40px;
+		border-bottom: 1px solid var(--color-divider);
+	}
+	.category-row .input {
+		min-width: 0;
+		flex: 1;
+	}
+	.category-name {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.category-count {
+		font-size: 12px;
+		font-variant-numeric: tabular-nums;
+	}
+	.category-action {
+		font-size: 12px;
+		padding: 5px 4px;
+	}
+	.danger-action {
+		color: var(--color-danger);
+	}
 	.sources-link {
 		display: flex;
 		align-items: center;
@@ -684,6 +830,16 @@
 		padding-top: 10px;
 		border-top: 1px solid var(--color-divider);
 		line-height: 1.5;
+	}
+
+	@media (max-width: 520px) {
+		.category-row {
+			flex-wrap: wrap;
+			padding: 6px 0;
+		}
+		.category-action {
+			margin-left: 0;
+		}
 	}
 
 	@media (max-width: 768px) {

@@ -1,13 +1,14 @@
 /** Sidebar-driven filters (Categories/Tags in Shell.svelte), read by
  *  `ArticleCollection` and applied server-side (see `ArticlePageRequest`)
  *  alongside whatever view (Library/Favorites) and search term it's
- *  already scoped to. */
+ *  already scoped to. Categories are real folder ids; the reserved
+ *  `__uncategorized__` value represents articles with no category. */
 class LibraryFiltersStore {
-	sourceName = $state<string | null>(null);
+	categoryId = $state<string | null>(null);
 	tags = $state<string[]>([]);
 
-	toggleSource(name: string) {
-		this.sourceName = this.sourceName === name ? null : name;
+	toggleCategory(id: string) {
+		this.categoryId = this.categoryId === id ? null : id;
 	}
 
 	toggleTag(tag: string) {
@@ -15,7 +16,7 @@ class LibraryFiltersStore {
 	}
 
 	clear() {
-		this.sourceName = null;
+		this.categoryId = null;
 		this.tags = [];
 	}
 }

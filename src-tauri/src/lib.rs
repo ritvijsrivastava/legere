@@ -143,6 +143,7 @@ pub fn run() {
             commands::articles::count_favorited,
             commands::articles::list_categories,
             commands::articles::list_tags,
+            commands::categories::count_uncategorized,
             commands::categories::get_categories,
             commands::categories::create_category,
             commands::categories::rename_category,

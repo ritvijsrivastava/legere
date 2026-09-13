@@ -40,6 +40,10 @@ export function countFavorited(): Promise<number> {
 	return invoke<number>('count_favorited');
 }
 
+export function countUncategorized(): Promise<number> {
+	return invoke<number>('count_uncategorized');
+}
+
 export function listCategories(): Promise<NamedCount[]> {
 	return invoke<NamedCount[]>('list_categories');
 }

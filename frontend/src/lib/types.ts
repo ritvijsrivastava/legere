@@ -83,7 +83,8 @@ export interface ArticlePageRequest {
 	cursor_id: string | null;
 	limit: number;
 	search: string | null;
-	source_name: string | null;
+	/** Real category/folder id; `__uncategorized__` filters null category_id. */
+	category_id: string | null;
 	/** Any-of match (OR semantics) against an article's tags. */
 	tags: string[];
 	favorited_only: boolean;
