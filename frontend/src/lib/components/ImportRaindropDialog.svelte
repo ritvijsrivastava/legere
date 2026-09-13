@@ -53,14 +53,28 @@
 		}
 	}
 
+	// `cancelling` stays true across the whole gap between "user clicked
+	// cancel" and "the backend actually stopped" — up to `CONCURRENCY`
+	// (5) in-flight captures are allowed to finish before the import
+	// really ends (see `raindrop_import::run_import`'s doc comment), which
+	// can take several seconds. Resetting `cancelling` as soon as the
+	// `cancel_raindrop_import` call itself resolves (it only flips a flag,
+	// so that round-trip is near-instant) made the button flip back to
+	// "Cancel import" immediately, looking like the click did nothing
+	// right up until the import quietly stopped later.
 	async function cancelImport() {
 		cancelling = true;
 		try {
 			await api.cancelRaindropImport();
-		} finally {
+		} catch (e) {
 			cancelling = false;
+			error = api.errorMessage(e);
 		}
 	}
+
+	$effect(() => {
+		if (!importStore.running) cancelling = false;
+	});
 
 	function startOver() {
 		importStore.dismiss();
@@ -97,7 +111,13 @@
 						{importStore.imported} imported · {importStore.skippedDuplicate} already saved · {importStore.failedCount}
 						failed
 					</p>
+					{#if cancelling}
+						<p class="text-muted counts">Finishing in-flight articles before stopping…</p>
+					{/if}
 				</div>
+				{#if error}
+					<div class="dialog-body dialog-body-error">{error}</div>
+				{/if}
 				<div class="dialog-actions">
 					<button class="btn btn-secondary" onclick={close}>Hide</button>
 					<button class="btn btn-secondary" disabled={cancelling} onclick={cancelImport}>
