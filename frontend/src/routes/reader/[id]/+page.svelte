@@ -7,6 +7,7 @@
 	import type { ArticleDetail, ReaderMeasure, ReaderLeading, ReaderTheme } from '$lib/types';
 	import HeroImage from '$lib/components/HeroImage.svelte';
 	import ReaderControls from '$lib/components/ReaderControls.svelte';
+	import TagEditor from '$lib/components/TagEditor.svelte';
 	import ArticleOverflowMenu from '$lib/components/ArticleOverflowMenu.svelte';
 	import ChevronLeft from '$lib/icons/ChevronLeft.svelte';
 	import Star from '$lib/icons/Star.svelte';
@@ -249,6 +250,16 @@
 			</div>
 			<h1 class="reader-title">{article.title}</h1>
 
+			<div class="reader-tags">
+				<TagEditor
+					articleId={article.id}
+					tags={article.tags}
+					onChange={(tags) => {
+						if (article) article = { ...article, tags };
+					}}
+				/>
+			</div>
+
 			<div
 				class="reader-body"
 				style:font-size="{fontSize}px"
@@ -343,6 +354,9 @@
 		font-size: 13px;
 		margin-bottom: 10px;
 		color: var(--reader-muted, var(--color-muted));
+	}
+	.reader-tags {
+		margin: 0 0 28px;
 	}
 	.reader-title {
 		font-family: var(--font-reading);
