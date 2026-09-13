@@ -10,8 +10,22 @@
 	let {
 		article,
 		onclick,
-		ondelete
-	}: { article: ArticleSummary; onclick: () => void; ondelete: () => void } = $props();
+		ondelete,
+		onMountRoot
+	}: {
+		article: ArticleSummary;
+		onclick: () => void;
+		ondelete: () => void;
+		/** Called once this card's root element exists — `ArticleCollection`
+		 *  uses it (only on the window's first rendered card) to measure a
+		 *  real row height for its virtualized grid. */
+		onMountRoot?: (el: HTMLElement) => void;
+	} = $props();
+
+	let wrapperEl = $state<HTMLElement | null>(null);
+	$effect(() => {
+		if (wrapperEl) onMountRoot?.(wrapperEl);
+	});
 
 	function toggleFavorite(e: MouseEvent) {
 		e.stopPropagation();
@@ -19,7 +33,7 @@
 	}
 </script>
 
-<div class="card-wrapper">
+<div class="card-wrapper" bind:this={wrapperEl}>
 	<div
 		{onclick}
 		onkeydown={(e) => {

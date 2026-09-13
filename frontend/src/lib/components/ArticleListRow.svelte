@@ -10,8 +10,22 @@
 	let {
 		article,
 		onclick,
-		ondelete
-	}: { article: ArticleSummary; onclick: () => void; ondelete: () => void } = $props();
+		ondelete,
+		onMountRoot
+	}: {
+		article: ArticleSummary;
+		onclick: () => void;
+		ondelete: () => void;
+		/** Called once this row's root element exists — `ArticleCollection`
+		 *  uses it (only on the window's first rendered row) to measure a
+		 *  real row height for its virtualized list. */
+		onMountRoot?: (el: HTMLElement) => void;
+	} = $props();
+
+	let wrapperEl = $state<HTMLElement | null>(null);
+	$effect(() => {
+		if (wrapperEl) onMountRoot?.(wrapperEl);
+	});
 
 	function toggleFavorite(e: MouseEvent) {
 		e.stopPropagation();
@@ -19,7 +33,7 @@
 	}
 </script>
 
-<div class="row-wrapper">
+<div class="row-wrapper" bind:this={wrapperEl}>
 	<button {onclick} class="article-row">
 		<div class="thumb">
 			<HeroImage path={article.hero_image_path} alt={article.title} />
