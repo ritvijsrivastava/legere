@@ -119,6 +119,26 @@ export interface ImportFailure {
 	error: string;
 }
 
+/** Folder-level summary shown before a Raindrop import starts. Existing
+ *  category names are grouped once per folder, never repeated per article. */
+export interface FolderPreview {
+	folder: string;
+	name: string;
+	row_count: number;
+	existing_categories: string[];
+}
+
+export interface ImportPreview {
+	total: number;
+	folders: FolderPreview[];
+}
+
+export interface FolderResolution {
+	folder: string;
+	category_id: string | null;
+	keep_existing_on_conflict: boolean;
+}
+
 export interface ImportProgress {
 	processed: number;
 	total: number;

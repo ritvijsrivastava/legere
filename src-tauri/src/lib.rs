@@ -168,6 +168,7 @@ pub fn run() {
             commands::settings::get_settings,
             commands::settings::update_settings,
             commands::import::import_raindrop_csv,
+            commands::import::preview_raindrop_csv,
             commands::import::cancel_raindrop_import,
             commands::system::get_data_dir,
             commands::system::write_text_file,

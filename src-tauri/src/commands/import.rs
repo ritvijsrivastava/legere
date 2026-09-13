@@ -5,7 +5,7 @@ use tauri::{AppHandle, Manager, State};
 
 use crate::error::AppError;
 use crate::events::{self, ImportFailure, ImportFinished};
-use crate::sources::raindrop_import::{self, ImportEvent};
+use crate::sources::raindrop_import::{self, FolderResolution, ImportEvent, ImportPreview};
 use crate::state::AppState;
 
 /// Reads `path` (a Raindrop.io CSV export chosen via the frontend's file
@@ -24,6 +24,7 @@ pub async fn import_raindrop_csv(
     app: AppHandle,
     state: State<'_, AppState>,
     path: String,
+    resolutions: Vec<FolderResolution>,
 ) -> Result<(), AppError> {
     {
         let guard = state.import_cancel.lock().await;
@@ -42,14 +43,19 @@ pub async fn import_raindrop_csv(
 
     tauri::async_runtime::spawn(async move {
         let app_state = app.state::<AppState>();
-        let result =
-            raindrop_import::run_import(&app_state, csv_bytes, cancel, |event| match event {
+        let result = raindrop_import::run_import_with_resolutions(
+            &app_state,
+            csv_bytes,
+            resolutions,
+            cancel,
+            |event| match event {
                 ImportEvent::Started { total } => events::emit_import_started(&app, total),
                 ImportEvent::Progress(progress) => events::emit_import_progress(&app, &progress),
                 ImportEvent::LibraryChanged => events::emit_articles_changed(&app),
                 ImportEvent::Finished(finished) => events::emit_import_finished(&app, &finished),
-            })
-            .await;
+            },
+        )
+        .await;
 
         // `validate_csv` above already rejects a malformed file before
         // this task is even spawned, so reaching an `Err` here would mean
@@ -78,6 +84,19 @@ pub async fn import_raindrop_csv(
     });
 
     Ok(())
+}
+
+/// Parses the selected CSV and returns the folder-level summary without
+/// capturing any links. The frontend uses this before starting an import
+/// so the user can explicitly map every folder to a category and review
+/// duplicate-category conflicts once per folder.
+#[tauri::command]
+pub async fn preview_raindrop_csv(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<ImportPreview, AppError> {
+    let csv_bytes = tokio::fs::read(&path).await?;
+    Ok(raindrop_import::preview_csv(&state, &csv_bytes)?)
 }
 
 /// Cancels the in-flight import, if any. Returns `true` if there was one

@@ -6,6 +6,8 @@ import type {
 	ArticlePageRequest,
 	ArticleSummary,
 	Category,
+	FolderResolution,
+	ImportPreview,
 	NamedCount,
 	Settings,
 	Source,
@@ -152,8 +154,15 @@ export function syncAll(): Promise<SyncResult> {
  *  running — progress is tracked via the `import:*` events (see
  *  `lib/events.ts` and `stores/import.svelte.ts`), not this call's return
  *  value. Rejects if an import is already in flight. */
-export function importRaindropCsv(path: string): Promise<void> {
-	return invoke<void>('import_raindrop_csv', { path });
+export function previewRaindropCsv(path: string): Promise<ImportPreview> {
+	return invoke<ImportPreview>('preview_raindrop_csv', { path });
+}
+
+export function importRaindropCsv(
+	path: string,
+	resolutions: FolderResolution[] = []
+): Promise<void> {
+	return invoke<void>('import_raindrop_csv', { path, resolutions });
 }
 
 /** Cancels the in-flight import, if any; resolves `true` if there was one

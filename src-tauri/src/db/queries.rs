@@ -148,14 +148,42 @@ pub fn insert_imported_article(
     saved_at: &str,
     favorited: bool,
 ) -> rusqlite::Result<bool> {
+    insert_imported_article_with_category(
+        conn,
+        id,
+        source_name,
+        output,
+        tags,
+        saved_at,
+        favorited,
+        None,
+        true,
+    )
+}
+
+/// Category-aware variant used by the Raindrop importer. The legacy
+/// `insert_imported_article` wrapper above intentionally keeps the old
+/// call shape for non-import callers and tests that create uncategorized
+/// imported fixtures.
+pub fn insert_imported_article_with_category(
+    conn: &Connection,
+    id: &str,
+    source_name: &str,
+    output: &LocalCaptureOutput,
+    tags: &[String],
+    saved_at: &str,
+    favorited: bool,
+    category_id: Option<&str>,
+    keep_existing_on_conflict: bool,
+) -> rusqlite::Result<bool> {
     let now = Utc::now().to_rfc3339();
     let inserted = conn.execute(
         "INSERT OR IGNORE INTO articles (
             id, source_id, source_name, source_type, title, link, excerpt,
             content_html, hero_image_path, published_at, fetched_at,
             read_time_min, favorited,
-            extraction_confident, tags, updated_at
-        ) VALUES (?1, NULL, ?2, 'direct', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+            extraction_confident, tags, updated_at, category_id
+        ) VALUES (?1, NULL, ?2, 'direct', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
         params![
             id,
             source_name,
@@ -171,10 +199,20 @@ pub fn insert_imported_article(
             output.extraction_confident,
             tags_to_json(&normalize_tags(tags)),
             now,
+            category_id,
         ],
     )? > 0;
     if !inserted {
         merge_tags_by_link(conn, &output.link, tags)?;
+        // A duplicate absorbed here (rather than by `run_import`'s own
+        // dedup pre-check, e.g. two rows racing on the same brand-new
+        // link within one run) should still get the same category
+        // treatment the pre-check path gets — conflicts are rare enough
+        // that "keep the existing category" is the safe default for this
+        // race-only path (the caller never gets to make an explicit
+        // per-folder choice for a row it didn't know was a duplicate
+        // until just now).
+        apply_category_on_duplicate(conn, &output.link, category_id, keep_existing_on_conflict)?;
     }
     Ok(inserted)
 }
@@ -190,7 +228,18 @@ pub fn insert_imported_article(
 /// order. Silently does nothing if `link` doesn't match any row (the
 /// caller only reaches here when it already knows the link duplicated
 /// *something*, but doesn't hold that row's id).
-fn merge_tags_by_link(conn: &Connection, link: &str, incoming: &[String]) -> rusqlite::Result<()> {
+///
+/// Public (not just called from [`insert_imported_article`]'s own
+/// duplicate branch) because `raindrop_import::run_import`'s dedup
+/// *pre-check* skips calling [`insert_imported_article`] entirely for a
+/// link it already recognizes — that's the whole point of the pre-check,
+/// avoiding a wasted network fetch — so it calls this directly to still
+/// pick up any new tags on the fast path.
+pub fn merge_tags_by_link(
+    conn: &Connection,
+    link: &str,
+    incoming: &[String],
+) -> rusqlite::Result<()> {
     let incoming = normalize_tags(incoming);
     if incoming.is_empty() {
         return Ok(());
@@ -556,6 +605,73 @@ pub fn rename_category(
 pub fn delete_category(conn: &Connection, id: &str) -> rusqlite::Result<bool> {
     let changed = conn.execute("DELETE FROM categories WHERE id = ?1", params![id])?;
     Ok(changed > 0)
+}
+
+/// Looks up the category an article at `link` currently belongs to, if
+/// any — used by `raindrop_import::preview_raindrop_csv` to detect a
+/// folder/existing-category conflict before an import runs, and by
+/// [`apply_category_on_duplicate`] to decide what a re-import's
+/// duplicate row should do about it.
+pub fn get_article_category_by_link(
+    conn: &Connection,
+    link: &str,
+) -> rusqlite::Result<Option<(String, String)>> {
+    conn.query_row(
+        "SELECT c.id, c.name FROM articles a
+         JOIN categories c ON c.id = a.category_id
+         WHERE a.link = ?1",
+        params![link],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )
+    .optional()
+}
+
+/// Applied to a duplicate-link row during a Raindrop import (same "fast
+/// path, no `insert_imported_article` call" situation
+/// [`merge_tags_by_link`] handles for tags) — decides what, if anything,
+/// to do about the *existing* article's category given the incoming
+/// row's resolved `category_id`:
+///
+/// - No existing category at all: always fills it in with `category_id`
+///   (not a conflict — there was nothing to preserve).
+/// - An existing category that matches `category_id` already: no-op.
+/// - An existing category that differs: a real conflict. Left alone if
+///   `keep_existing_on_conflict` is `true` (the user's "keep existing
+///   category" choice for this folder); overwritten to `category_id`
+///   otherwise.
+///
+/// Silently does nothing if `link` doesn't match any row, same as
+/// [`merge_tags_by_link`].
+pub fn apply_category_on_duplicate(
+    conn: &Connection,
+    link: &str,
+    category_id: Option<&str>,
+    keep_existing_on_conflict: bool,
+) -> rusqlite::Result<()> {
+    let Some((id, existing_category_id)) = conn
+        .query_row(
+            "SELECT id, category_id FROM articles WHERE link = ?1",
+            params![link],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+        )
+        .optional()?
+    else {
+        return Ok(());
+    };
+
+    if existing_category_id.as_deref() == category_id {
+        return Ok(());
+    }
+    let is_conflict = existing_category_id.is_some();
+    if is_conflict && keep_existing_on_conflict {
+        return Ok(());
+    }
+
+    conn.execute(
+        "UPDATE articles SET category_id = ?2, updated_at = ?3 WHERE id = ?1",
+        params![id, category_id, Utc::now().to_rfc3339()],
+    )?;
+    Ok(())
 }
 
 /// Sets (or clears, for `category_id = None`) a single article's
