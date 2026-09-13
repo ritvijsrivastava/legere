@@ -128,7 +128,15 @@ mod imp {
             }
         }
 
-        if let Ok(status) = Command::new("rpm").args(["-q", "legere"]).status() {
+        // `.status()` inherits the parent's stdio by default, so without
+        // this `rpm -q` on a system where legere isn't rpm-installed prints
+        // its own "package legere is not installed" straight to our stderr.
+        if let Ok(status) = Command::new("rpm")
+            .args(["-q", "legere"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+        {
             if status.success() {
                 return Some("rpm");
             }
