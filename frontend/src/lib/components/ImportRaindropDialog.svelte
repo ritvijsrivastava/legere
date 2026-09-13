@@ -8,6 +8,7 @@
 	let cancelling = $state(false);
 	let error = $state<string | null>(null);
 	let failuresExpanded = $state(false);
+	let exporting = $state(false);
 
 	const selectedFileName = $derived(
 		selectedPath ? (selectedPath.split(/[/\\]/).pop() ?? selectedPath) : null
@@ -80,6 +81,29 @@
 		importStore.dismiss();
 		failuresExpanded = false;
 	}
+
+	function failuresToCsv(failures: typeof importStore.failures): string {
+		const escape = (value: string) => `"${value.replace(/"/g, '""')}"`;
+		const rows = failures.map((f) => [f.title, f.url, f.error].map(escape).join(','));
+		return ['Title,URL,Error', ...rows].join('\r\n');
+	}
+
+	async function exportFailures() {
+		error = null;
+		exporting = true;
+		try {
+			const path = await api.saveCsvFile({
+				defaultPath: 'legere-import-failures.csv',
+				filters: [{ name: 'CSV', extensions: ['csv'] }]
+			});
+			if (!path) return;
+			await api.writeTextFile(path, failuresToCsv(importStore.failures));
+		} catch (e) {
+			error = api.errorMessage(e);
+		} finally {
+			exporting = false;
+		}
+	}
 </script>
 
 <svelte:window
@@ -132,9 +156,14 @@
 						failed
 					</p>
 					{#if importStore.failures.length > 0}
-						<button class="btn btn-ghost details-btn" onclick={() => (failuresExpanded = !failuresExpanded)}>
-							{failuresExpanded ? 'Hide failed links' : 'Show failed links'}
-						</button>
+						<div class="failure-actions">
+							<button class="btn btn-ghost details-btn" onclick={() => (failuresExpanded = !failuresExpanded)}>
+								{failuresExpanded ? 'Hide failed links' : 'Show failed links'}
+							</button>
+							<button class="btn btn-ghost details-btn" disabled={exporting} onclick={exportFailures}>
+								{exporting ? 'Exporting\u2026' : 'Export failed links as CSV'}
+							</button>
+						</div>
 						{#if failuresExpanded}
 							<ul class="failure-list">
 								{#each importStore.failures as failure (failure.url)}
@@ -210,6 +239,11 @@
 		height: 100%;
 		background: var(--color-accent);
 		transition: width 0.2s ease;
+	}
+	.failure-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 4px 16px;
 	}
 	.details-btn {
 		margin-top: 10px;

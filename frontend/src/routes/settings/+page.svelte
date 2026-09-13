@@ -3,6 +3,7 @@
 	import { settingsStore } from '$lib/stores/settings.svelte';
 	import { sourcesStore } from '$lib/stores/sources.svelte';
 	import { uiStore } from '$lib/stores/ui.svelte';
+	import { importStore } from '$lib/stores/import.svelte';
 	import ChevronRight from '$lib/icons/ChevronRight.svelte';
 	import type { LibraryView, ReaderMeasure, ReaderTheme } from '$lib/types';
 	import { isTauri } from '$lib/platform';
@@ -310,6 +311,20 @@
 			<button class="btn btn-secondary" onclick={() => uiStore.openImportDialog()}>
 				Import from Raindrop
 			</button>
+			{#if importStore.running}
+				{@const pct =
+					importStore.total > 0
+						? Math.round((importStore.processed / importStore.total) * 100)
+						: 0}
+				<div class="import-progress">
+					<div class="import-progress-track">
+						<div class="import-progress-fill" style:width="{pct}%"></div>
+					</div>
+					<p class="text-muted import-progress-label">
+						Importing {importStore.processed} of {importStore.total}
+					</p>
+				</div>
+			{/if}
 		{/if}
 	</section>
 
@@ -505,6 +520,24 @@
 	.section-desc {
 		font-size: 13px;
 		margin: 0 0 14px;
+	}
+	.import-progress {
+		margin-top: 12px;
+	}
+	.import-progress-track {
+		height: 6px;
+		border-radius: 3px;
+		background: var(--color-divider);
+		overflow: hidden;
+	}
+	.import-progress-fill {
+		height: 100%;
+		background: var(--color-accent);
+		transition: width 0.2s ease;
+	}
+	.import-progress-label {
+		font-size: 12px;
+		margin: 6px 0 0;
 	}
 	.row {
 		display: flex;

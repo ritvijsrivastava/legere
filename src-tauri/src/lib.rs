@@ -163,6 +163,7 @@ pub fn run() {
             commands::import::import_raindrop_csv,
             commands::import::cancel_raindrop_import,
             commands::system::get_data_dir,
+            commands::system::write_text_file,
             save_github_token,
             has_github_token,
             clear_github_token,

@@ -12,7 +12,14 @@ import type {
 	SyncResult
 } from './types';
 
-export { open as pickCsvFile } from '@tauri-apps/plugin-dialog';
+export { open as pickCsvFile, save as saveCsvFile } from '@tauri-apps/plugin-dialog';
+
+/** Writes `contents` to `path`, overwriting any existing file — used to
+ *  export data (e.g. failed Raindrop import rows as CSV) to a location
+ *  picked via `saveCsvFile`. */
+export function writeTextFile(path: string, contents: string): Promise<void> {
+	return invoke<void>('write_text_file', { path, contents });
+}
 
 export function listArticlesPage(request: ArticlePageRequest): Promise<ArticlePage> {
 	return invoke<ArticlePage>('list_articles_page', { request });
