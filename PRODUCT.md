@@ -61,7 +61,9 @@ unless revisited later.)
 - Distributed via signed GitHub releases with an in-app updater
   (desktop self-replace; Android hands off to the OS package installer).
 - RSS/Atom polling (autosync toggle) plus direct-URL capture; per-article
-  read/reading/read-later state, favorites, and feed-derived tags.
+  read/reading/read-later state, favorites, and tags (feed-derived at
+  capture time, freely editable afterward — always lowercase, no upper
+  limit per article).
 - No backend service to design for — everything above is local-first.
 
 ## Capabilities and Constraints

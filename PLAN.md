@@ -18,6 +18,20 @@ be revisited post-MVP; until then, treat every mention of `archives/`,
 `zim_main_path`, `archive_status`/`archive_source`, the archive server, or
 an in-app "Original" tab below as historical.
 
+## Addendum — tags (post-MVP)
+
+Tags shipped after the MVP cut below, which still lists them as
+deferred (historical). An article can carry any number of
+user-and/or-feed-derived tags, always stored lowercase/trimmed/deduped
+(`db::queries::normalize_tags`, the single choke point every
+tag-writing path — RSS `<category>` capture, Raindrop import, and
+manual edits — goes through; migration V8 normalized pre-existing
+rows). Sources: RSS `<category>` elements and Raindrop-import tag
+cells at capture time, plus manual add/remove in the reader
+(`TagEditor.svelte`, via the `set_article_tags` command, replace-all
+semantics). Consumed by an any-of tag filter in the library/favorites
+views and a sidebar tag list with counts (`list_tags`).
+
 ## Context
 
 Legere (`~/Code/legere`, Tauri 2 + SvelteKit/Svelte 5) is an existing MVP scaffold (~1k lines Rust, ~2.1k frontend, 2 commits) for an offline article reader. The user wants RSS/Atom + direct-URL ingestion where each article stores three things: (1) extracted readable HTML, (2) a self-contained single-page **.zim** archive (reusing the sibling `~/Code/wraith` crates, consumed as path deps), and (3) the original link with tracking params stripped. Reading experience anchored on **Matter**. Exploration found the scaffold sound but with structural gaps: the ZIM is write-only and not self-contained (raw HTML, zero assets), extracted articles reference remote images (offline reading is broken), `wraith-urlx` is imported but never called (and wraith has **no** tracking-param stripping anywhere — new work), there is no event system (library never refreshes after autosync), errored sources are unrecoverable, and archive/media files leak forever.
@@ -29,7 +43,7 @@ Legere (`~/Code/legere`, Tauri 2 + SvelteKit/Svelte 5) is an existing MVP scaffo
 - In-app ZIM viewer in v1 (reader toggles Readable ↔ Original archived page).
 - wraith stays as **path deps** for now (git-pin TODO in `src-tauri/Cargo.toml` stays deferred).
 - Dark-only Nocturne for v1; Matter treatment applied to reader typography.
-- MVP scope: read/unread ✅; no tags, no search, no OPML, no notifications, no mail (remove stubs).
+- MVP scope: read/unread ✅; no tags, no search, no OPML, no notifications, no mail (remove stubs). (Tags shipped post-MVP — see the addendum above.)
 - Android minSdk: 30 (Tauri default is 24; 30 chosen as a firmer modern-WebView floor).
 
 **First execution step:** write this plan as `PLAN.md` in `~/Code/legere` (the user asked for the plan as a markdown file in the repo).
@@ -121,7 +135,7 @@ Goal: every new capture has offline-correct readable HTML, a genuinely self-cont
 - Consolidate fixture server into `src-tauri/tests/common/`; both old live-network tests gone.
 - Verify ZIM LRU memory ceiling with a ~20MB archive; PRAGMA review (`db/pool.rs` — keep busy_timeout-first ordering, known startup-race fix).
 - Housekeeping: unused-icon audit, remove `as unknown as string` bind cast in `AddSourceDialog`, README, keep the git-pin TODO (explicitly deferred).
-- Explicitly deferred: tags, search, OPML, notifications, WorkManager sync, cross-device sync, light theme (tokens kept theme-ready).
+- Explicitly deferred: search, OPML, notifications, WorkManager sync, cross-device sync, light theme (tokens kept theme-ready). (Tags shipped post-MVP — see the addendum near the top of this file.)
 
 ---
 
