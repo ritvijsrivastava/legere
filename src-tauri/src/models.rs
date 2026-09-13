@@ -44,6 +44,42 @@ pub struct ArticleDetail {
     pub tags: Vec<String>,
 }
 
+/// Request for a page of [`ArticleSummary`] rows, keyset-paginated on
+/// `(fetched_at, id)` DESC (see `db::queries::list_articles_page`). The
+/// same request also carries every filter predicate the library/favorites
+/// views support (search text, category, tags) — these are applied
+/// server-side rather than over an in-memory array, since once paginated
+/// the frontend no longer holds the whole table to filter locally.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ArticlePageRequest {
+    /// `None` on both fields requests the first page; otherwise both must
+    /// be `Some`, taken verbatim from the previous page's last item.
+    pub cursor_fetched_at: Option<String>,
+    pub cursor_id: Option<String>,
+    pub limit: i64,
+    pub search: Option<String>,
+    pub source_name: Option<String>,
+    /// Matches articles tagged with *any* of these (OR semantics) —
+    /// mirrors the sidebar's multi-select tag filter.
+    pub tags: Vec<String>,
+    pub favorited_only: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArticlePage {
+    pub items: Vec<ArticleSummary>,
+    /// Whether another page exists beyond `items` for the same filters —
+    /// determined by fetching one extra row server-side, not by comparing
+    /// `items.len()` to the requested limit.
+    pub has_more: bool,
+    /// `(fetched_at, id)` of `items`' last row, ready to feed straight
+    /// back in as the next request's `cursor_fetched_at`/`cursor_id` —
+    /// `Some` exactly when `has_more` is true. `ArticleSummary` itself
+    /// doesn't carry `fetched_at`, so the frontend has no other way to
+    /// form the next cursor.
+    pub next_cursor: Option<(String, String)>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Source {
     pub id: String,

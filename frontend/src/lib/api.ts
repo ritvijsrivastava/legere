@@ -2,7 +2,10 @@ import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import type {
 	AddSourceAutoResult,
 	ArticleDetail,
+	ArticlePage,
+	ArticlePageRequest,
 	ArticleSummary,
+	NamedCount,
 	Settings,
 	Source,
 	SourceType,
@@ -11,8 +14,28 @@ import type {
 
 export { open as pickCsvFile } from '@tauri-apps/plugin-dialog';
 
-export function listArticles(): Promise<ArticleSummary[]> {
-	return invoke<ArticleSummary[]>('list_articles');
+export function listArticlesPage(request: ArticlePageRequest): Promise<ArticlePage> {
+	return invoke<ArticlePage>('list_articles_page', { request });
+}
+
+export function countAllArticles(): Promise<number> {
+	return invoke<number>('count_all_articles');
+}
+
+export function countUnread(): Promise<number> {
+	return invoke<number>('count_unread');
+}
+
+export function countFavorited(): Promise<number> {
+	return invoke<number>('count_favorited');
+}
+
+export function listCategories(): Promise<NamedCount[]> {
+	return invoke<NamedCount[]>('list_categories');
+}
+
+export function listTags(): Promise<NamedCount[]> {
+	return invoke<NamedCount[]>('list_tags');
 }
 
 export function getArticle(id: string): Promise<ArticleDetail> {

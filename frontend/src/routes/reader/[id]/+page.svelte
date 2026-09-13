@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
-	import { articlesStore } from '$lib/stores/articles.svelte';
+	import { libraryStatsStore } from '$lib/stores/libraryStats.svelte';
 	import { settingsStore } from '$lib/stores/settings.svelte';
 	import * as api from '$lib/api';
 	import type { ArticleDetail, ReaderMeasure, ReaderLeading, ReaderTheme } from '$lib/types';
@@ -117,8 +117,6 @@
 		const progress = scrollProgress;
 		saveProgressTimer = setTimeout(() => {
 			api.saveReadingProgress(id, progress);
-			const storeItem = articlesStore.items.find((a) => a.id === id);
-			if (storeItem) storeItem.reading_progress = progress;
 		}, SAVE_PROGRESS_DEBOUNCE_MS);
 	}
 
@@ -143,13 +141,15 @@
 		if (!article) return;
 		const favorited = await api.toggleFavorite(article.id);
 		article = { ...article, favorited };
-		const storeItem = articlesStore.items.find((a) => a.id === article!.id);
-		if (storeItem) storeItem.favorited = favorited;
+		libraryStatsStore.refresh();
 	}
 
 	async function markAsRead() {
 		if (!article) return;
-		await articlesStore.markAsRead(article.id);
+		// No explicit `libraryStatsStore.refresh()` here — the backend's
+		// `mark_as_read` command already emits `articles:changed`, which
+		// the app-wide listener (`events.ts`) turns into one.
+		await api.markAsRead(article.id);
 		article = { ...article, reading_state: 'read' };
 	}
 
@@ -168,9 +168,11 @@
 	async function deleteArticle() {
 		if (!article) return;
 		if (!confirm(`Delete "${article.title}"? This can't be undone.`)) return;
-		const id = article.id;
-		await api.deleteArticle(id);
-		articlesStore.items = articlesStore.items.filter((a) => a.id !== id);
+		// No explicit `libraryStatsStore.refresh()` here — `delete_article`
+		// already emits `articles:changed` (see the app-wide listener in
+		// `events.ts`), and `goto` below remounts the destination view's
+		// `ArticleCollection` fresh anyway.
+		await api.deleteArticle(article.id);
 		goto(backHref);
 	}
 </script>

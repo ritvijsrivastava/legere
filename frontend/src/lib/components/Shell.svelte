@@ -7,12 +7,11 @@
 	import Plus from '$lib/icons/Plus.svelte';
 	import Moon from '$lib/icons/Moon.svelte';
 	import Sun from '$lib/icons/Sun.svelte';
-	import { articlesStore } from '$lib/stores/articles.svelte';
+	import { libraryStatsStore } from '$lib/stores/libraryStats.svelte';
 	import { settingsStore } from '$lib/stores/settings.svelte';
 	import { uiStore } from '$lib/stores/ui.svelte';
 	import { libraryFiltersStore } from '$lib/stores/libraryFilters.svelte';
 	import { sourceDotColor } from '$lib/sourceColor';
-	import { deriveCategories, deriveTags } from '$lib/deriveCategories';
 	import { goto } from '$app/navigation';
 	import { isTauri } from '$lib/platform';
 	import { checkForUpdate, getLastDismissedVersion, setLastDismissedVersion } from '$lib/update';
@@ -64,8 +63,8 @@
 	});
 
 	const navItems = [
-		{ href: '/', label: 'Library', Icon: Library, count: () => articlesStore.items.length },
-		{ href: '/favorites', label: 'Favorites', Icon: Star, count: () => articlesStore.favoritedCount },
+		{ href: '/', label: 'Library', Icon: Library, count: () => libraryStatsStore.totalCount },
+		{ href: '/favorites', label: 'Favorites', Icon: Star, count: () => libraryStatsStore.favoritedCount },
 		{ href: '/settings', label: 'Settings', Icon: SettingsIcon, count: null as (() => number) | null }
 	];
 
@@ -83,9 +82,13 @@
 	// app. Categories here are derived from each article's real source
 	// instead (same dot+label+count shape, same click-to-filter
 	// behavior); tags are real, parsed from the source feed's
-	// `<category>` elements at capture time.
-	let categories = $derived(deriveCategories(articlesStore.items));
-	let tags = $derived(deriveTags(articlesStore.items));
+	// `<category>` elements at capture time. Both come from
+	// `libraryStatsStore`'s SQL-computed `list_categories`/`list_tags`
+	// rather than scanning an in-memory copy of the whole library, which
+	// no longer exists once articles are paginated (see
+	// `ArticleCollection`).
+	let categories = $derived(libraryStatsStore.categories);
+	let tags = $derived(libraryStatsStore.tags);
 </script>
 
 {#snippet sidebarNav()}

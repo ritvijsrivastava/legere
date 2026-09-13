@@ -4,15 +4,93 @@ use crate::capture;
 use crate::db::queries;
 use crate::error::AppError;
 use crate::events;
-use crate::models::{ArticleDetail, ArticleSummary};
+use crate::models::{ArticleDetail, ArticlePage, ArticlePageRequest, ArticleSummary};
 use crate::state::AppState;
 
+/// Keyset-paginated article listing backing the library/favorites views
+/// (see `ArticlePageRequest`/`queries::list_articles_page` for the
+/// pagination and filter semantics) — replaces the old `list_articles`,
+/// which fetched and returned the entire table on every call and stopped
+/// scaling once a library reached hundreds/thousands of articles.
 #[tauri::command]
-pub async fn list_articles(state: State<'_, AppState>) -> Result<Vec<ArticleSummary>, AppError> {
+pub async fn list_articles_page(
+    state: State<'_, AppState>,
+    request: ArticlePageRequest,
+) -> Result<ArticlePage, AppError> {
     let pool = state.pool.clone();
     tokio::task::spawn_blocking(move || {
         let conn = pool.get()?;
-        Ok(queries::list_articles(&conn)?)
+        let cursor = match (&request.cursor_fetched_at, &request.cursor_id) {
+            (Some(fetched_at), Some(id)) => Some((fetched_at.as_str(), id.as_str())),
+            _ => None,
+        };
+        let search = request.search.as_deref().map(str::trim).filter(|s| !s.is_empty());
+        let result = queries::list_articles_page(
+            &conn,
+            &queries::ArticlePageQuery {
+                cursor,
+                limit: request.limit.max(1),
+                search,
+                source_name: request.source_name.as_deref(),
+                tags: &request.tags,
+                favorited_only: request.favorited_only,
+            },
+        )?;
+        Ok(ArticlePage {
+            items: result.items,
+            has_more: result.has_more,
+            next_cursor: result.next_cursor,
+        })
+    })
+    .await?
+}
+
+#[tauri::command]
+pub async fn count_all_articles(state: State<'_, AppState>) -> Result<i64, AppError> {
+    let pool = state.pool.clone();
+    tokio::task::spawn_blocking(move || {
+        let conn = pool.get()?;
+        Ok(queries::count_all_articles(&conn)?)
+    })
+    .await?
+}
+
+#[tauri::command]
+pub async fn count_unread(state: State<'_, AppState>) -> Result<i64, AppError> {
+    let pool = state.pool.clone();
+    tokio::task::spawn_blocking(move || {
+        let conn = pool.get()?;
+        Ok(queries::count_unread(&conn)?)
+    })
+    .await?
+}
+
+#[tauri::command]
+pub async fn count_favorited(state: State<'_, AppState>) -> Result<i64, AppError> {
+    let pool = state.pool.clone();
+    tokio::task::spawn_blocking(move || {
+        let conn = pool.get()?;
+        Ok(queries::count_favorited(&conn)?)
+    })
+    .await?
+}
+
+#[tauri::command]
+pub async fn list_categories(state: State<'_, AppState>) -> Result<Vec<(String, i64)>, AppError> {
+    let pool = state.pool.clone();
+    tokio::task::spawn_blocking(move || {
+        let conn = pool.get()?;
+        Ok(queries::list_categories(&conn)?)
+    })
+    .await?
+}
+
+#[tauri::command]
+pub async fn list_tags(state: State<'_, AppState>) -> Result<Vec<(String, i64)>, AppError> {
+    let pool = state.pool.clone();
+    tokio::task::spawn_blocking(move || {
+        let conn = pool.get()?;
+        Ok(queries::list_tags(&conn)?)
     })
     .await?
 }

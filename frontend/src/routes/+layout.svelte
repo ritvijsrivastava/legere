@@ -5,14 +5,14 @@
 	import AddSourceDialog from '$lib/components/AddSourceDialog.svelte';
 	import ImportRaindropDialog from '$lib/components/ImportRaindropDialog.svelte';
 	import Toast from '$lib/components/Toast.svelte';
-	import { articlesStore } from '$lib/stores/articles.svelte';
+	import { libraryStatsStore } from '$lib/stores/libraryStats.svelte';
 	import { settingsStore } from '$lib/stores/settings.svelte';
 	import { registerBackendEvents } from '$lib/events';
 
 	let { children } = $props();
 
 	$effect(() => {
-		articlesStore.refresh();
+		libraryStatsStore.refresh();
 		settingsStore.refresh();
 		registerBackendEvents();
 	});

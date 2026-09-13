@@ -1,7 +1,7 @@
-/** Sidebar-driven filters (Categories/Tags in Shell.svelte) applied on
- *  top of whatever view (Library/Favorites) and search term a page has
- *  already narrowed down to. There's no server-side query for this —
- *  the whole library is already in memory via `articlesStore`. */
+/** Sidebar-driven filters (Categories/Tags in Shell.svelte), read by
+ *  `ArticleCollection` and applied server-side (see `ArticlePageRequest`)
+ *  alongside whatever view (Library/Favorites) and search term it's
+ *  already scoped to. */
 class LibraryFiltersStore {
 	sourceName = $state<string | null>(null);
 	tags = $state<string[]>([]);

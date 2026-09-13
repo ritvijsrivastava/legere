@@ -1,27 +1,17 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { articlesStore } from '$lib/stores/articles.svelte';
+	import { libraryStatsStore } from '$lib/stores/libraryStats.svelte';
 	import ArticleCollection from '$lib/components/ArticleCollection.svelte';
-	import * as api from '$lib/api';
-	import type { ArticleSummary } from '$lib/types';
 
 	function openArticle(id: string) {
 		goto(`/reader/${id}?from=/`);
-	}
-
-	async function deleteArticle(article: ArticleSummary) {
-		if (!confirm(`Delete "${article.title}"? This can't be undone.`)) return;
-		await api.deleteArticle(article.id);
-		articlesStore.items = articlesStore.items.filter((a) => a.id !== article.id);
 	}
 </script>
 
 <ArticleCollection
 	title="Library"
-	subtitle="{articlesStore.unreadCount} unread"
-	items={articlesStore.items}
+	subtitle="{libraryStatsStore.unreadCount} unread"
 	emptyMessage="No articles yet. Add a source or paste a direct link to get started."
 	showRefresh
 	onopen={openArticle}
-	ondelete={deleteArticle}
 />

@@ -320,8 +320,29 @@ const V6: &str = "
 ALTER TABLE articles DROP COLUMN content_zim_path;
 ";
 
+// Supports the keyset-paginated `list_articles_page` query (replacing the
+// old "fetch every article" `list_articles`, which stopped scaling once
+// libraries reached hundreds/thousands of rows): the library and
+// favorites views, plus the sidebar's category filter, now query with a
+// `WHERE favorited = ...`/`WHERE source_name = ...` predicate on every
+// page fetch rather than filtering an already-fully-loaded array in the
+// frontend, so these need their own indexes rather than riding along on
+// `idx_articles_fetched_at`.
+const V7: &str = "
+CREATE INDEX idx_articles_favorited ON articles(favorited);
+CREATE INDEX idx_articles_source_name ON articles(source_name);
+";
+
 pub fn migrations() -> Migrations<'static> {
-    Migrations::new(vec![M::up(V1), M::up(V2), M::up(V3), M::up(V4), M::up(V5), M::up(V6)])
+    Migrations::new(vec![
+        M::up(V1),
+        M::up(V2),
+        M::up(V3),
+        M::up(V4),
+        M::up(V5),
+        M::up(V6),
+        M::up(V7),
+    ])
 }
 
 pub fn migrate(conn: &mut Connection) -> Result<(), rusqlite_migration::Error> {

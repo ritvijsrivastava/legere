@@ -136,7 +136,12 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            commands::articles::list_articles,
+            commands::articles::list_articles_page,
+            commands::articles::count_all_articles,
+            commands::articles::count_unread,
+            commands::articles::count_favorited,
+            commands::articles::list_categories,
+            commands::articles::list_tags,
             commands::articles::get_article,
             commands::articles::open_for_reading,
             commands::articles::mark_as_read,

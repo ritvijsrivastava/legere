@@ -2,9 +2,9 @@
 	import { settingsStore } from '$lib/stores/settings.svelte';
 	import { sourcesStore } from '$lib/stores/sources.svelte';
 	import { uiStore } from '$lib/stores/ui.svelte';
-	import { articlesStore } from '$lib/stores/articles.svelte';
+	import { libraryStatsStore } from '$lib/stores/libraryStats.svelte';
 	import { libraryFiltersStore } from '$lib/stores/libraryFilters.svelte';
-	import { deriveCategories } from '$lib/deriveCategories';
+	import * as api from '$lib/api';
 	import ArticleCard from './ArticleCard.svelte';
 	import ArticleListRow from './ArticleListRow.svelte';
 	import Search from '$lib/icons/Search.svelte';
@@ -16,25 +16,24 @@
 	let {
 		title,
 		subtitle,
-		items,
+		favoritedOnly = false,
 		emptyMessage,
 		showRefresh = false,
-		onopen,
-		ondelete
+		onopen
 	}: {
 		title: string;
 		subtitle?: string;
-		items: ArticleSummary[];
+		/** Scopes every fetch to `favorited = 1` (the Favorites view) rather
+		 *  than the whole library. */
+		favoritedOnly?: boolean;
 		emptyMessage: string;
 		showRefresh?: boolean;
 		onopen: (id: string) => void;
-		ondelete: (article: ArticleSummary) => void;
 	} = $props();
 
 	let search = $state('');
-	// The `filtered` derived below re-scans the whole (unbounded, until it's
-	// paginated) items array on every dependency change — debounce so fast
-	// typing doesn't force a recompute + full re-render per keystroke.
+	// The paginated fetch below re-queries on every dependency change —
+	// debounce so fast typing doesn't fire a request per keystroke.
 	let debouncedSearch = $state('');
 	let searchTimer: ReturnType<typeof setTimeout> | undefined;
 	$effect(() => {
@@ -63,46 +62,171 @@
 		}
 	}
 
-	let filtered = $derived(
-		items.filter((a) => {
-			if (
-				debouncedSearch.trim() &&
-				!a.title.toLowerCase().includes(debouncedSearch.trim().toLowerCase())
-			) {
-				return false;
-			}
-			if (libraryFiltersStore.sourceName && a.source_name !== libraryFiltersStore.sourceName) {
-				return false;
-			}
-			if (
-				libraryFiltersStore.tags.length &&
-				!a.tags.some((tag) => libraryFiltersStore.tags.includes(tag))
-			) {
-				return false;
-			}
-			return true;
-		})
+	let hasActiveFilters = $derived(
+		debouncedSearch.trim().length > 0 ||
+			libraryFiltersStore.sourceName !== null ||
+			libraryFiltersStore.tags.length > 0
 	);
 
-	// Mobile-only horizontal category-chip row (the sidebar's Categories
-	// section has no equivalent on narrow screens) — drawn from the whole
-	// library, not just this view's `items`, matching the design's global
-	// category list.
-	let allCategories = $derived(deriveCategories(articlesStore.items));
+	// ── Paginated data ──────────────────────────────────────────────────
+	// Every filter (search/category/tags/favorited-only) is applied
+	// server-side (see `ArticlePageRequest`) — this component only ever
+	// holds however much of the *current* query's result set has been
+	// scrolled into (see the virtualization section below), never the
+	// whole library.
+	const PAGE_SIZE = 60;
+	let loadedItems = $state<ArticleSummary[]>([]);
+	let nextCursor = $state<[string, string] | null>(null);
+	let hasMore = $state(true);
+	let loadingMore = $state(false);
+	let initialLoading = $state(true);
+	// Guards against a slow, now-superseded request (e.g. the previous
+	// search term) overwriting the result of a newer one.
+	let loadSeq = 0;
+
+	function baseRequestFields() {
+		return {
+			limit: PAGE_SIZE,
+			search: debouncedSearch.trim() || null,
+			source_name: libraryFiltersStore.sourceName,
+			tags: [...libraryFiltersStore.tags],
+			favorited_only: favoritedOnly
+		};
+	}
+
+	async function loadFirstPage() {
+		const seq = ++loadSeq;
+		initialLoading = true;
+		try {
+			const page = await api.listArticlesPage({
+				cursor_fetched_at: null,
+				cursor_id: null,
+				...baseRequestFields()
+			});
+			if (seq !== loadSeq) return;
+			loadedItems = page.items;
+			hasMore = page.has_more;
+			nextCursor = page.next_cursor;
+		} finally {
+			if (seq === loadSeq) initialLoading = false;
+		}
+	}
+
+	async function loadNextPage() {
+		if (loadingMore || !hasMore || !nextCursor) return;
+		const seq = loadSeq;
+		loadingMore = true;
+		try {
+			const page = await api.listArticlesPage({
+				cursor_fetched_at: nextCursor[0],
+				cursor_id: nextCursor[1],
+				...baseRequestFields()
+			});
+			if (seq !== loadSeq) return;
+			loadedItems = [...loadedItems, ...page.items];
+			hasMore = page.has_more;
+			nextCursor = page.next_cursor;
+		} finally {
+			if (seq === loadSeq) loadingMore = false;
+		}
+	}
+
+	// No explicit `libraryStatsStore.refresh()` here — `delete_article`
+	// already emits `articles:changed`, which both refreshes the sidebar
+	// stats and (via `changeVersion`, see below) lets *other* open views
+	// notice; this view already knows (it just did the deleting).
+	async function handleDelete(article: ArticleSummary) {
+		if (!confirm(`Delete "${article.title}"? This can't be undone.`)) return;
+		await api.deleteArticle(article.id);
+		loadedItems = loadedItems.filter((a) => a.id !== article.id);
+	}
+
+	// Re-query from the top whenever a filter (or the favorited-only scope
+	// itself) changes — a fundamentally different result set, so resetting
+	// scroll to the top makes sense here.
+	$effect(() => {
+		void debouncedSearch;
+		void libraryFiltersStore.sourceName;
+		void libraryFiltersStore.tags;
+		void favoritedOnly;
+		if (scrollAreaEl) scrollAreaEl.scrollTop = 0;
+		scrollTop = 0;
+		loadFirstPage();
+	});
+
+	// Switching card/list view doesn't need a re-query (same data), just a
+	// scroll reset (row height differs between the two).
+	$effect(() => {
+		void libraryView;
+		if (scrollAreaEl) scrollAreaEl.scrollTop = 0;
+		scrollTop = 0;
+	});
+
+	// The backend reports a library change from *anywhere* (sync, import,
+	// a delete from another view, etc.) via one coarse `articles:changed`
+	// event bumping `libraryStatsStore.changeVersion` — unlike the filter
+	// effect above, this must NOT reset scroll or fully reload (the user
+	// could be mid-scroll through what's already loaded, and a sync
+	// tick shouldn't yank them back to the top). Instead, quietly fetch a
+	// fresh page 1 and prepend whatever's genuinely new (new articles sort
+	// first, so the fresh page's order is already the correct prepend
+	// order) — anything already loaded is left exactly where it is.
+	let changeVersionInitialized = false;
+	$effect(() => {
+		const version = libraryStatsStore.changeVersion;
+		void version;
+		if (!changeVersionInitialized) {
+			// Skip the run every `$effect` does immediately on mount — this
+			// is for *subsequent* external changes only; the initial load is
+			// already `loadFirstPage`'s job.
+			changeVersionInitialized = true;
+			return;
+		}
+		mergeInFreshFirstPage();
+	});
+
+	async function mergeInFreshFirstPage() {
+		if (initialLoading) return;
+		try {
+			const page = await api.listArticlesPage({
+				cursor_fetched_at: null,
+				cursor_id: null,
+				...baseRequestFields()
+			});
+			const existingIds = new Set(loadedItems.map((a) => a.id));
+			const newOnes = page.items.filter((a) => !existingIds.has(a.id));
+			if (newOnes.length > 0) {
+				loadedItems = [...newOnes, ...loadedItems];
+			}
+			// Nothing was loaded to merge into (e.g. every previously loaded
+			// row was deleted elsewhere) — fall back to adopting the fresh
+			// page wholesale so `hasMore`/`nextCursor` don't stay stuck.
+			if (loadedItems.length === 0) {
+				loadedItems = page.items;
+				hasMore = page.has_more;
+				nextCursor = page.next_cursor;
+			}
+		} catch {
+			// Best-effort background refresh — a failure here shouldn't
+			// disrupt whatever's already on screen.
+		}
+	}
 
 	// ── Virtualized rendering ───────────────────────────────────────────
 	// With hundreds (soon thousands) of articles, mounting a live
 	// ArticleCard/ArticleListRow — each with its own hero-image fetch and
-	// CSS transitions — for every item regardless of scroll position is
-	// the main source of jank. Instead we render only the rows within (or
-	// just outside) the viewport, plus two spacer elements that stand in
-	// for the rows above/below so the scrollbar's size/position stays
-	// correct. `.scroll-area` below is this component's own scroll
-	// container (rather than relying on the app shell's ancestor `.content`
-	// pane) so the scroll position and the grid's content start at the
-	// same coordinate — no ancestor-offset math needed. This also makes
-	// the header/search bar sticky above the scrolling list, which reads
-	// as an improvement in its own right for a long list.
+	// CSS transitions — for every loaded item regardless of scroll
+	// position is the main source of jank. Instead we render only the
+	// rows within (or just outside) the viewport, plus two spacer
+	// elements that stand in for the rows above/below so the scrollbar's
+	// size/position stays correct. `.scroll-area` below is this
+	// component's own scroll container (rather than relying on the app
+	// shell's ancestor `.content` pane) so the scroll position and the
+	// grid's content start at the same coordinate — no ancestor-offset
+	// math needed. This also makes the header/search bar sticky above the
+	// scrolling list, which reads as an improvement in its own right for
+	// a long list. The same viewport tracking also drives when to fetch
+	// the next page (see the effect at the bottom of this section).
 	const OVERSCAN_ROWS = 3;
 	// Keep in sync with the `gap`/`minmax()` values in the corresponding
 	// CSS rules below — used to convert a measured card/row height into a
@@ -153,19 +277,6 @@
 		return () => ro.disconnect();
 	});
 
-	// Snap back to the top whenever the result set is narrowed (or the
-	// view mode changes row shape) — otherwise a mid-list scroll position
-	// can point past the new, possibly much shorter, filtered set and the
-	// virtualized window renders nothing visible.
-	$effect(() => {
-		void debouncedSearch;
-		void libraryFiltersStore.sourceName;
-		void libraryFiltersStore.tags;
-		void libraryView;
-		if (scrollAreaEl) scrollAreaEl.scrollTop = 0;
-		scrollTop = 0;
-	});
-
 	let firstItemEl = $state<HTMLElement | null>(null);
 	function bindFirstItem(el: HTMLElement) {
 		firstItemEl = el;
@@ -192,14 +303,14 @@
 	);
 	let rowHeight = $derived(libraryView === 'cards' ? rowHeightCards : rowHeightList);
 	let rowGap = $derived(libraryView === 'cards' ? GRID_GAP : LIST_GAP);
-	let totalRows = $derived(Math.max(1, Math.ceil(filtered.length / columns)));
+	let totalRows = $derived(Math.max(1, Math.ceil(loadedItems.length / columns)));
 	let startRow = $derived(Math.max(0, Math.floor(scrollTop / rowHeight) - OVERSCAN_ROWS));
 	let endRow = $derived(
 		Math.min(totalRows, Math.ceil((scrollTop + viewportHeight) / rowHeight) + OVERSCAN_ROWS)
 	);
 	let startIndex = $derived(startRow * columns);
-	let endIndex = $derived(Math.min(filtered.length, endRow * columns));
-	let visibleItems = $derived(filtered.slice(startIndex, endIndex));
+	let endIndex = $derived(Math.min(loadedItems.length, endRow * columns));
+	let visibleItems = $derived(loadedItems.slice(startIndex, endIndex));
 	// The grid/flex `gap` is inserted structurally by the browser between
 	// every adjacent row, including right after a spacer — so a spacer
 	// standing in for N rows only needs N-1 gaps' worth of height itself
@@ -208,6 +319,15 @@
 	// when there's nothing to stand in for.
 	let topSpacerHeight = $derived(Math.max(0, startRow * rowHeight - rowGap));
 	let bottomSpacerHeight = $derived(Math.max(0, (totalRows - endRow) * rowHeight - rowGap));
+
+	// Fetch the next page once the virtualized window's range comes
+	// within a page-sized buffer of the end of what's currently loaded.
+	$effect(() => {
+		if (initialLoading || loadingMore || !hasMore) return;
+		if (totalRows - endRow <= OVERSCAN_ROWS) {
+			loadNextPage();
+		}
+	});
 </script>
 
 <div class="collection-page">
@@ -254,7 +374,7 @@
 		</div>
 	</div>
 
-	{#if allCategories.length > 0}
+	{#if libraryStatsStore.categories.length > 0}
 		<div class="mobile-chips">
 			<button
 				class="chip"
@@ -263,7 +383,7 @@
 			>
 				All
 			</button>
-			{#each allCategories as [name] (name)}
+			{#each libraryStatsStore.categories as [name] (name)}
 				<button
 					class="chip"
 					class:active={libraryFiltersStore.sourceName === name}
@@ -276,9 +396,12 @@
 	{/if}
 
 	<div class="scroll-area" bind:this={scrollAreaEl}>
-		{#if items.length === 0}
+		{#if initialLoading}
+			<!-- Nothing yet — avoids a flash of `emptyMessage` while the
+			     first page is still in flight. -->
+		{:else if loadedItems.length === 0 && !hasActiveFilters}
 			<p class="empty-state text-muted">{emptyMessage}</p>
-		{:else if filtered.length === 0}
+		{:else if loadedItems.length === 0}
 			<p class="empty-state text-muted">No articles match.</p>
 		{:else if libraryView === 'cards'}
 			<div
@@ -295,7 +418,7 @@
 					<ArticleCard
 						{article}
 						onclick={() => onopen(article.id)}
-						ondelete={() => ondelete(article)}
+						ondelete={() => handleDelete(article)}
 						onMountRoot={i === 0 ? bindFirstItem : undefined}
 					/>
 				{/each}
@@ -316,7 +439,7 @@
 					<ArticleListRow
 						{article}
 						onclick={() => onopen(article.id)}
-						ondelete={() => ondelete(article)}
+						ondelete={() => handleDelete(article)}
 						onMountRoot={i === 0 ? bindFirstItem : undefined}
 					/>
 				{/each}

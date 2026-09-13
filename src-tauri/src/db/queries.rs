@@ -195,11 +195,160 @@ pub fn update_captured_article(
     Ok(())
 }
 
+/// Superseded by [`list_articles_page`] for the frontend's own use (it
+/// stopped scaling once a library reached hundreds/thousands of rows),
+/// but kept for test fixtures (`sources::rss`, `sources::raindrop_import`)
+/// that just want "everything currently in the table" without dealing
+/// with pagination.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn list_articles(conn: &Connection) -> rusqlite::Result<Vec<ArticleSummary>> {
     let mut stmt = conn.prepare(&format!(
         "SELECT {ARTICLE_SUMMARY_COLUMNS} FROM articles ORDER BY fetched_at DESC"
     ))?;
     let rows = stmt.query_map([], article_summary_from_row)?;
+    rows.collect()
+}
+
+/// Escapes `%`/`_` (SQLite `LIKE` wildcards) and the escape character
+/// itself in free-text search input, so a user searching for e.g. `50%
+/// done` doesn't have `%` behave as a wildcard. Paired with `ESCAPE '\'`
+/// on the `LIKE` clause in [`list_articles_page`].
+fn escape_like(input: &str) -> String {
+    input.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")
+}
+
+/// Filters/cursor for [`list_articles_page`] — borrowed rather than
+/// owned since it's only ever used for the lifetime of a single query.
+pub struct ArticlePageQuery<'a> {
+    /// `(fetched_at, id)` of the last row on the previous page; `None`
+    /// fetches the first page.
+    pub cursor: Option<(&'a str, &'a str)>,
+    pub limit: i64,
+    pub search: Option<&'a str>,
+    pub source_name: Option<&'a str>,
+    /// Any-of match against the article's `tags` JSON array, via
+    /// `json_each` (bundled SQLite has had the JSON functions built in,
+    /// no extension needed, since 3.38 — comfortably covered by this
+    /// crate's bundled version).
+    pub tags: &'a [String],
+    pub favorited_only: bool,
+}
+
+/// [`list_articles_page`]'s result. `next_cursor` is `Some((fetched_at,
+/// id))` of the last row in `items` whenever `has_more` is true, ready to
+/// pass straight back in as the next call's `ArticlePageQuery::cursor` —
+/// callers never need to know `ArticleSummary` doesn't itself carry
+/// `fetched_at`.
+pub struct ArticlePageResult {
+    pub items: Vec<ArticleSummary>,
+    pub has_more: bool,
+    pub next_cursor: Option<(String, String)>,
+}
+
+/// Keyset-paginated (not `OFFSET`-based, which would mean re-scanning and
+/// discarding an ever-growing prefix as the user pages deeper) article
+/// listing, ordered by `fetched_at DESC, id DESC` — the `id` tiebreak
+/// makes the sort fully deterministic (two rows can share a `fetched_at`,
+/// e.g. backdated Raindrop imports), which keyset pagination depends on
+/// to never skip or repeat a row across pages. Every filter predicate is
+/// applied in SQL so a page reflects the *whole* table, not just whatever
+/// happens to already be loaded client-side.
+///
+/// `has_more` comes from fetching one extra row past `limit`, not from
+/// comparing the returned count to `limit`.
+pub fn list_articles_page(
+    conn: &Connection,
+    query: &ArticlePageQuery,
+) -> rusqlite::Result<ArticlePageResult> {
+    let mut sql = format!("SELECT {ARTICLE_SUMMARY_COLUMNS}, fetched_at FROM articles WHERE 1 = 1");
+    let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+
+    if query.favorited_only {
+        sql.push_str(" AND favorited = 1");
+    }
+    if let Some(search) = query.search {
+        sql.push_str(" AND title LIKE ? ESCAPE '\\'");
+        params.push(Box::new(format!("%{}%", escape_like(search))));
+    }
+    if let Some(source_name) = query.source_name {
+        sql.push_str(" AND source_name = ?");
+        params.push(Box::new(source_name.to_string()));
+    }
+    if !query.tags.is_empty() {
+        let placeholders = vec!["?"; query.tags.len()].join(", ");
+        sql.push_str(&format!(
+            " AND EXISTS (SELECT 1 FROM json_each(articles.tags) WHERE json_each.value IN ({placeholders}))"
+        ));
+        for tag in query.tags {
+            params.push(Box::new(tag.clone()));
+        }
+    }
+    if let Some((fetched_at, id)) = query.cursor {
+        sql.push_str(" AND (fetched_at < ? OR (fetched_at = ? AND id < ?))");
+        params.push(Box::new(fetched_at.to_string()));
+        params.push(Box::new(fetched_at.to_string()));
+        params.push(Box::new(id.to_string()));
+    }
+    sql.push_str(" ORDER BY fetched_at DESC, id DESC LIMIT ?");
+    // Fetch one row past what was asked for, purely to answer `has_more`
+    // without a second round trip.
+    params.push(Box::new(query.limit + 1));
+
+    let mut stmt = conn.prepare(&sql)?;
+    let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    let mut rows: Vec<(ArticleSummary, String)> = stmt
+        .query_map(param_refs.as_slice(), |row| {
+            Ok((article_summary_from_row(row)?, row.get::<_, String>("fetched_at")?))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+
+    let has_more = rows.len() as i64 > query.limit;
+    rows.truncate(query.limit.max(0) as usize);
+    let next_cursor = has_more
+        .then(|| rows.last().map(|(item, fetched_at)| (fetched_at.clone(), item.id.clone())))
+        .flatten();
+    let items = rows.into_iter().map(|(item, _)| item).collect();
+    Ok(ArticlePageResult { items, has_more, next_cursor })
+}
+
+pub fn count_all_articles(conn: &Connection) -> rusqlite::Result<i64> {
+    conn.query_row("SELECT COUNT(*) FROM articles", [], |row| row.get(0))
+}
+
+pub fn count_unread(conn: &Connection) -> rusqlite::Result<i64> {
+    conn.query_row(
+        "SELECT COUNT(*) FROM articles WHERE reading_state = 'unread'",
+        [],
+        |row| row.get(0),
+    )
+}
+
+pub fn count_favorited(conn: &Connection) -> rusqlite::Result<i64> {
+    conn.query_row("SELECT COUNT(*) FROM articles WHERE favorited = 1", [], |row| row.get(0))
+}
+
+/// Distinct `source_name`s with their article counts, for the sidebar's
+/// Categories section and the mobile category-chip row — the SQL
+/// equivalent of the old `deriveCategories(articlesStore.items)`, which
+/// stopped being viable once the frontend no longer holds every article
+/// in memory.
+pub fn list_categories(conn: &Connection) -> rusqlite::Result<Vec<(String, i64)>> {
+    let mut stmt = conn.prepare(
+        "SELECT source_name, COUNT(*) FROM articles GROUP BY source_name ORDER BY source_name COLLATE NOCASE",
+    )?;
+    let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))?;
+    rows.collect()
+}
+
+/// Distinct tags (from every article's `tags` JSON array) with counts,
+/// for the sidebar's Tags section — the SQL equivalent of the old
+/// `deriveTags(articlesStore.items)`.
+pub fn list_tags(conn: &Connection) -> rusqlite::Result<Vec<(String, i64)>> {
+    let mut stmt = conn.prepare(
+        "SELECT value, COUNT(*) FROM articles, json_each(articles.tags)
+         GROUP BY value ORDER BY value COLLATE NOCASE",
+    )?;
+    let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))?;
     rows.collect()
 }
 
@@ -717,5 +866,221 @@ mod tests {
         // what protects a future user-set custom name).
         set_source_name_if_default(&conn, &source.id, "Some Other Title", feed_url).unwrap();
         assert_eq!(get_source(&conn, &source.id).unwrap().unwrap().name, "Real Feed Title");
+    }
+
+    fn titled_output(link: &str, title: &str) -> LocalCaptureOutput {
+        LocalCaptureOutput {
+            title: title.to_string(),
+            ..sample_capture_output(link)
+        }
+    }
+
+    #[test]
+    fn list_articles_page_orders_by_fetched_at_desc_then_id_desc_and_paginates_without_gaps_or_dupes()
+     {
+        let conn = migrated_conn();
+        // "c", "b", "a" deliberately share a `fetched_at` to exercise the
+        // `id DESC` tiebreak that keyset pagination's determinism depends
+        // on; "z-newest" is strictly newer and must sort first regardless.
+        for (id, fetched_at) in [
+            ("a", "2024-01-01T00:00:00Z"),
+            ("b", "2024-01-01T00:00:00Z"),
+            ("c", "2024-01-01T00:00:00Z"),
+            ("z-newest", "2024-02-01T00:00:00Z"),
+        ] {
+            insert_imported_article(
+                &conn,
+                id,
+                "Feed",
+                &sample_capture_output(&format!("https://example.com/{id}")),
+                &[],
+                fetched_at,
+                false,
+            )
+            .unwrap();
+        }
+
+        let mut seen = Vec::new();
+        let mut cursor_owned: Option<(String, String)> = None;
+        loop {
+            let cursor = cursor_owned.as_ref().map(|(f, i)| (f.as_str(), i.as_str()));
+            let result = list_articles_page(
+                &conn,
+                &ArticlePageQuery {
+                    cursor,
+                    limit: 2,
+                    search: None,
+                    source_name: None,
+                    tags: &[],
+                    favorited_only: false,
+                },
+            )
+            .unwrap();
+            assert!(result.items.len() <= 2);
+            seen.extend(result.items.iter().map(|a| a.id.clone()));
+            if !result.has_more {
+                break;
+            }
+            let last = result.items.last().unwrap();
+            // The cursor is opaque to `ArticlePageQuery` itself (it just
+            // takes fetched_at/id strings) — re-fetch them the same way a
+            // real caller would, from the row just returned.
+            let fetched_at: String = conn
+                .query_row("SELECT fetched_at FROM articles WHERE id = ?1", [&last.id], |r| r.get(0))
+                .unwrap();
+            cursor_owned = Some((fetched_at, last.id.clone()));
+            if seen.len() > 10 {
+                panic!("pagination did not terminate");
+            }
+        }
+
+        assert_eq!(seen, vec!["z-newest", "c", "b", "a"]);
+    }
+
+    #[test]
+    fn list_articles_page_filters_by_search_source_name_tags_and_favorited() {
+        let conn = migrated_conn();
+        insert_imported_article(
+            &conn,
+            "rust-1",
+            "Rust Blog",
+            &titled_output("https://example.com/rust-1", "Understanding Ownership"),
+            &["rust".to_string(), "systems".to_string()],
+            "2024-01-01T00:00:00Z",
+            true,
+        )
+        .unwrap();
+        insert_imported_article(
+            &conn,
+            "js-1",
+            "JS Weekly",
+            &titled_output("https://example.com/js-1", "Async Await Patterns"),
+            &["javascript".to_string()],
+            "2024-01-02T00:00:00Z",
+            false,
+        )
+        .unwrap();
+
+        let run = |q: &ArticlePageQuery| list_articles_page(&conn, q).unwrap().items;
+
+        let by_search = run(&ArticlePageQuery {
+            cursor: None,
+            limit: 10,
+            search: Some("ownership"),
+            source_name: None,
+            tags: &[],
+            favorited_only: false,
+        });
+        assert_eq!(by_search.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(), vec!["rust-1"]);
+
+        let by_source = run(&ArticlePageQuery {
+            cursor: None,
+            limit: 10,
+            search: None,
+            source_name: Some("JS Weekly"),
+            tags: &[],
+            favorited_only: false,
+        });
+        assert_eq!(by_source.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(), vec!["js-1"]);
+
+        let by_tag = run(&ArticlePageQuery {
+            cursor: None,
+            limit: 10,
+            search: None,
+            source_name: None,
+            tags: &["systems".to_string()],
+            favorited_only: false,
+        });
+        assert_eq!(by_tag.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(), vec!["rust-1"]);
+
+        let favorited = run(&ArticlePageQuery {
+            cursor: None,
+            limit: 10,
+            search: None,
+            source_name: None,
+            tags: &[],
+            favorited_only: true,
+        });
+        assert_eq!(favorited.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(), vec!["rust-1"]);
+    }
+
+    #[test]
+    fn list_articles_page_search_is_case_insensitive_and_escapes_like_wildcards() {
+        let conn = migrated_conn();
+        insert_imported_article(
+            &conn,
+            "pct",
+            "Feed",
+            &titled_output("https://example.com/pct", "Batteries at 50% capacity"),
+            &[],
+            "2024-01-01T00:00:00Z",
+            false,
+        )
+        .unwrap();
+
+        let run = |search: &str| {
+            list_articles_page(
+                &conn,
+                &ArticlePageQuery {
+                    cursor: None,
+                    limit: 10,
+                    search: Some(search),
+                    source_name: None,
+                    tags: &[],
+                    favorited_only: false,
+                },
+            )
+            .unwrap()
+            .items
+        };
+
+        assert_eq!(run("BATTERIES").len(), 1, "search should be case-insensitive");
+        assert_eq!(run("50% capacity").len(), 1, "literal % in the query should not act as a wildcard");
+        assert_eq!(
+            run("50x capacity").len(),
+            0,
+            "an unescaped % would have made this an unrelated match"
+        );
+    }
+
+    #[test]
+    fn count_and_list_aggregates_reflect_the_table() {
+        let conn = migrated_conn();
+        insert_imported_article(
+            &conn,
+            "a1",
+            "Feed A",
+            &titled_output("https://example.com/a1", "First"),
+            &["tag-x".to_string()],
+            "2024-01-01T00:00:00Z",
+            true,
+        )
+        .unwrap();
+        insert_imported_article(
+            &conn,
+            "a2",
+            "Feed B",
+            &titled_output("https://example.com/a2", "Second"),
+            &["tag-x".to_string(), "tag-y".to_string()],
+            "2024-01-02T00:00:00Z",
+            false,
+        )
+        .unwrap();
+        transition_to_read(&conn, "a2").unwrap();
+
+        assert_eq!(count_all_articles(&conn).unwrap(), 2);
+        assert_eq!(count_favorited(&conn).unwrap(), 1);
+        // "a1" defaults to `unread` (never opened); "a2" was just
+        // transitioned to `read`.
+        assert_eq!(count_unread(&conn).unwrap(), 1);
+
+        assert_eq!(
+            list_categories(&conn).unwrap(),
+            vec![("Feed A".to_string(), 1), ("Feed B".to_string(), 1)]
+        );
+        assert_eq!(
+            list_tags(&conn).unwrap(),
+            vec![("tag-x".to_string(), 2), ("tag-y".to_string(), 1)]
+        );
     }
 }

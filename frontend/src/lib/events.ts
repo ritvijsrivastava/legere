@@ -1,5 +1,5 @@
 import { listen } from '@tauri-apps/api/event';
-import { articlesStore } from './stores/articles.svelte';
+import { libraryStatsStore } from './stores/libraryStats.svelte';
 import { sourcesStore } from './stores/sources.svelte';
 import { uiStore } from './stores/ui.svelte';
 import { importStore } from './stores/import.svelte';
@@ -37,7 +37,7 @@ export function registerBackendEvents() {
 	});
 
 	listen('articles:changed', () => {
-		articlesStore.refresh();
+		libraryStatsStore.notifyChanged();
 	});
 
 	listen('source:changed', () => {

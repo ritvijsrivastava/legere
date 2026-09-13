@@ -74,6 +74,35 @@ export interface SyncResult {
 	new_article_count: number;
 }
 
+/** Keyset-pagination request for `list_articles_page` — mirrors the
+ *  Rust `ArticlePageRequest`. `cursor_fetched_at`/`cursor_id` are both
+ *  `null` for the first page; otherwise both come from the last item of
+ *  the previously loaded page. Filters are applied server-side. */
+export interface ArticlePageRequest {
+	cursor_fetched_at: string | null;
+	cursor_id: string | null;
+	limit: number;
+	search: string | null;
+	source_name: string | null;
+	/** Any-of match (OR semantics) against an article's tags. */
+	tags: string[];
+	favorited_only: boolean;
+}
+
+export interface ArticlePage {
+	items: ArticleSummary[];
+	/** Whether another page exists beyond `items` for the same filters. */
+	has_more: boolean;
+	/** `[fetched_at, id]` of `items`' last row — feed straight back in as
+	 *  the next request's cursor. `null` exactly when `has_more` is false.
+	 *  `ArticleSummary` doesn't carry `fetched_at` itself, so this is the
+	 *  only way to form the next request. */
+	next_cursor: [string, string] | null;
+}
+
+/** `[name, count]` pairs, as returned by `list_categories`/`list_tags`. */
+export type NamedCount = [string, number];
+
 export interface ImportFailure {
 	url: string;
 	title: string;

@@ -1,7 +1,8 @@
 <script lang="ts">
 	import type { ArticleSummary } from '$lib/types';
 	import { formatDate, formatReadTime } from '$lib/format';
-	import { articlesStore } from '$lib/stores/articles.svelte';
+	import * as api from '$lib/api';
+	import { libraryStatsStore } from '$lib/stores/libraryStats.svelte';
 	import { sourceDotColor } from '$lib/sourceColor';
 	import HeroImage from './HeroImage.svelte';
 	import Star from '$lib/icons/Star.svelte';
@@ -27,9 +28,13 @@
 		if (wrapperEl) onMountRoot?.(wrapperEl);
 	});
 
-	function toggleFavorite(e: MouseEvent) {
+	async function toggleFavorite(e: MouseEvent) {
 		e.stopPropagation();
-		articlesStore.toggleFavorite(article.id);
+		// Mutating `article` directly (rather than going through a shared
+		// store) works because it's the same reactive object the caller's
+		// paginated `loadedItems` array holds — see `ArticleCollection`.
+		article.favorited = await api.toggleFavorite(article.id);
+		libraryStatsStore.refresh();
 	}
 </script>
 
