@@ -7,6 +7,11 @@
 	let newSourceValue = $state('');
 	let submitting = $state(false);
 	let error = $state<string | null>(null);
+	let inputEl = $state<HTMLInputElement>();
+
+	$effect(() => {
+		if (uiStore.addSourceOpen) inputEl?.focus();
+	});
 
 	function close() {
 		uiStore.closeAddSource();
@@ -60,7 +65,7 @@
 					placeholder="https://example.com/feed-or-article"
 					autocomplete="off"
 					spellcheck="false"
-					autofocus
+					bind:this={inputEl}
 					bind:value={newSourceValue}
 					onkeydown={(e) => {
 						if (e.key === 'Enter' && !submitting && newSourceValue.trim()) submit();
