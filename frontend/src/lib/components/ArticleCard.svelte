@@ -106,6 +106,7 @@
 		display: flex;
 		flex-direction: column;
 		width: 100%;
+		height: 100%;
 		text-align: left;
 		background: var(--color-surface);
 		border: none;
@@ -220,6 +221,12 @@
 		margin: 0;
 		font-size: 15.5px;
 		line-height: 1.3;
+		/* Reserve space for 2 lines regardless of actual line count —
+		   otherwise a 1-line title makes the whole card shorter than its
+		   neighbors, and CSS Grid's row-stretch only pads the invisible
+		   wrapper, not this box, leaving visibly mismatched card heights
+		   in the same row (see `card-wrapper` sizing above `.article-card`). */
+		min-height: calc(1.3em * 2);
 		display: -webkit-box;
 		-webkit-line-clamp: 2;
 		line-clamp: 2;
@@ -231,6 +238,8 @@
 		opacity: 0.75;
 		font-size: 12.5px;
 		line-height: 1.5;
+		/* Same fixed-height reasoning as `.card-title` above. */
+		min-height: calc(1.5em * 2);
 		display: -webkit-box;
 		-webkit-line-clamp: 2;
 		line-clamp: 2;
