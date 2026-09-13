@@ -26,10 +26,10 @@
 		error = null;
 		try {
 			await api.deleteAllArticles();
+			deleting = false;
 			close();
 		} catch (e) {
 			error = api.errorMessage(e);
-		} finally {
 			deleting = false;
 		}
 	}
