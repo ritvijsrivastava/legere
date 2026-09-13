@@ -246,7 +246,7 @@
 		flex: none;
 		padding: 24px 16px;
 		height: 100%;
-		border-right: 1px solid var(--color-divider);
+		border-right: 1px solid var(--color-divider-strong);
 		overflow-y: auto;
 	}
 	.brand-row {
@@ -436,7 +436,7 @@
 	.bottom-bar {
 		display: flex;
 		align-items: stretch;
-		border-top: 1px solid var(--color-divider);
+		border-top: 1px solid var(--color-divider-strong);
 		background: var(--color-bg);
 		flex: none;
 		padding-bottom: env(safe-area-inset-bottom);

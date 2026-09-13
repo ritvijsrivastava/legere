@@ -15,6 +15,12 @@
   --color-text: #221f19;
   --color-muted: rgba(34, 31, 25, 0.58);
   --color-divider: rgba(34, 31, 25, 0.12);
+  /* Reserved for major app-shell partitions (sidebar/content,
+     mobile top/bottom bars) — those separate two panes of the exact
+     same background color, so the ordinary `--color-divider` used for
+     in-content hairlines (card borders, meta rows) reads as no
+     boundary at all there. */
+  --color-divider-strong: rgba(34, 31, 25, 0.2);
   --color-accent: #2d6b50;
   --color-accent-fg: #ffffff;
   --color-danger: #ae3c2e;
@@ -63,6 +69,7 @@
   --color-text: #ece6d8;
   --color-muted: rgba(236, 230, 216, 0.6);
   --color-divider: rgba(255, 255, 255, 0.08);
+  --color-divider-strong: rgba(255, 255, 255, 0.16);
   --color-accent: #7fc39d;
   --color-accent-fg: #12231a;
   --color-danger: #e2887a;
