@@ -149,6 +149,7 @@ pub fn run() {
             commands::articles::toggle_favorite,
             commands::articles::save_reading_progress,
             commands::articles::delete_article,
+            commands::articles::delete_all_articles,
             commands::articles::recapture_article,
             commands::articles::add_direct_link_article,
             commands::sources::list_sources,

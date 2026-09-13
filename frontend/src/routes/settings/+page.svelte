@@ -497,6 +497,17 @@
 	</section>
 
 	<section>
+		<h4 class="danger-heading">Danger zone</h4>
+		<p class="text-muted section-desc">
+			Permanently delete every saved article and its files. Sources are kept, but everything
+			captured from them is gone — this cannot be undone.
+		</p>
+		<button class="btn btn-danger" onclick={() => uiStore.openDeleteAllArticlesDialog()}>
+			Delete all articles
+		</button>
+	</section>
+
+	<section>
 		<h4>About</h4>
 		<p class="text-muted version">Legere — offline article reader.</p>
 	</section>
@@ -516,6 +527,9 @@
 	}
 	section h4 {
 		margin: 0 0 4px;
+	}
+	.danger-heading {
+		color: var(--color-danger);
 	}
 	.section-desc {
 		font-size: 13px;

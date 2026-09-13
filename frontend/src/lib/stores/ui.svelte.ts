@@ -3,6 +3,7 @@ const TOAST_DURATION_MS = 4000;
 class UiStore {
 	addSourceOpen = $state(false);
 	importDialogOpen = $state(false);
+	deleteAllArticlesDialogOpen = $state(false);
 	syncing = $state(false);
 	toastMessage = $state<string | null>(null);
 	private toastTimer: ReturnType<typeof setTimeout> | null = null;
@@ -19,6 +20,13 @@ class UiStore {
 	}
 	closeImportDialog() {
 		this.importDialogOpen = false;
+	}
+
+	openDeleteAllArticlesDialog() {
+		this.deleteAllArticlesDialogOpen = true;
+	}
+	closeDeleteAllArticlesDialog() {
+		this.deleteAllArticlesDialogOpen = false;
 	}
 
 	showToast(message: string) {

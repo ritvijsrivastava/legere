@@ -210,6 +210,31 @@ pub async fn delete_article(
     Ok(())
 }
 
+/// Deletes every article and its files in one shot — the settings
+/// "delete all articles" action. Sources themselves are kept (only their
+/// `article_count` is reset); this is read-later cleanup, not source
+/// removal. Unlike `delete_article`, this doesn't collect a per-article
+/// file list first: with everything going away, it's cheaper and just as
+/// correct to wipe `content/` and `media/` wholesale.
+#[tauri::command]
+pub async fn delete_all_articles(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), AppError> {
+    let pool = state.pool.clone();
+    tokio::task::spawn_blocking(move || {
+        let conn = pool.get()?;
+        Ok::<_, AppError>(queries::delete_all_articles(&conn)?)
+    })
+    .await??;
+
+    let _ = tokio::fs::remove_dir_all(state.data_dir.join("content")).await;
+    let _ = tokio::fs::remove_dir_all(state.data_dir.join("media")).await;
+    events::emit_articles_changed(&app);
+
+    Ok(())
+}
+
 /// Re-runs the capture pipeline for an existing article against its
 /// already-stored link, refreshing the readable view/content images
 /// locally.

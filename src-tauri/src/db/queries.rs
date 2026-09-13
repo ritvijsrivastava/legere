@@ -494,6 +494,21 @@ pub fn delete_article(
     Ok(Some(DeletedArticleFiles { hero_image_path }))
 }
 
+/// Deletes every article row and resets every source's `article_count`
+/// to 0. Used by the settings "delete all articles" action — a
+/// deliberately blunt, irreversible bulk op, unlike `delete_article`'s
+/// per-row path. The caller is responsible for removing the on-disk
+/// `content/` and `media/` directories wholesale, since there's no per-
+/// article file list worth collecting when everything is going away.
+pub fn delete_all_articles(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute("DELETE FROM articles", [])?;
+    conn.execute(
+        "UPDATE sources SET article_count = 0, updated_at = ?1",
+        params![Utc::now().to_rfc3339()],
+    )?;
+    Ok(())
+}
+
 /// Every live article's id, plus every `hero_image_path` currently
 /// referenced — the startup orphan sweep (`gc::sweep_orphaned_files`)
 /// diffs this against what's actually on disk under `content/`/`media/`:
@@ -911,6 +926,46 @@ mod tests {
     fn delete_article_is_a_no_op_for_an_unknown_id() {
         let conn = migrated_conn();
         assert!(delete_article(&conn, "does-not-exist").unwrap().is_none());
+    }
+
+    #[test]
+    fn delete_all_articles_clears_rows_and_resets_source_counts() {
+        let conn = migrated_conn();
+        let source = insert_rss_source(&conn, "Feed", "https://example.com/feed.xml").unwrap();
+        for i in 0..3 {
+            let output = sample_capture_output(&format!("https://example.com/article-{i}"));
+            insert_captured_article(
+                &conn,
+                &format!("art-{i}"),
+                Some(&source.id),
+                &source.name,
+                "rss",
+                &output,
+                &[],
+            )
+            .unwrap();
+        }
+        assert_eq!(
+            get_source(&conn, &source.id)
+                .unwrap()
+                .unwrap()
+                .article_count,
+            3
+        );
+
+        delete_all_articles(&conn).unwrap();
+
+        assert_eq!(count_all_articles(&conn).unwrap(), 0);
+        assert_eq!(
+            get_source(&conn, &source.id)
+                .unwrap()
+                .unwrap()
+                .article_count,
+            0
+        );
+        // The source row itself survives — this is read-later cleanup, not
+        // source removal.
+        assert!(get_source(&conn, &source.id).unwrap().is_some());
     }
 
     #[test]

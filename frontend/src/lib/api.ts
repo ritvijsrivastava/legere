@@ -77,6 +77,11 @@ export function deleteArticle(id: string): Promise<void> {
 	return invoke<void>('delete_article', { id });
 }
 
+/** Permanently deletes every article and its files. Sources are kept. */
+export function deleteAllArticles(): Promise<void> {
+	return invoke<void>('delete_all_articles');
+}
+
 export function recaptureArticle(id: string): Promise<ArticleDetail> {
 	return invoke<ArticleDetail>('recapture_article', { id });
 }

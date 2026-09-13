@@ -31,6 +31,9 @@
 .btn-secondary { border-color: var(--color-divider); }
 .btn-secondary:hover:not(:disabled) { background: color-mix(in srgb, var(--color-text) 7%, transparent); }
 .btn-secondary:active:not(:disabled) { background: color-mix(in srgb, var(--color-text) 14%, transparent); }
+.btn-danger { color: #fff; background: var(--color-danger); border-color: var(--color-danger); }
+.btn-danger:hover:not(:disabled) { background: color-mix(in srgb, var(--color-danger) 88%, black); }
+.btn-danger:active:not(:disabled) { background: color-mix(in srgb, var(--color-danger) 78%, black); }
 .btn-ghost { color: var(--color-accent); padding-inline: var(--space-1); }
 .btn-ghost:hover:not(:disabled) { background: color-mix(in srgb, var(--color-accent) 10%, transparent); }
 .btn-ghost:active:not(:disabled) { background: color-mix(in srgb, var(--color-accent) 18%, transparent); }
