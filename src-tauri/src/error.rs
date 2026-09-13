@@ -66,6 +66,18 @@ impl From<crate::sources::rss::RssSyncError> for AppError {
     }
 }
 
+impl From<csv::Error> for AppError {
+    fn from(e: csv::Error) -> Self {
+        AppError::Internal(format!("invalid CSV file: {e}"))
+    }
+}
+
+impl From<std::io::Error> for AppError {
+    fn from(e: std::io::Error) -> Self {
+        AppError::Internal(e.to_string())
+    }
+}
+
 impl From<crate::sources::direct_link::DirectLinkError> for AppError {
     fn from(e: crate::sources::direct_link::DirectLinkError) -> Self {
         use crate::sources::direct_link::DirectLinkError;

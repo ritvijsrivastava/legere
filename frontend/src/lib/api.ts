@@ -9,6 +9,8 @@ import type {
 	SyncResult
 } from './types';
 
+export { open as pickCsvFile } from '@tauri-apps/plugin-dialog';
+
 export function listArticles(): Promise<ArticleSummary[]> {
 	return invoke<ArticleSummary[]>('list_articles');
 }
@@ -77,6 +79,21 @@ export function syncSource(id: string): Promise<SyncResult> {
 
 export function syncAll(): Promise<SyncResult> {
 	return invoke<SyncResult>('sync_all');
+}
+
+/** Starts a background Raindrop.io CSV import and returns as soon as it's
+ *  running — progress is tracked via the `import:*` events (see
+ *  `lib/events.ts` and `stores/import.svelte.ts`), not this call's return
+ *  value. Rejects if an import is already in flight. */
+export function importRaindropCsv(path: string): Promise<void> {
+	return invoke<void>('import_raindrop_csv', { path });
+}
+
+/** Cancels the in-flight import, if any; resolves `true` if there was one
+ *  to cancel. In-flight fetches (up to the backend's small worker-pool
+ *  size) are still allowed to finish — only new ones are stopped. */
+export function cancelRaindropImport(): Promise<boolean> {
+	return invoke<boolean>('cancel_raindrop_import');
 }
 
 export function getSettings(): Promise<Settings> {

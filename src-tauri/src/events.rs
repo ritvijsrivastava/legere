@@ -38,3 +38,46 @@ pub fn emit_articles_changed(app: &AppHandle) {
 pub fn emit_source_changed(app: &AppHandle) {
     let _ = app.emit("source:changed", ());
 }
+
+/// One row `raindrop_import::run_import` couldn't capture — a dead link,
+/// timeout, or DB error. Collected rather than aborting the whole import,
+/// since a multi-thousand-row, years-old export is expected to contain
+/// plenty of these.
+#[derive(Debug, Clone, Serialize)]
+pub struct ImportFailure {
+    pub url: String,
+    pub title: String,
+    pub error: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ImportProgress {
+    pub processed: u32,
+    pub total: u32,
+    pub imported: u32,
+    pub skipped_duplicate: u32,
+    pub failed: u32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ImportFinished {
+    pub total: u32,
+    pub imported: u32,
+    pub skipped_duplicate: u32,
+    pub failed: Vec<ImportFailure>,
+    /// `true` if `cancel_raindrop_import` stopped this run early — the
+    /// counts above still reflect whatever completed before that point.
+    pub cancelled: bool,
+}
+
+pub fn emit_import_started(app: &AppHandle, total: u32) {
+    let _ = app.emit("import:started", total);
+}
+
+pub fn emit_import_progress(app: &AppHandle, payload: &ImportProgress) {
+    let _ = app.emit("import:progress", payload);
+}
+
+pub fn emit_import_finished(app: &AppHandle, payload: &ImportFinished) {
+    let _ = app.emit("import:finished", payload);
+}

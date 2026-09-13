@@ -2,6 +2,8 @@ import { listen } from '@tauri-apps/api/event';
 import { articlesStore } from './stores/articles.svelte';
 import { sourcesStore } from './stores/sources.svelte';
 import { uiStore } from './stores/ui.svelte';
+import { importStore } from './stores/import.svelte';
+import type { ImportFinished, ImportProgress } from './types';
 
 interface SyncFinishedPayload {
 	new_article_count: number;
@@ -40,5 +42,22 @@ export function registerBackendEvents() {
 
 	listen('source:changed', () => {
 		sourcesStore.refresh();
+	});
+
+	listen<number>('import:started', (event) => {
+		importStore.started(event.payload);
+	});
+
+	listen<ImportProgress>('import:progress', (event) => {
+		importStore.progress(event.payload);
+	});
+
+	listen<ImportFinished>('import:finished', (event) => {
+		importStore.finish(event.payload);
+		if (event.payload.failed.length > 0) {
+			uiStore.showToast(
+				`Import finished with ${event.payload.failed.length} failed link${event.payload.failed.length === 1 ? '' : 's'}`
+			);
+		}
 	});
 }

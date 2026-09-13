@@ -1,4 +1,5 @@
 pub mod articles;
+pub mod import;
 pub mod settings;
 pub mod sources;
 pub mod system;

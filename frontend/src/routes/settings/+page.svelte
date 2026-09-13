@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { settingsStore } from '$lib/stores/settings.svelte';
 	import { sourcesStore } from '$lib/stores/sources.svelte';
+	import { uiStore } from '$lib/stores/ui.svelte';
 	import ChevronRight from '$lib/icons/ChevronRight.svelte';
 	import type { LibraryView, ReaderMeasure, ReaderTheme } from '$lib/types';
 	import { isTauri } from '$lib/platform';
@@ -293,6 +294,23 @@
 			<span class="sources-count text-muted">{sourcesStore.items.length}</span>
 			<ChevronRight size={14} />
 		</a>
+	</section>
+
+	<section>
+		<h4>Import</h4>
+		{#if !tauri}
+			<p class="text-muted section-desc">
+				Not available in the web build — install the desktop or Android app to import bookmarks.
+			</p>
+		{:else}
+			<p class="text-muted section-desc">
+				Import bookmarks from a Raindrop.io CSV export. Links and tags are imported; notes, folders,
+				and highlights are not.
+			</p>
+			<button class="btn btn-secondary" onclick={() => uiStore.openImportDialog()}>
+				Import from Raindrop
+			</button>
+		{/if}
 	</section>
 
 	<section>

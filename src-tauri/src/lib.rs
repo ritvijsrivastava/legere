@@ -48,7 +48,8 @@ pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::default().build())
-        .plugin(tauri_plugin_os::init());
+        .plugin(tauri_plugin_os::init())
+        .plugin(tauri_plugin_dialog::init());
 
     #[cfg(not(target_os = "android"))]
     let builder = builder
@@ -95,6 +96,7 @@ pub fn run() {
                 data_dir,
                 autosync_handle: Mutex::new(None),
                 last_foreground_sync: std::sync::Mutex::new(None),
+                import_cancel: Mutex::new(None),
                 #[cfg(not(target_os = "android"))]
                 pending_update: Default::default(),
                 #[cfg(not(target_os = "android"))]
@@ -152,6 +154,8 @@ pub fn run() {
             commands::sources::sync_all,
             commands::settings::get_settings,
             commands::settings::update_settings,
+            commands::import::import_raindrop_csv,
+            commands::import::cancel_raindrop_import,
             commands::system::get_data_dir,
             save_github_token,
             has_github_token,

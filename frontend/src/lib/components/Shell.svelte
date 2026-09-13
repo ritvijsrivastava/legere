@@ -3,7 +3,6 @@
 	import Logo from '$lib/icons/Logo.svelte';
 	import Library from '$lib/icons/Library.svelte';
 	import Star from '$lib/icons/Star.svelte';
-	import Highlighter from '$lib/icons/Highlighter.svelte';
 	import SettingsIcon from '$lib/icons/Settings.svelte';
 	import Plus from '$lib/icons/Plus.svelte';
 	import Moon from '$lib/icons/Moon.svelte';
@@ -67,7 +66,6 @@
 	const navItems = [
 		{ href: '/', label: 'Library', Icon: Library, count: () => articlesStore.items.length },
 		{ href: '/favorites', label: 'Favorites', Icon: Star, count: () => articlesStore.favoritedCount },
-		{ href: '/highlights', label: 'Highlights', Icon: Highlighter, count: () => 0 },
 		{ href: '/settings', label: 'Settings', Icon: SettingsIcon, count: null as (() => number) | null }
 	];
 

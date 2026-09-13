@@ -134,6 +134,7 @@ mod tests {
             data_dir: data_dir.to_path_buf(),
             autosync_handle: Mutex::new(None),
             last_foreground_sync: std::sync::Mutex::new(None),
+            import_cancel: Mutex::new(None),
             pending_update: Default::default(),
             pending_linux_update: Default::default(),
         }

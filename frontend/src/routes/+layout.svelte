@@ -3,6 +3,7 @@
 	import favicon from '$lib/assets/favicon.svg';
 	import Shell from '$lib/components/Shell.svelte';
 	import AddSourceDialog from '$lib/components/AddSourceDialog.svelte';
+	import ImportRaindropDialog from '$lib/components/ImportRaindropDialog.svelte';
 	import Toast from '$lib/components/Toast.svelte';
 	import { articlesStore } from '$lib/stores/articles.svelte';
 	import { settingsStore } from '$lib/stores/settings.svelte';
@@ -29,4 +30,5 @@
 	{@render children()}
 </Shell>
 <AddSourceDialog />
+<ImportRaindropDialog />
 <Toast />

@@ -28,7 +28,7 @@
 		dark: { bg: '#1a1712', fg: '#ece6d8', muted: 'rgba(236,230,216,0.55)', divider: 'rgba(255,255,255,0.1)' }
 	};
 
-	const BACK_LABELS: Record<string, string> = { '/': 'Library', '/favorites': 'Favorites', '/highlights': 'Highlights' };
+	const BACK_LABELS: Record<string, string> = { '/': 'Library', '/favorites': 'Favorites' };
 	let backHref = $derived.by(() => {
 		const from = page.url.searchParams.get('from');
 		return from && from in BACK_LABELS ? from : '/';
@@ -246,7 +246,6 @@
 				<span>{formatCompactRelativeTime(article.published_at)}</span>
 			</div>
 			<h1 class="reader-title">{article.title}</h1>
-			<p class="reader-hint">Tap a marked passage to highlight it and add a note.</p>
 
 			<div
 				class="reader-body"
@@ -349,13 +348,7 @@
 		font-size: clamp(28px, 5vw, 38px);
 		line-height: 1.15;
 		letter-spacing: -0.01em;
-		margin: 0 0 10px;
-	}
-	.reader-hint {
-		font-family: var(--font-reading);
-		font-size: 15px;
 		margin: 0 0 28px;
-		color: var(--reader-muted, var(--color-muted));
 	}
 	.reader-body {
 		font-size: 19px;

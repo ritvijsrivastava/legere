@@ -168,6 +168,7 @@ mod tests {
             data_dir: data_dir.to_path_buf(),
             autosync_handle: TokioMutex::new(None),
             last_foreground_sync: std::sync::Mutex::new(None),
+            import_cancel: TokioMutex::new(None),
             pending_update: Default::default(),
             pending_linux_update: Default::default(),
         }

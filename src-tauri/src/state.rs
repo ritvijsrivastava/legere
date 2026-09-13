@@ -1,5 +1,6 @@
 use std::path::PathBuf;
-use std::sync::Mutex as StdMutex;
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Instant;
 
 use tauri::async_runtime::JoinHandle;
@@ -19,6 +20,14 @@ pub struct AppState {
     /// trigger between app launches beyond a manual refresh.
     #[cfg_attr(not(mobile), allow(dead_code))]
     pub last_foreground_sync: StdMutex<Option<Instant>>,
+    /// Cancellation flag for an in-progress `raindrop_import::run_import`
+    /// run, `None` when no import is running. A command starting an
+    /// import stores the flag it handed to the background task here so
+    /// `cancel_raindrop_import` can flip it; the task itself clears this
+    /// back to `None` when it finishes (successfully, on error, or via
+    /// cancellation), which also doubles as the single-import-at-a-time
+    /// guard (a start request while this is `Some` is rejected).
+    pub import_cancel: Mutex<Option<Arc<AtomicBool>>>,
     /// Update found by `check_for_update`, consumed by `install_update`.
     /// tauri-plugin-updater doesn't support mobile, so this only exists on desktop.
     #[cfg(not(target_os = "android"))]

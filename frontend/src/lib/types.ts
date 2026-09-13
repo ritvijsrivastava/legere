@@ -73,3 +73,27 @@ export interface Settings {
 export interface SyncResult {
 	new_article_count: number;
 }
+
+export interface ImportFailure {
+	url: string;
+	title: string;
+	error: string;
+}
+
+export interface ImportProgress {
+	processed: number;
+	total: number;
+	imported: number;
+	skipped_duplicate: number;
+	failed: number;
+}
+
+export interface ImportFinished {
+	total: number;
+	imported: number;
+	skipped_duplicate: number;
+	failed: ImportFailure[];
+	/** `true` if `cancel_raindrop_import` stopped the run early — the counts
+	 *  above still reflect whatever completed before that point. */
+	cancelled: boolean;
+}

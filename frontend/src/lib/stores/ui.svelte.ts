@@ -2,6 +2,7 @@ const TOAST_DURATION_MS = 4000;
 
 class UiStore {
 	addSourceOpen = $state(false);
+	importDialogOpen = $state(false);
 	syncing = $state(false);
 	toastMessage = $state<string | null>(null);
 	private toastTimer: ReturnType<typeof setTimeout> | null = null;
@@ -11,6 +12,13 @@ class UiStore {
 	}
 	closeAddSource() {
 		this.addSourceOpen = false;
+	}
+
+	openImportDialog() {
+		this.importDialogOpen = true;
+	}
+	closeImportDialog() {
+		this.importDialogOpen = false;
 	}
 
 	showToast(message: string) {

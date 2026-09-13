@@ -110,6 +110,53 @@ pub fn insert_captured_article(
     Ok(inserted)
 }
 
+/// Inserts an article captured by `raindrop_import::run_import`. Unlike
+/// [`insert_captured_article`], `fetched_at` is backdated to `saved_at`
+/// (the bookmark's own original save timestamp from the import source,
+/// e.g. Raindrop's `created` column) rather than "now", so an imported
+/// article's place in the library's fetched-at ordering reflects when it
+/// was actually bookmarked, not when this import ran; `favorited` is
+/// likewise taken directly from the import data instead of defaulting to
+/// `false`. Always `source_id = NULL` — an import isn't tied to a
+/// recurring source. Returns `true`/`false` on insert/duplicate exactly
+/// like `insert_captured_article`.
+pub fn insert_imported_article(
+    conn: &Connection,
+    id: &str,
+    source_name: &str,
+    output: &LocalCaptureOutput,
+    tags: &[String],
+    saved_at: &str,
+    favorited: bool,
+) -> rusqlite::Result<bool> {
+    let now = Utc::now().to_rfc3339();
+    let inserted = conn.execute(
+        "INSERT OR IGNORE INTO articles (
+            id, source_id, source_name, source_type, title, link, excerpt,
+            content_html, hero_image_path, published_at, fetched_at,
+            read_time_min, favorited,
+            extraction_confident, tags, updated_at
+        ) VALUES (?1, NULL, ?2, 'direct', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+        params![
+            id,
+            source_name,
+            output.title,
+            output.link,
+            output.excerpt,
+            output.content_html,
+            output.hero_image_path,
+            output.published_at,
+            saved_at,
+            output.read_time_min,
+            favorited,
+            output.extraction_confident,
+            tags_to_json(tags),
+            now,
+        ],
+    )? > 0;
+    Ok(inserted)
+}
+
 /// Overwrites an existing article's *readable* content in place, for
 /// `recapture_article` — re-running the local capture pipeline against the
 /// same id (and thus the same on-disk content/hero-image paths, which the
@@ -587,6 +634,66 @@ mod tests {
 
         assert!(get_article(&conn, "art-1").unwrap().is_none());
         assert_eq!(get_source(&conn, &source.id).unwrap().unwrap().article_count, 0);
+    }
+
+    #[test]
+    fn insert_imported_article_backdates_fetched_at_and_sets_favorited_and_tags() {
+        let conn = migrated_conn();
+        let output = sample_capture_output("https://example.com/imported");
+        let tags = vec!["pdf".to_string(), "file-system".to_string()];
+        let inserted = insert_imported_article(
+            &conn,
+            "art-imported",
+            "Raindrop import",
+            &output,
+            &tags,
+            "2024-10-02T16:40:49.533Z",
+            true,
+        )
+        .unwrap();
+        assert!(inserted);
+
+        let article = get_article(&conn, "art-imported").unwrap().unwrap();
+        assert!(article.favorited);
+        assert_eq!(article.tags, tags);
+        assert_eq!(article.source_type, "direct");
+
+        let fetched_at: String = conn
+            .query_row("SELECT fetched_at FROM articles WHERE id = ?1", ["art-imported"], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(fetched_at, "2024-10-02T16:40:49.533Z");
+    }
+
+    #[test]
+    fn insert_imported_article_is_a_no_op_for_a_duplicate_link() {
+        let conn = migrated_conn();
+        let output = sample_capture_output("https://example.com/dup-import");
+        let first = insert_imported_article(
+            &conn,
+            "art-1",
+            "Raindrop import",
+            &output,
+            &[],
+            "2024-01-01T00:00:00Z",
+            false,
+        )
+        .unwrap();
+        assert!(first);
+
+        let second = insert_imported_article(
+            &conn,
+            "art-2",
+            "Raindrop import",
+            &output,
+            &[],
+            "2024-01-02T00:00:00Z",
+            false,
+        )
+        .unwrap();
+        assert!(!second, "UNIQUE(link) should silently absorb the duplicate insert");
+        assert!(get_article(&conn, "art-2").unwrap().is_none());
     }
 
     #[test]
