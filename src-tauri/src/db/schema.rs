@@ -333,6 +333,36 @@ CREATE INDEX idx_articles_favorited ON articles(favorited);
 CREATE INDEX idx_articles_source_name ON articles(source_name);
 ";
 
+// Normalizes every existing row's `tags` JSON array to the invariant new
+// writes have enforced in Rust since `db::queries::normalize_tags` was
+// introduced (lowercase, trimmed, de-duplicated): RSS `<category>`
+// elements and Raindrop-import tag cells were stored verbatim before
+// this, so pre-existing rows can carry mixed-case or duplicate entries
+// that a same-tag filter/manual edit wouldn't otherwise recognize as the
+// same tag. Done here in SQL (rather than left to `normalize_tags` at the
+// next write) because a row that's never rewritten again would otherwise
+// carry stale casing indefinitely — `list_tags`' sidebar counts and the
+// tag filter both read straight off this column.
+//
+// The inner `SELECT DISTINCT ... ORDER BY t` collapses case-insensitive
+// duplicates (e.g. `Rust` and `rust`) before `json_group_array` rebuilds
+// the array; an all-empty or already-`'[]'` source array correctly comes
+// back as `'[]'` via `COALESCE` (an empty `json_each` produces zero
+// aggregate rows, and `json_group_array` of zero rows is `NULL`, not
+// `'[]'`).
+const V8: &str = "
+ UPDATE articles
+ SET tags = (
+     SELECT COALESCE(json_group_array(t), '[]')
+     FROM (
+         SELECT DISTINCT lower(trim(je.value)) AS t
+         FROM json_each(articles.tags) AS je
+         WHERE trim(je.value) != ''
+         ORDER BY t
+     )
+ );
+";
+
 pub fn migrations() -> Migrations<'static> {
     Migrations::new(vec![
         M::up(V1),
@@ -342,6 +372,7 @@ pub fn migrations() -> Migrations<'static> {
         M::up(V5),
         M::up(V6),
         M::up(V7),
+        M::up(V8),
     ])
 }
 
@@ -588,6 +619,30 @@ mod tests {
             )
             .unwrap();
         assert_eq!(tags, "[]");
+    }
+
+    #[test]
+    fn v8_normalizes_existing_tags_to_lowercase_trimmed_deduped() {
+        let mut conn = v2_conn_with_test_data();
+        migrations()
+            .to_version(&mut conn, 5)
+            .expect("migrate to V5");
+        conn.execute(
+            "UPDATE articles SET tags = ?1 WHERE id = 'art-unread'",
+            [r#"["Rust", " rust ", "WebDev", ""]"#],
+        )
+        .expect("seed pre-normalization tags");
+
+        migrate(&mut conn).expect("migrate to latest");
+
+        let tags: String = conn
+            .query_row(
+                "SELECT tags FROM articles WHERE id = 'art-unread'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(tags, r#"["rust","webdev"]"#);
     }
 
     #[test]

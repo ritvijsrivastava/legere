@@ -19,6 +19,24 @@ fn tags_to_json(tags: &[String]) -> String {
     serde_json::to_string(tags).unwrap_or_else(|_| "[]".to_string())
 }
 
+/// The one invariant every tag-writing path shares: lowercase, trimmed,
+/// non-empty, de-duplicated (first occurrence wins, order otherwise
+/// preserved). Called from every insert/update path that accepts tags
+/// (RSS capture, Raindrop import, manual edits) so "tags are always
+/// lowercase" holds regardless of what a caller passes in, rather than
+/// relying on each call site to remember to normalize itself.
+fn normalize_tags(tags: &[String]) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut result = Vec::new();
+    for tag in tags {
+        let tag = tag.trim().to_lowercase();
+        if !tag.is_empty() && seen.insert(tag.clone()) {
+            result.push(tag);
+        }
+    }
+    result
+}
+
 fn article_summary_from_row(row: &Row) -> rusqlite::Result<ArticleSummary> {
     Ok(ArticleSummary {
         id: row.get("id")?,
@@ -98,7 +116,7 @@ pub fn insert_captured_article(
             now,
             output.read_time_min,
             output.extraction_confident,
-            tags_to_json(tags),
+            tags_to_json(&normalize_tags(tags)),
             now,
         ],
     )? > 0;
@@ -151,7 +169,7 @@ pub fn insert_imported_article(
             output.read_time_min,
             favorited,
             output.extraction_confident,
-            tags_to_json(tags),
+            tags_to_json(&normalize_tags(tags)),
             now,
         ],
     )? > 0;
@@ -284,7 +302,10 @@ pub fn list_articles_page(
             " AND EXISTS (SELECT 1 FROM json_each(articles.tags) WHERE json_each.value IN ({placeholders}))"
         ));
         for tag in query.tags {
-            params.push(Box::new(tag.clone()));
+            // Stored tags are always lowercase (`normalize_tags`); lowercase
+            // the filter value too so a stray mixed-case caller still
+            // matches instead of silently returning nothing.
+            params.push(Box::new(tag.trim().to_lowercase()));
         }
     }
     if let Some((fetched_at, id)) = query.cursor {
@@ -574,6 +595,25 @@ pub fn toggle_favorite(conn: &Connection, id: &str) -> rusqlite::Result<bool> {
     .map(|v| v != 0)
 }
 
+/// Replaces an article's whole tag set (not a single add/remove) — the
+/// manual tag editor in the reader always submits the full list it's
+/// currently showing, same shape as [`normalize_tags`] expects. Returns
+/// the normalized tags actually stored, or `None` if `id` doesn't match
+/// any row (checked via `changes()`, since an UPDATE against a missing id
+/// silently affects zero rows rather than erroring).
+pub fn set_article_tags(
+    conn: &Connection,
+    id: &str,
+    tags: &[String],
+) -> rusqlite::Result<Option<Vec<String>>> {
+    let normalized = normalize_tags(tags);
+    let changed = conn.execute(
+        "UPDATE articles SET tags = ?2, updated_at = ?3 WHERE id = ?1",
+        params![id, tags_to_json(&normalized), Utc::now().to_rfc3339()],
+    )?;
+    Ok((changed > 0).then_some(normalized))
+}
+
 fn source_from_row(row: &Row) -> rusqlite::Result<Source> {
     Ok(Source {
         id: row.get("id")?,
@@ -854,6 +894,72 @@ mod tests {
                 .unwrap()
                 .article_count,
             0
+        );
+    }
+
+    #[test]
+    fn insert_captured_article_normalizes_tags_to_lowercase_trimmed_deduped() {
+        let conn = migrated_conn();
+        let output = sample_capture_output("https://example.com/tagged");
+        let tags = vec![
+            "Rust".to_string(),
+            " rust ".to_string(),
+            "WebDev".to_string(),
+            "".to_string(),
+        ];
+        insert_captured_article(
+            &conn,
+            "art-tagged",
+            None,
+            "Direct link",
+            "direct",
+            &output,
+            &tags,
+        )
+        .unwrap();
+
+        let article = get_article(&conn, "art-tagged").unwrap().unwrap();
+        assert_eq!(article.tags, vec!["rust".to_string(), "webdev".to_string()]);
+    }
+
+    #[test]
+    fn set_article_tags_replaces_and_normalizes_the_tag_set() {
+        let conn = migrated_conn();
+        let output = sample_capture_output("https://example.com/retagged");
+        insert_captured_article(
+            &conn,
+            "art-retag",
+            None,
+            "Direct link",
+            "direct",
+            &output,
+            &["old-tag".to_string()],
+        )
+        .unwrap();
+
+        let updated = set_article_tags(
+            &conn,
+            "art-retag",
+            &[
+                "New Tag".to_string(),
+                "new tag".to_string(),
+                " ".to_string(),
+            ],
+        )
+        .unwrap()
+        .expect("row existed");
+        assert_eq!(updated, vec!["new tag".to_string()]);
+
+        let article = get_article(&conn, "art-retag").unwrap().unwrap();
+        assert_eq!(article.tags, vec!["new tag".to_string()]);
+    }
+
+    #[test]
+    fn set_article_tags_returns_none_for_a_missing_id() {
+        let conn = migrated_conn();
+        assert_eq!(
+            set_article_tags(&conn, "does-not-exist", &[]).unwrap(),
+            None
         );
     }
 
