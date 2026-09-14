@@ -44,12 +44,16 @@ creating a duplicate name is rejected by the backend, and the one caller
 that can hit this on a normal path (`MoveToCategoryDialog`'s "create a
 new category") quietly reuses the existing category instead of erroring.
 
-Raindrop CSV imports preview folder names and row counts before capture.
-The user explicitly maps every folder to an existing/new category or
-Uncategorized. Duplicate links show existing category names once per
-folder and support keeping the current category or moving all duplicates
-to the selected category. Re-imports merge newly available tags without
-recapturing duplicate links.
+Raindrop CSV imports preview folder names and row counts before capture
+(no category choice involved in the preview — it's read-only). A row's
+`folder` maps straight to a same-named category automatically when the
+import runs (created if it doesn't exist yet, reused case-insensitively
+if it does; blank/`Unsorted` means Uncategorized, matching Raindrop's own
+convention) via `queries::find_or_create_category`, resolved once per
+distinct folder up front rather than per row. A link already saved is
+always skipped outright and its category is never changed by a
+re-import, even if the folder resolves differently this time; only new
+tags the CSV row carries get merged in.
 
 Direct-link captures ("Add a source") no longer prompt for a category —
 a new article has no `category_id` by construction, so it's simply

@@ -12,8 +12,9 @@ Built with Tauri 2 (Rust) + SvelteKit (Svelte 5 runes), SQLite storage.
 Articles can be assigned to user-managed flat folders/categories, managed
 from the sidebar (not Settings) — a new direct-link capture starts
 Uncategorized, moved from there via its card or the reader. Raindrop
-imports preview their folders before capture, require explicit folder
-choices, and merge newly available tags when a link is re-imported.
+imports preview their folders (read-only) before capture; each folder
+auto-maps to a same-named category on import, and a link already saved
+is always skipped, keeping its existing category untouched.
 The HTML sanitizer, SSRF guard, and URL/local-path utilities were
 originally sourced from the [wraith](../wraith) workspace but are now
 vendored directly into `src-tauri/src/` (see `capture::sanitize`,

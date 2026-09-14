@@ -158,7 +158,6 @@ pub fn insert_imported_article(
         saved_at,
         favorited,
         None,
-        true,
     )
 }
 
@@ -176,7 +175,6 @@ pub fn insert_imported_article_with_category(
     saved_at: &str,
     favorited: bool,
     category_id: Option<&str>,
-    keep_existing_on_conflict: bool,
 ) -> rusqlite::Result<bool> {
     let now = Utc::now().to_rfc3339();
     let inserted = conn.execute(
@@ -205,16 +203,12 @@ pub fn insert_imported_article_with_category(
         ],
     )? > 0;
     if !inserted {
+        // A duplicate is left alone, whether caught here (a race between
+        // two rows on the same brand-new link within one `run_import`
+        // call) or by that function's own dedup pre-check: its category
+        // is never touched, only its tags get topped up with anything
+        // new the CSV row carries.
         merge_tags_by_link(conn, &output.link, tags)?;
-        // A duplicate absorbed here (rather than by `run_import`'s own
-        // dedup pre-check, e.g. two rows racing on the same brand-new
-        // link within one run) should still get the same category
-        // treatment the pre-check path gets — conflicts are rare enough
-        // that "keep the existing category" is the safe default for this
-        // race-only path (the caller never gets to make an explicit
-        // per-folder choice for a row it didn't know was a duplicate
-        // until just now).
-        apply_category_on_duplicate(conn, &output.link, category_id, keep_existing_on_conflict)?;
     }
     Ok(inserted)
 }
@@ -581,71 +575,54 @@ pub fn delete_category(conn: &Connection, id: &str) -> rusqlite::Result<bool> {
     Ok(changed > 0)
 }
 
-/// Looks up the category an article at `link` currently belongs to, if
-/// any — used by `raindrop_import::preview_raindrop_csv` to detect a
-/// folder/existing-category conflict before an import runs, and by
-/// [`apply_category_on_duplicate`] to decide what a re-import's
-/// duplicate row should do about it.
-pub fn get_article_category_by_link(
-    conn: &Connection,
-    link: &str,
-) -> rusqlite::Result<Option<(String, String)>> {
+/// Looks up an existing category by name, case-insensitively (matching
+/// the uniqueness `idx_categories_name` already enforces). Used by
+/// [`find_or_create_category`] so a Raindrop folder name reuses a
+/// same-named category instead of erroring on the unique index.
+pub fn find_category_by_name(conn: &Connection, name: &str) -> rusqlite::Result<Option<Category>> {
     conn.query_row(
-        "SELECT c.id, c.name FROM articles a
-         JOIN categories c ON c.id = a.category_id
-         WHERE a.link = ?1",
-        params![link],
-        |row| Ok((row.get(0)?, row.get(1)?)),
+        "SELECT c.id AS id, c.name AS name, COUNT(a.id) AS article_count
+         FROM categories c
+         LEFT JOIN articles a ON a.category_id = c.id
+         WHERE c.name = ?1 COLLATE NOCASE
+         GROUP BY c.id",
+        params![name.trim()],
+        category_from_row,
     )
     .optional()
 }
 
-/// Applied to a duplicate-link row during a Raindrop import (same "fast
-/// path, no `insert_imported_article` call" situation
-/// [`merge_tags_by_link`] handles for tags) — decides what, if anything,
-/// to do about the *existing* article's category given the incoming
-/// row's resolved `category_id`:
-///
-/// - No existing category at all: always fills it in with `category_id`
-///   (not a conflict — there was nothing to preserve).
-/// - An existing category that matches `category_id` already: no-op.
-/// - An existing category that differs: a real conflict. Left alone if
-///   `keep_existing_on_conflict` is `true` (the user's "keep existing
-///   category" choice for this folder); overwritten to `category_id`
-///   otherwise.
-///
-/// Silently does nothing if `link` doesn't match any row, same as
-/// [`merge_tags_by_link`].
-pub fn apply_category_on_duplicate(
-    conn: &Connection,
-    link: &str,
-    category_id: Option<&str>,
-    keep_existing_on_conflict: bool,
-) -> rusqlite::Result<()> {
-    let Some((id, existing_category_id)) = conn
-        .query_row(
-            "SELECT id, category_id FROM articles WHERE link = ?1",
-            params![link],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+/// Resolves a Raindrop folder name to a category, creating it if it
+/// doesn't exist yet — the whole mapping a Raindrop import needs, with no
+/// separate user choice: a folder always becomes (or reuses) the
+/// same-named category. Race-safe against a concurrent create of the same
+/// name (falls back to a fresh lookup on the unique-index violation)
+/// rather than surfacing the raw constraint error.
+pub fn find_or_create_category(conn: &Connection, name: &str) -> rusqlite::Result<Category> {
+    let trimmed = name.trim();
+    if let Some(existing) = find_category_by_name(conn, trimmed)? {
+        return Ok(existing);
+    }
+    match create_category(conn, trimmed) {
+        Ok(category) => Ok(category),
+        Err(err) if is_constraint_violation(&err) => {
+            find_category_by_name(conn, trimmed)?.ok_or(err)
+        }
+        Err(err) => Err(err),
+    }
+}
+
+fn is_constraint_violation(err: &rusqlite::Error) -> bool {
+    matches!(
+        err,
+        rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error {
+                code: rusqlite::ErrorCode::ConstraintViolation,
+                ..
+            },
+            _
         )
-        .optional()?
-    else {
-        return Ok(());
-    };
-
-    if existing_category_id.as_deref() == category_id {
-        return Ok(());
-    }
-    let is_conflict = existing_category_id.is_some();
-    if is_conflict && keep_existing_on_conflict {
-        return Ok(());
-    }
-
-    conn.execute(
-        "UPDATE articles SET category_id = ?2, updated_at = ?3 WHERE id = ?1",
-        params![id, category_id, Utc::now().to_rfc3339()],
-    )?;
-    Ok(())
+    )
 }
 
 /// Sets (or clears, for `category_id = None`) a single article's

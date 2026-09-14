@@ -5,7 +5,7 @@ use tauri::{AppHandle, Manager, State};
 
 use crate::error::AppError;
 use crate::events::{self, ImportFailure, ImportFinished};
-use crate::sources::raindrop_import::{self, FolderResolution, ImportEvent, ImportPreview};
+use crate::sources::raindrop_import::{self, ImportEvent, ImportPreview};
 use crate::state::AppState;
 
 /// Reads `path` (a Raindrop.io CSV export chosen via the frontend's file
@@ -24,7 +24,6 @@ pub async fn import_raindrop_csv(
     app: AppHandle,
     state: State<'_, AppState>,
     path: String,
-    resolutions: Vec<FolderResolution>,
 ) -> Result<(), AppError> {
     {
         let guard = state.import_cancel.lock().await;
@@ -43,25 +42,20 @@ pub async fn import_raindrop_csv(
 
     tauri::async_runtime::spawn(async move {
         let app_state = app.state::<AppState>();
-        let result = raindrop_import::run_import_with_resolutions(
-            &app_state,
-            csv_bytes,
-            resolutions,
-            cancel,
-            |event| match event {
+        let result =
+            raindrop_import::run_import(&app_state, csv_bytes, cancel, |event| match event {
                 ImportEvent::Started { total } => events::emit_import_started(&app, total),
                 ImportEvent::Progress(progress) => events::emit_import_progress(&app, &progress),
                 ImportEvent::LibraryChanged => events::emit_articles_changed(&app),
                 ImportEvent::Finished(finished) => events::emit_import_finished(&app, &finished),
-            },
-        )
-        .await;
+            })
+            .await;
 
         // `validate_csv` above already rejects a malformed file before
         // this task is even spawned, so reaching an `Err` here would mean
-        // the file changed on disk between the two reads — reported the
-        // same way any other row-level failure would be, rather than
-        // silently dropped.
+        // either the file changed on disk between the two reads, or a
+        // category/database error — reported the same way any other
+        // row-level failure would be, rather than silently dropped.
         if let Err(err) = result {
             tracing::warn!(%err, "raindrop import failed after having already started");
             events::emit_import_finished(
@@ -73,7 +67,7 @@ pub async fn import_raindrop_csv(
                     failed: vec![ImportFailure {
                         url: String::new(),
                         title: String::new(),
-                        error: format!("invalid CSV file: {err}"),
+                        error: err.to_string(),
                     }],
                     cancelled: false,
                 },
@@ -87,9 +81,9 @@ pub async fn import_raindrop_csv(
 }
 
 /// Parses the selected CSV and returns the folder-level summary without
-/// capturing any links. The frontend uses this before starting an import
-/// so the user can explicitly map every folder to a category and review
-/// duplicate-category conflicts once per folder.
+/// capturing any links, so the frontend can show "N bookmarks, M already
+/// saved" before starting an import — folders themselves are resolved to
+/// categories automatically inside `run_import`, not chosen here.
 #[tauri::command]
 pub async fn preview_raindrop_csv(
     state: State<'_, AppState>,

@@ -3,10 +3,19 @@
 //! from each row — `note`, `excerpt`, `cover`, and `highlights` are
 //! intentionally ignored: this app has no highlight/annotation storage or
 //! UI (the sidebar's old "Highlights" entry was itself just a stub with
-//! no working feature behind it, since removed). `folder` maps to a real
-//! category (see `preview_raindrop_csv`/`FolderResolution`) rather than
-//! being discarded — no folder, or the literal "Unsorted" Raindrop
-//! itself writes for an uncategorized bookmark, both mean Uncategorized.
+//! no working feature behind it, since removed). `folder` maps 1:1 to a
+//! real category, automatically: no user choice involved, a folder name
+//! finds or creates the same-named category (see
+//! `queries::find_or_create_category`) — no folder, or the literal
+//! "Unsorted" Raindrop itself writes for an uncategorized bookmark, both
+//! mean Uncategorized.
+//!
+//! A row whose link is already stored is always skipped outright: no
+//! capture, and — deliberately — no change to whatever category that
+//! existing article already has, even if this row's folder resolves to a
+//! different one. Only its tags get topped up (see `merge_tags_by_link`)
+//! so a re-import still picks up tags added in Raindrop since the last
+//! run.
 //!
 //! Every row goes through the same local-capture pipeline
 //! (`capture::capture_local`) as manually adding a direct link, run
@@ -17,7 +26,7 @@
 //! export is expected to contain plenty of dead links — it's recorded in
 //! [`ImportSummary::failed`] instead.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -112,29 +121,14 @@ fn folder_display_name(key: &str) -> String {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct FolderResolution {
-    /// Empty string means the CSV row had no folder / was `Unsorted`.
-    pub folder: String,
-    /// `None` deliberately means Uncategorized — no hidden import default.
-    pub category_id: Option<String>,
-    /// On a duplicate link whose current category differs, preserve it
-    /// when true; otherwise move it to `category_id` (including null).
-    #[serde(default)]
-    pub keep_existing_on_conflict: bool,
-}
-
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct FolderPreview {
-    /// Stable key sent back in `FolderResolution`.
+    /// Stable key, same shape `folder_key` produces.
     pub folder: String,
     /// Human-readable name for the preview UI.
     pub name: String,
     pub row_count: u32,
     pub duplicate_count: u32,
-    /// Existing category names found among duplicate links in this folder.
-    /// These are shown once per folder, not once per article.
-    pub existing_categories: Vec<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -172,7 +166,7 @@ enum RowOutcome {
 /// the pre-check below catches most already-imported rows before paying
 /// for a fetch. Not authoritative — the *actually* fetched/redirected URL
 /// can still differ (this is the same tradeoff `article_link_exists`
-/// documents at every other call site); [`queries::insert_imported_article`]'s
+/// documents at every other call site); [`queries::insert_imported_article_with_category`]'s
 /// `UNIQUE(link)` index is what makes a resulting duplicate insert safe
 /// regardless. Returns `None` for a URL that doesn't even parse, so the
 /// row falls through to a real capture attempt (which will fail with a
@@ -188,7 +182,6 @@ async fn process_row(
     pool: db::DbPool,
     row: RaindropRow,
     category_id: Option<String>,
-    keep_existing_on_conflict: bool,
 ) -> RowOutcome {
     let url = row.url.trim().to_string();
     let display_title = if row.title.trim().is_empty() {
@@ -232,7 +225,6 @@ async fn process_row(
         &saved_at,
         favorited,
         category_id.as_deref(),
-        keep_existing_on_conflict,
     ) {
         Ok(true) => RowOutcome::Imported,
         Ok(false) => RowOutcome::SkippedDuplicate,
@@ -267,10 +259,10 @@ pub fn validate_csv(csv_bytes: &[u8]) -> Result<(), csv::Error> {
     Ok(())
 }
 
-/// Parses a CSV without fetching any links. The result is the import
-/// summary the UI needs before asking the user to choose destination
-/// categories: one row per distinct folder, with duplicate-link category
-/// names grouped at folder level rather than repeated for every article.
+/// Parses a CSV without fetching any links or creating any categories —
+/// a read-only summary the UI shows before an import starts: one row per
+/// distinct folder, with how many of its links are new versus already
+/// saved (and therefore will be skipped).
 pub fn preview_csv(state: &AppState, csv_bytes: &[u8]) -> Result<ImportPreview, AppError> {
     let mut reader = csv::Reader::from_reader(csv_bytes);
     let rows: Vec<RaindropRow> = reader
@@ -280,19 +272,16 @@ pub fn preview_csv(state: &AppState, csv_bytes: &[u8]) -> Result<ImportPreview, 
         .filter(|row| !row.url.trim().is_empty())
         .collect();
 
-    let mut folders: BTreeMap<String, (u32, u32, BTreeSet<String>)> = BTreeMap::new();
+    let mut folders: BTreeMap<String, (u32, u32)> = BTreeMap::new();
     let conn = state.pool.get()?;
     for row in &rows {
         let key = folder_key(&row.folder);
-        let entry = folders.entry(key.clone()).or_default();
+        let entry = folders.entry(key).or_default();
         entry.0 += 1;
-        if let Some(link) = precheck_link(&row.url) {
-            if queries::article_link_exists(&conn, &link)? {
-                entry.1 += 1;
-            }
-            if let Some((_, category_name)) = queries::get_article_category_by_link(&conn, &link)? {
-                entry.2.insert(category_name);
-            }
+        if let Some(link) = precheck_link(&row.url)
+            && queries::article_link_exists(&conn, &link)?
+        {
+            entry.1 += 1;
         }
     }
 
@@ -300,21 +289,51 @@ pub fn preview_csv(state: &AppState, csv_bytes: &[u8]) -> Result<ImportPreview, 
         total: rows.len() as u32,
         folders: folders
             .into_iter()
-            .map(
-                |(folder, (row_count, duplicate_count, existing_categories))| FolderPreview {
-                    name: folder_display_name(&folder),
-                    folder,
-                    row_count,
-                    duplicate_count,
-                    existing_categories: existing_categories.into_iter().collect(),
-                },
-            )
+            .map(|(folder, (row_count, duplicate_count))| FolderPreview {
+                name: folder_display_name(&folder),
+                folder,
+                row_count,
+                duplicate_count,
+            })
             .collect(),
     })
 }
 
+/// Resolves every distinct folder key appearing in `rows` to a category
+/// id (`None` for the empty/Uncategorized key), creating a same-named
+/// category the first time a folder is seen. Done once per distinct
+/// folder up front, sequentially, rather than per-row inside the worker
+/// pool — `find_or_create_category` isn't safe to call concurrently for
+/// the *same* new name (two workers could both decide to create it), and
+/// there's no benefit to doing so: a CSV with thousands of rows still
+/// only has a handful of distinct folders.
+fn resolve_folder_categories(
+    state: &AppState,
+    rows: &[RaindropRow],
+) -> Result<HashMap<String, Option<String>>, AppError> {
+    let conn = state.pool.get()?;
+    let mut resolved = HashMap::new();
+    for row in rows {
+        let key = folder_key(&row.folder);
+        if resolved.contains_key(&key) {
+            continue;
+        }
+        let category_id = if key.is_empty() {
+            None
+        } else {
+            Some(queries::find_or_create_category(&conn, &key)?.id)
+        };
+        resolved.insert(key, category_id);
+    }
+    Ok(resolved)
+}
+
 /// Parses `csv_bytes` (a Raindrop.io bookmark export) and imports every
 /// row it can, invoking `on_event` as it goes (see [`ImportEvent`]).
+/// Each row's `folder` automatically resolves to a same-named category
+/// (see [`resolve_folder_categories`]); a row whose link is already
+/// stored is always skipped, without changing that existing article's
+/// category.
 ///
 /// `cancel` is polled between dispatching rows to the worker pool, not
 /// mid-fetch: once set, no *new* row is dispatched, but up to
@@ -328,27 +347,12 @@ pub fn preview_csv(state: &AppState, csv_bytes: &[u8]) -> Result<ImportPreview, 
 /// function; `csv::Reader::deserialize` surfaces both as `Err` items in
 /// the same iterator, and both are treated as fatal here rather than
 /// silently dropping rows a user might expect to see reported.
-#[cfg_attr(not(test), allow(dead_code))]
 pub async fn run_import(
     state: &AppState,
     csv_bytes: Vec<u8>,
     cancel: Arc<AtomicBool>,
-    on_event: impl FnMut(ImportEvent),
-) -> Result<ImportSummary, csv::Error> {
-    run_import_with_resolutions(state, csv_bytes, Vec::new(), cancel, on_event).await
-}
-
-/// Resolution-aware entry point used by the import-preview flow. The
-/// compatibility wrapper [`run_import`] above keeps the low-level API
-/// useful for existing tests and callers that intentionally import every
-/// row Uncategorized.
-pub async fn run_import_with_resolutions(
-    state: &AppState,
-    csv_bytes: Vec<u8>,
-    resolutions: Vec<FolderResolution>,
-    cancel: Arc<AtomicBool>,
     mut on_event: impl FnMut(ImportEvent),
-) -> Result<ImportSummary, csv::Error> {
+) -> Result<ImportSummary, AppError> {
     let mut reader = csv::Reader::from_reader(csv_bytes.as_slice());
     let rows: Vec<RaindropRow> = reader
         .deserialize::<RaindropRow>()
@@ -356,6 +360,8 @@ pub async fn run_import_with_resolutions(
         .into_iter()
         .filter(|row| !row.url.trim().is_empty())
         .collect();
+
+    let folder_categories = resolve_folder_categories(state, &rows)?;
 
     let total = rows.len() as u32;
     on_event(ImportEvent::Started { total });
@@ -365,30 +371,13 @@ pub async fn run_import_with_resolutions(
         ..Default::default()
     };
 
-    let resolution_by_folder: HashMap<String, FolderResolution> = resolutions
-        .into_iter()
-        .map(|mut resolution| {
-            resolution.folder = folder_key(&resolution.folder);
-            (resolution.folder.clone(), resolution)
-        })
-        .collect();
-
     let mut rows_iter = rows.into_iter().map(|row| {
         let link_hint = precheck_link(&row.url);
-        let folder = folder_key(&row.folder);
-        let resolution = resolution_by_folder
-            .get(&folder)
+        let category_id = folder_categories
+            .get(&folder_key(&row.folder))
             .cloned()
-            // Missing resolutions are only possible for an internal
-            // caller that skipped the preview step. Keep that path safe:
-            // it produces Uncategorized and preserves existing category
-            // assignments instead of inventing a category or moving data.
-            .unwrap_or(FolderResolution {
-                folder,
-                category_id: None,
-                keep_existing_on_conflict: true,
-            });
-        (row, link_hint, resolution)
+            .flatten();
+        (row, link_hint, category_id)
     });
     let mut join_set = tokio::task::JoinSet::new();
     let mut processed = 0u32;
@@ -402,7 +391,7 @@ pub async fn run_import_with_resolutions(
             if cancel.load(Ordering::Relaxed) {
                 break;
             }
-            let Some((row, link_hint, resolution)) = rows_iter.next() else {
+            let Some((row, link_hint, category_id)) = rows_iter.next() else {
                 break;
             };
 
@@ -416,31 +405,23 @@ pub async fn run_import_with_resolutions(
                 None => false,
             };
             if already_exists {
-                // The whole point of `already_exists` is to skip the
-                // network fetch `process_row` would otherwise pay for —
-                // but a re-import can still carry tags the stored article
-                // doesn't have yet (e.g. added in Raindrop after the last
-                // import), so those are still merged in here.
+                // Already saved: skipped outright. Its category is left
+                // exactly as-is — a re-import never moves an existing
+                // article, even if this row's folder now resolves to a
+                // different category. Only new tags (e.g. added in
+                // Raindrop since the last import) are still picked up.
                 if let Some(link) = &link_hint {
                     let tags = parse_tags(&row.tags);
-                    let update_result =
+                    let merge_result =
                         state
                             .pool
                             .get()
                             .map_err(|err| err.to_string())
                             .and_then(|conn| {
                                 queries::merge_tags_by_link(&conn, link, &tags)
-                                    .and_then(|_| {
-                                        queries::apply_category_on_duplicate(
-                                            &conn,
-                                            link,
-                                            resolution.category_id.as_deref(),
-                                            resolution.keep_existing_on_conflict,
-                                        )
-                                    })
                                     .map_err(|err| err.to_string())
                             });
-                    if let Err(error) = update_result {
+                    if let Err(error) = merge_result {
                         summary.failed.push(ImportFailure {
                             url: row.url.clone(),
                             title: row.title.clone(),
@@ -457,14 +438,7 @@ pub async fn run_import_with_resolutions(
             let http_client = state.http_client.clone();
             let data_dir = state.data_dir.clone();
             let pool = state.pool.clone();
-            join_set.spawn(process_row(
-                http_client,
-                data_dir,
-                pool,
-                row,
-                resolution.category_id,
-                resolution.keep_existing_on_conflict,
-            ));
+            join_set.spawn(process_row(http_client, data_dir, pool, row, category_id));
         }
 
         let Some(joined) = join_set.join_next().await else {
@@ -568,11 +542,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn preview_groups_rows_by_folder_and_lists_existing_categories_once() {
+    async fn preview_groups_rows_by_folder_and_counts_duplicates() {
         let data_dir = tempfile::tempdir().expect("tempdir");
         let base_url = test_support::spawn().await;
         let state = build_state(data_dir.path());
-        let category = queries::create_category(&state.pool.get().unwrap(), "Old folder").unwrap();
         let existing_url = format!("{base_url}/article.html?preview-existing=1");
         let output = capture::LocalCaptureOutput {
             title: "Existing".to_string(),
@@ -596,7 +569,6 @@ mod tests {
             &[],
         )
         .unwrap();
-        queries::set_article_category(&conn, "existing", Some(&category.id)).unwrap();
 
         let csv = csv_bytes_with_folder(&[
             (
@@ -634,23 +606,16 @@ mod tests {
         assert_eq!(preview.folders[1].name, "New folder");
         assert_eq!(preview.folders[1].row_count, 2);
         assert_eq!(preview.folders[1].duplicate_count, 1);
-        assert_eq!(preview.folders[1].existing_categories, vec!["Old folder"]);
     }
 
     #[tokio::test]
-    async fn importing_a_folder_assigns_its_explicit_category() {
+    async fn importing_a_folder_creates_and_assigns_a_same_named_category() {
         let data_dir = tempfile::tempdir().expect("tempdir");
         let base_url = test_support::spawn().await;
         let state = build_state(data_dir.path());
-        let category = queries::create_category(&state.pool.get().unwrap(), "Reading").unwrap();
         let url = format!("{base_url}/article.html?folder-category=1");
-        let resolutions = vec![FolderResolution {
-            folder: "Reading".to_string(),
-            category_id: Some(category.id.clone()),
-            keep_existing_on_conflict: false,
-        }];
 
-        let summary = run_import_with_resolutions(
+        let summary = run_import(
             &state,
             csv_bytes_with_folder(&[(
                 "Foldered",
@@ -660,7 +625,6 @@ mod tests {
                 "2024-01-01T00:00:00Z",
                 "false",
             )]),
-            resolutions,
             Arc::new(AtomicBool::new(false)),
             |_| {},
         )
@@ -669,6 +633,10 @@ mod tests {
         assert_eq!(summary.imported, 1);
 
         let conn = state.pool.get().unwrap();
+        let categories = queries::fetch_categories(&conn).unwrap();
+        assert_eq!(categories.len(), 1);
+        assert_eq!(categories[0].name, "Reading");
+
         let stored_category: Option<String> = conn
             .query_row(
                 "SELECT category_id FROM articles WHERE link LIKE '%folder-category=1'",
@@ -676,26 +644,60 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(stored_category, Some(category.id));
+        assert_eq!(stored_category, Some(categories[0].id.clone()));
     }
 
     #[tokio::test]
-    async fn duplicate_folder_conflict_can_preserve_the_existing_category() {
+    async fn importing_the_same_folder_twice_reuses_the_existing_category() {
         let data_dir = tempfile::tempdir().expect("tempdir");
         let base_url = test_support::spawn().await;
         let state = build_state(data_dir.path());
-        let old_category = queries::create_category(&state.pool.get().unwrap(), "Old").unwrap();
-        let new_category = queries::create_category(&state.pool.get().unwrap(), "New").unwrap();
+        let existing = queries::create_category(&state.pool.get().unwrap(), "Reading").unwrap();
+        let url = format!("{base_url}/article.html?folder-reuse=1");
+
+        let summary = run_import(
+            &state,
+            csv_bytes_with_folder(&[(
+                "Foldered",
+                &url,
+                "reading",
+                "",
+                "2024-01-01T00:00:00Z",
+                "false",
+            )]),
+            Arc::new(AtomicBool::new(false)),
+            |_| {},
+        )
+        .await
+        .expect("valid csv should parse");
+        assert_eq!(summary.imported, 1);
+
+        let conn = state.pool.get().unwrap();
+        assert_eq!(
+            queries::fetch_categories(&conn).unwrap().len(),
+            1,
+            "a folder differing only by case must reuse the existing category, not duplicate it"
+        );
+        let stored_category: Option<String> = conn
+            .query_row(
+                "SELECT category_id FROM articles WHERE link LIKE '%folder-reuse=1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored_category, Some(existing.id));
+    }
+
+    #[tokio::test]
+    async fn reimporting_an_already_saved_link_never_changes_its_category() {
+        let data_dir = tempfile::tempdir().expect("tempdir");
+        let base_url = test_support::spawn().await;
+        let state = build_state(data_dir.path());
         let url = format!("{base_url}/article.html?folder-conflict=1");
 
-        let first = run_import_with_resolutions(
+        let first = run_import(
             &state,
-            csv_bytes(&[("First", &url, "", "2024-01-01T00:00:00Z", "false")]),
-            vec![FolderResolution {
-                folder: "Unsorted".to_string(),
-                category_id: Some(old_category.id.clone()),
-                keep_existing_on_conflict: false,
-            }],
+            csv_bytes_with_folder(&[("First", &url, "Old", "", "2024-01-01T00:00:00Z", "false")]),
             Arc::new(AtomicBool::new(false)),
             |_| {},
         )
@@ -703,14 +705,9 @@ mod tests {
         .unwrap();
         assert_eq!(first.imported, 1);
 
-        let second = run_import_with_resolutions(
+        let second = run_import(
             &state,
             csv_bytes_with_folder(&[("Second", &url, "New", "", "2024-01-02T00:00:00Z", "false")]),
-            vec![FolderResolution {
-                folder: "New".to_string(),
-                category_id: Some(new_category.id.clone()),
-                keep_existing_on_conflict: true,
-            }],
             Arc::new(AtomicBool::new(false)),
             |_| {},
         )
@@ -719,6 +716,9 @@ mod tests {
         assert_eq!(second.skipped_duplicate, 1);
 
         let conn = state.pool.get().unwrap();
+        let old_category = queries::find_category_by_name(&conn, "Old")
+            .unwrap()
+            .unwrap();
         let stored_category: String = conn
             .query_row(
                 "SELECT category_id FROM articles WHERE link LIKE '%folder-conflict=1'",
@@ -807,8 +807,8 @@ mod tests {
     /// doesn't cover: a re-import isn't just a no-op when the row is
     /// otherwise identical — if it now carries tags the stored article
     /// doesn't have, those must still land, even though the dedup
-    /// *pre-check* (not `insert_imported_article`) is what actually
-    /// short-circuits this row before any network fetch happens.
+    /// *pre-check* (not `insert_imported_article_with_category`) is what
+    /// actually short-circuits this row before any network fetch happens.
     #[tokio::test]
     async fn reimporting_via_the_dedup_precheck_path_still_merges_new_tags() {
         let data_dir = tempfile::tempdir().expect("tempdir");

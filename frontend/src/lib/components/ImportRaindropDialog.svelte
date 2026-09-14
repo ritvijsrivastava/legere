@@ -1,19 +1,12 @@
 <script lang="ts">
 	import { uiStore } from '$lib/stores/ui.svelte';
 	import { importStore } from '$lib/stores/import.svelte';
-	import type { Category, FolderResolution, ImportPreview } from '$lib/types';
+	import type { ImportPreview } from '$lib/types';
 	import * as api from '$lib/api';
-
-	const UNCATEGORIZED = '__uncategorized__';
 
 	let selectedPath = $state<string | null>(null);
 	let preview = $state<ImportPreview | null>(null);
-	let categories = $state<Category[]>([]);
-	let folderChoices = $state<Record<string, string>>({});
-	let conflictChoices = $state<Record<string, 'keep' | 'move' | ''>>({});
-	let newCategoryName = $state('');
 	let previewing = $state(false);
-	let creatingCategory = $state(false);
 	let starting = $state(false);
 	let cancelling = $state(false);
 	let error = $state<string | null>(null);
@@ -26,22 +19,11 @@
 	const progressPct = $derived(
 		importStore.total > 0 ? Math.round((importStore.processed / importStore.total) * 100) : 0
 	);
-	const choicesComplete = $derived(
-		preview !== null && preview.folders.every((folder) => Boolean(folderChoices[folder.folder]))
-	);
-	const conflictsComplete = $derived(
-		preview !== null &&
-		preview.folders.every((folder) => !hasConflict(folder.folder) || Boolean(conflictChoices[folder.folder]))
-	);
-	const canStart = $derived(Boolean(selectedPath && preview && choicesComplete && conflictsComplete));
+	const canStart = $derived(Boolean(selectedPath && preview));
 
 	function clearSelection() {
 		selectedPath = null;
 		preview = null;
-		categories = [];
-		folderChoices = {};
-		conflictChoices = {};
-		newCategoryName = '';
 		previewing = false;
 	}
 
@@ -66,16 +48,8 @@
 
 			selectedPath = path;
 			preview = null;
-			folderChoices = {};
-			conflictChoices = {};
 			previewing = true;
-			const [nextPreview, nextCategories] = await Promise.all([
-				api.previewRaindropCsv(path),
-				api.getCategories()
-			]);
-			preview = nextPreview;
-			categories = nextCategories;
-			folderChoices = Object.fromEntries(nextPreview.folders.map((folder) => [folder.folder, '']));
+			preview = await api.previewRaindropCsv(path);
 		} catch (e) {
 			error = api.errorMessage(e);
 			preview = null;
@@ -84,60 +58,12 @@
 		}
 	}
 
-	function categoryName(categoryId: string): string | null {
-		return categories.find((category) => category.id === categoryId)?.name ?? null;
-	}
-
-	function hasConflict(folder: string): boolean {
-		const folderPreview = preview?.folders.find((item) => item.folder === folder);
-		const choice = folderChoices[folder];
-		if (!folderPreview || !choice || folderPreview.existing_categories.length === 0) return false;
-		if (choice === UNCATEGORIZED) return true;
-		const chosenName = categoryName(choice);
-		return (
-			chosenName === null ||
-			folderPreview.existing_categories.some(
-				(existing) => existing.toLowerCase() !== chosenName.toLowerCase()
-			)
-		);
-	}
-
-	async function createCategory() {
-		const name = newCategoryName.trim();
-		if (!name) return;
-		creatingCategory = true;
-		error = null;
-		try {
-			const category = await api.createCategory(name);
-			categories = [...categories, category].sort((a, b) => a.name.localeCompare(b.name));
-			newCategoryName = '';
-		} catch (e) {
-			error = api.errorMessage(e);
-		} finally {
-			creatingCategory = false;
-		}
-	}
-
-	function buildResolutions(): FolderResolution[] {
-		if (!preview) return [];
-		return preview.folders.map((folder) => {
-			const choice = folderChoices[folder.folder];
-			return {
-				folder: folder.folder,
-				category_id: choice === UNCATEGORIZED ? null : choice,
-				keep_existing_on_conflict: hasConflict(folder.folder)
-					? conflictChoices[folder.folder] === 'keep'
-					: false
-			};
-		});
-	}
-
 	async function startImport() {
 		if (!selectedPath || !canStart) return;
 		starting = true;
 		error = null;
 		try {
-			await api.importRaindropCsv(selectedPath, buildResolutions());
+			await api.importRaindropCsv(selectedPath);
 			clearSelection();
 		} catch (e) {
 			error = api.errorMessage(e);
@@ -281,89 +207,27 @@
 			{:else if preview}
 					<div class="preview-intro">
 						<strong>{preview.total} bookmarks found</strong>
-						<span>Choose a category for each folder before importing.</span>
+						<span>
+							Each Raindrop folder becomes its own category automatically. Links already saved are
+							skipped and left as-is.
+						</span>
 					</div>
 
-					<div class="folder-list" aria-label="Raindrop folders">
+					<ul class="folder-list" aria-label="Raindrop folders">
 						{#each preview.folders as folder (folder.folder)}
-							<section class="folder-row">
-								<div class="folder-heading">
-									<strong>{folder.name}</strong>
-									<span>
-										{folder.row_count} {folder.row_count === 1 ? 'bookmark' : 'bookmarks'}
-										· {folder.row_count - folder.duplicate_count} new
-										· {folder.duplicate_count} already saved
-									</span>
-								</div>
-								{#if folder.existing_categories.length > 0}
-									<p class="conflict-note">
-										Saved duplicates currently use: {folder.existing_categories.join(', ')}.
-									</p>
-								{/if}
-								<label class="folder-select-label" for={`folder-${folder.folder || 'uncategorized'}`}>
-									Category
-								</label>
-								<select
-									id={`folder-${folder.folder || 'uncategorized'}`}
-									class="input folder-select"
-									value={folderChoices[folder.folder] ?? ''}
-									onchange={(event) =>
-										(folderChoices[folder.folder] = (event.currentTarget as HTMLSelectElement).value)}
-								>
-									<option value="">Choose a category…</option>
-									<option value={UNCATEGORIZED}>Uncategorized</option>
-									{#each categories as category (category.id)}
-										<option value={category.id}>{category.name}</option>
-									{/each}
-								</select>
-
-								{#if hasConflict(folder.folder)}
-									<div class="conflict-choice">
-										<span class="folder-select-label">Duplicate handling</span>
-										<label>
-											<input
-												type="radio"
-												name={`conflict-${folder.folder}`}
-												value="keep"
-												checked={conflictChoices[folder.folder] === 'keep'}
-												onchange={() => (conflictChoices[folder.folder] = 'keep')}
-											/>
-											Keep each saved article’s current category
-										</label>
-										<label>
-											<input
-												type="radio"
-												name={`conflict-${folder.folder}`}
-												value="move"
-												checked={conflictChoices[folder.folder] === 'move'}
-												onchange={() => (conflictChoices[folder.folder] = 'move')}
-											/>
-											Move duplicates to the selected category
-										</label>
-									</div>
-								{/if}
-							</section>
+							<li class="folder-row">
+								<strong>{folder.name}</strong>
+								<span class="text-muted">
+									{folder.row_count - folder.duplicate_count} new
+									· {folder.duplicate_count} already saved
+								</span>
+							</li>
 						{/each}
-					</div>
-
-					<div class="new-category">
-						<label class="folder-select-label" for="new-import-category">Need another category?</label>
-						<div class="new-category-row">
-							<input
-								id="new-import-category"
-								class="input"
-								placeholder="Category name"
-								bind:value={newCategoryName}
-								onkeydown={(event) => event.key === 'Enter' && createCategory()}
-							/>
-							<button class="btn btn-secondary" onclick={createCategory} disabled={creatingCategory || !newCategoryName.trim()}>
-								{creatingCategory ? 'Creating…' : 'Create'}
-							</button>
-						</div>
-					</div>
+					</ul>
 				{:else}
 					<div class="dialog-body">
-						Choose a Raindrop CSV to review its folders before anything is captured. Each folder can be assigned to an existing category or left Uncategorized explicitly.
+						Choose a Raindrop CSV to review what it contains before anything is captured. Each
+						folder in the export becomes its own category; links already saved are skipped.
 					</div>
 				{/if}
 
@@ -383,7 +247,7 @@
 
 <style>
 	.dialog {
-		width: min(620px, 94vw);
+		width: min(560px, 94vw);
 		max-height: min(760px, calc(100vh - 32px));
 	}
 	.field {
@@ -419,78 +283,32 @@
 	.preview-intro strong {
 		font-size: 15px;
 	}
-	.preview-intro span,
-	.folder-heading span,
-	.conflict-note {
+	.preview-intro span {
 		color: var(--color-muted);
 	}
 	.folder-list {
+		list-style: none;
+		margin: 0;
+		padding: 0;
 		display: flex;
 		flex-direction: column;
-		gap: 8px;
+		gap: 6px;
 		max-height: min(390px, 42vh);
 		overflow-y: auto;
-		padding: 2px;
 	}
 	.folder-row {
-		display: flex;
-		flex-direction: column;
-		gap: 7px;
-		padding: 12px;
-		border: 1px solid var(--color-divider);
-		border-radius: var(--radius-md);
-	}
-	.folder-heading {
 		display: flex;
 		align-items: baseline;
 		justify-content: space-between;
 		gap: 12px;
+		padding: 10px 12px;
+		border: 1px solid var(--color-divider);
+		border-radius: var(--radius-md);
 		font-size: 14px;
 	}
-	.folder-heading span,
-	.conflict-note,
-	.folder-select-label,
-	.conflict-choice label {
+	.folder-row span {
 		font-size: 12px;
-	}
-	.conflict-note {
-		margin: 0;
-		line-height: 1.4;
-	}
-	.folder-select-label {
-		color: var(--color-muted);
-	}
-	.folder-select {
-		width: 100%;
-	}
-	.conflict-choice {
-		display: flex;
-		flex-direction: column;
-		gap: 7px;
-		padding-top: 4px;
-	}
-	.conflict-choice label {
-		display: flex;
-		align-items: flex-start;
-		gap: 7px;
-		line-height: 1.35;
-	}
-	.conflict-choice input {
-		accent-color: var(--color-accent);
-		margin: 1px 0 0;
-	}
-	.new-category {
-		display: flex;
-		flex-direction: column;
-		gap: 6px;
-	}
-	.new-category-row {
-		display: flex;
-		gap: 8px;
-	}
-	.new-category-row .input {
-		min-width: 0;
-		flex: 1;
+		flex: none;
 	}
 	.counts {
 		font-size: 12px;
@@ -545,7 +363,7 @@
 		.dialog {
 			padding: 20px;
 		}
-		.folder-heading {
+		.folder-row {
 			align-items: flex-start;
 			flex-direction: column;
 			gap: 2px;

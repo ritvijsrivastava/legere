@@ -6,7 +6,6 @@ import type {
 	ArticlePageRequest,
 	ArticleSummary,
 	Category,
-	FolderResolution,
 	ImportPreview,
 	NamedCount,
 	Settings,
@@ -156,11 +155,8 @@ export function previewRaindropCsv(path: string): Promise<ImportPreview> {
 	return invoke<ImportPreview>('preview_raindrop_csv', { path });
 }
 
-export function importRaindropCsv(
-	path: string,
-	resolutions: FolderResolution[] = []
-): Promise<void> {
-	return invoke<void>('import_raindrop_csv', { path, resolutions });
+export function importRaindropCsv(path: string): Promise<void> {
+	return invoke<void>('import_raindrop_csv', { path });
 }
 
 /** Cancels the in-flight import, if any; resolves `true` if there was one
