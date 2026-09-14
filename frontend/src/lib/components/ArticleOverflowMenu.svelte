@@ -5,13 +5,13 @@
 
 	let {
 		recapturing,
-		link,
+		onOpenOriginal,
 		onRecapture,
 		onMoveCategory,
 		onDelete
 	}: {
 		recapturing: boolean;
-		link: string;
+		onOpenOriginal: () => void;
 		onRecapture: () => void;
 		onMoveCategory: () => void;
 		onDelete: () => void;
@@ -45,17 +45,17 @@
 	</button>
 	{#if open}
 		<div class="overflow-popover elev-md" role="menu">
-			<a
+			<button
 				class="overflow-item"
 				role="menuitem"
-				href={link}
-				target="_blank"
-				rel="noopener"
-				onclick={() => (open = false)}
+				onclick={() => {
+					open = false;
+					onOpenOriginal();
+				}}
 			>
 				<ExternalLink />
 				View original
-			</a>
+			</button>
 			<button
 				class="overflow-item"
 				role="menuitem"

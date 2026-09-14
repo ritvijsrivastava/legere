@@ -6,7 +6,8 @@ a Rust port of Mozilla's Readability), cleans tracking params off the
 link, and localizes that readable view's own images into a plain
 per-article directory (`content/<id>/`) so it stays readable with no
 network at all. The original page itself is never archived — "view
-original" just opens the live link in your browser.
+original" opens the cleaned live link in the system browser, and the reader
+can share that same link through the platform share sheet or clipboard.
 
 Built with Tauri 2 (Rust) + SvelteKit (Svelte 5 runes), SQLite storage.
 Articles can be assigned to user-managed flat folders/categories, managed

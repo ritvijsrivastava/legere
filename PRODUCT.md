@@ -78,7 +78,9 @@ unless revisited later.)
   the article being read (persisted per-article, with a "reset to global
   defaults" action), without touching the global setting. Reading
   progress is persisted and restored (scroll position, the article's
-  fixed read time shown in the byline, library-card progress bar).
+  fixed read time shown in the byline, library-card progress bar). The
+  reader exposes the cleaned original URL as an explicit external link
+  and can share that URL through the platform share sheet or clipboard.
 - Library: card view and list view, filter by user-managed
   folder/category and by tag, unread/favorite counts, delete with confirm,
   "Favorites" as its own view. The Library search box (search-by-title)

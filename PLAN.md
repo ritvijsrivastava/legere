@@ -1,5 +1,13 @@
 # Legere Remodel — Offline Article Reader (Desktop + Android)
 
+## Addendum — original links and sharing (implemented)
+
+The readable reader now exposes the cleaned original URL beside the article
+metadata and in the overflow menu. Both actions open the system's default
+browser; the reader also shares that same URL through the platform share
+sheet when available, falling back to the clipboard. No original page is
+embedded or archived in Legere, and no opening-mode setting is required.
+
 ## Addendum — offline website archive removed (MVP scope cut)
 
 Everything below describes an earlier plan (and the codebase evolved past

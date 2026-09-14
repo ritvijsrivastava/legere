@@ -200,6 +200,7 @@ Consistently soft, never sharp and never maximal. Radius scales with the size an
 - **Primary:** Ledger Pine fill, white/near-black text (light/dark), Title-weight (650) label.
 - **Secondary:** transparent fill, hairline border, ink text.
 - **Ghost:** no border, accent-colored text, used for low-emphasis actions (back button, "Details").
+- **Reader actions:** the original article link sits with the reader metadata; sharing is a quiet icon action in the reader header and shares the cleaned external URL rather than a local reader route.
 - **Hover/Press:** background darkens (primary) or tints from ink (secondary/ghost) over `--duration-base` with `--ease-snap`; every button scales to 0.96 on press — the one tactile signature shared by every clickable control in the app.
 
 ### Segmented Controls

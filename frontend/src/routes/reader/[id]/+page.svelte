@@ -10,7 +10,10 @@
 	import TagEditor from '$lib/components/TagEditor.svelte';
 	import ArticleOverflowMenu from '$lib/components/ArticleOverflowMenu.svelte';
 	import { uiStore } from '$lib/stores/ui.svelte';
+	import { openExternalUrl, shareArticleLink } from '$lib/articleActions';
 	import ChevronLeft from '$lib/icons/ChevronLeft.svelte';
+	import ExternalLink from '$lib/icons/ExternalLink.svelte';
+	import Share from '$lib/icons/Share.svelte';
 	import Star from '$lib/icons/Star.svelte';
 	import { formatCompactRelativeTime, formatReadTime } from '$lib/format';
 
@@ -183,6 +186,25 @@
 		libraryStatsStore.refresh();
 	}
 
+	async function openOriginal() {
+		if (!article) return;
+		try {
+			await openExternalUrl(article.link);
+		} catch (error) {
+			uiStore.showToast(`Couldn't open original article: ${api.errorMessage(error)}`);
+		}
+	}
+
+	async function shareArticle() {
+		if (!article) return;
+		try {
+			const result = await shareArticleLink(article.title, article.link);
+			if (result === 'copied') uiStore.showToast('Article link copied');
+		} catch (error) {
+			uiStore.showToast(`Couldn't share article: ${api.errorMessage(error)}`);
+		}
+	}
+
 	let recapturing = $state(false);
 
 	async function recapture() {
@@ -241,16 +263,25 @@
 					onReset={resetOverrides}
 				/>
 				<button
+					class="btn btn-icon btn-secondary share-btn"
+					onclick={() => void shareArticle()}
+					aria-label="Share article"
+					title="Share article"
+				>
+					<Share />
+				</button>
+				<button
 					class="btn btn-icon btn-secondary favorite-btn"
 					class:favorited={article.favorited}
 					onclick={toggleFavorite}
 					aria-label="Favorite"
+					title="Favorite"
 				>
 					<Star filled={article.favorited} />
 				</button>
 				<ArticleOverflowMenu
 					{recapturing}
-					link={article.link}
+					onOpenOriginal={() => void openOriginal()}
 					onRecapture={recapture}
 					onMoveCategory={moveToCategory}
 					onDelete={deleteArticle}
@@ -272,6 +303,20 @@
 				<span>{formatReadTime(article.read_time_min)}</span>
 				<span>·</span>
 				<span>{formatCompactRelativeTime(article.published_at)}</span>
+				<span>·</span>
+				<a
+					class="original-link"
+					href={article.link}
+					target="_blank"
+					rel="noopener noreferrer"
+					onclick={(event) => {
+						event.preventDefault();
+						void openOriginal();
+					}}
+				>
+					<ExternalLink size={12} />
+					View original
+				</a>
 			</div>
 			<h1 class="reader-title">{article.title}</h1>
 
@@ -359,6 +404,14 @@
 		row-gap: 8px;
 		gap: 10px;
 	}
+	.share-btn,
+	.favorite-btn {
+		color: var(--color-text);
+	}
+	.share-btn:hover:not(:disabled),
+	.favorite-btn:hover:not(:disabled) {
+		color: var(--color-accent);
+	}
 	.favorite-btn {
 		color: var(--color-text);
 	}
@@ -379,6 +432,14 @@
 		font-size: 13px;
 		margin-bottom: 10px;
 		color: var(--color-muted);
+		flex-wrap: wrap;
+	}
+	.original-link {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		font-weight: 600;
+		white-space: nowrap;
 	}
 	.reader-tags {
 		margin: 0 0 28px;
