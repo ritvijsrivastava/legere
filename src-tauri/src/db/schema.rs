@@ -827,17 +827,14 @@ mod tests {
         let mut conn = v2_conn_with_test_data();
         migrate(&mut conn).expect("migrate to latest");
 
-        let column_gone = conn.query_row(
-            "SELECT source_name FROM articles LIMIT 1",
-            [],
-            |row| row.get::<_, Option<String>>(0),
-        );
+        let column_gone = conn.query_row("SELECT source_name FROM articles LIMIT 1", [], |row| {
+            row.get::<_, Option<String>>(0)
+        });
         assert!(
             column_gone.is_err(),
             "source_name column should no longer exist after V11"
         );
     }
-
 
     #[test]
     fn v12_backfills_null_published_at_but_leaves_a_real_one_alone() {

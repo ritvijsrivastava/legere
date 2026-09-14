@@ -1167,8 +1167,7 @@ mod tests {
         let conn = migrated_conn();
         let source = insert_rss_source(&conn, "Feed", "https://example.com/feed.xml").unwrap();
         let output = sample_capture_output("https://example.com/article");
-        insert_captured_article(&conn, "art-1", Some(&source.id), "rss", &output, &[])
-            .unwrap();
+        insert_captured_article(&conn, "art-1", Some(&source.id), "rss", &output, &[]).unwrap();
         assert_eq!(
             get_source(&conn, &source.id)
                 .unwrap()
@@ -1255,8 +1254,7 @@ mod tests {
         create_category(&conn, "Travel").unwrap();
 
         let output = sample_capture_output("https://example.com/recipe-1");
-        insert_captured_article(&conn, "art-1", None, "direct", &output, &[])
-            .unwrap();
+        insert_captured_article(&conn, "art-1", None, "direct", &output, &[]).unwrap();
         set_article_category(&conn, "art-1", Some(&recipes.id)).unwrap();
 
         let categories = fetch_categories(&conn).unwrap();
@@ -1313,8 +1311,7 @@ mod tests {
         let conn = migrated_conn();
         let category = create_category(&conn, "Recipes").unwrap();
         let output = sample_capture_output("https://example.com/recipe-2");
-        insert_captured_article(&conn, "art-1", None, "direct", &output, &[])
-            .unwrap();
+        insert_captured_article(&conn, "art-1", None, "direct", &output, &[]).unwrap();
         set_article_category(&conn, "art-1", Some(&category.id)).unwrap();
 
         let deleted = delete_category(&conn, &category.id).unwrap();
@@ -1345,8 +1342,7 @@ mod tests {
     fn set_article_category_rejects_an_unknown_category_id() {
         let conn = migrated_conn();
         let output = sample_capture_output("https://example.com/recipe-3");
-        insert_captured_article(&conn, "art-1", None, "direct", &output, &[])
-            .unwrap();
+        insert_captured_article(&conn, "art-1", None, "direct", &output, &[]).unwrap();
 
         let result = set_article_category(&conn, "art-1", Some("does-not-exist"));
         assert!(
@@ -1360,8 +1356,7 @@ mod tests {
         let conn = migrated_conn();
         let category = create_category(&conn, "Recipes").unwrap();
         let output = sample_capture_output("https://example.com/recipe-4");
-        insert_captured_article(&conn, "art-1", None, "direct", &output, &[])
-            .unwrap();
+        insert_captured_article(&conn, "art-1", None, "direct", &output, &[]).unwrap();
         set_article_category(&conn, "art-1", Some(&category.id)).unwrap();
 
         set_article_category(&conn, "art-1", None).unwrap();
@@ -1405,26 +1400,14 @@ mod tests {
     fn insert_imported_article_is_a_no_op_for_a_duplicate_link() {
         let conn = migrated_conn();
         let output = sample_capture_output("https://example.com/dup-import");
-        let first = insert_imported_article(
-            &conn,
-            "art-1",
-            &output,
-            &[],
-            "2024-01-01T00:00:00Z",
-            false,
-        )
-        .unwrap();
+        let first =
+            insert_imported_article(&conn, "art-1", &output, &[], "2024-01-01T00:00:00Z", false)
+                .unwrap();
         assert!(first);
 
-        let second = insert_imported_article(
-            &conn,
-            "art-2",
-            &output,
-            &[],
-            "2024-01-02T00:00:00Z",
-            false,
-        )
-        .unwrap();
+        let second =
+            insert_imported_article(&conn, "art-2", &output, &[], "2024-01-02T00:00:00Z", false)
+                .unwrap();
         assert!(
             !second,
             "UNIQUE(link) should silently absorb the duplicate insert"
