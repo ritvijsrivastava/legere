@@ -12,7 +12,7 @@
 	import { uiStore } from '$lib/stores/ui.svelte';
 	import ChevronLeft from '$lib/icons/ChevronLeft.svelte';
 	import Star from '$lib/icons/Star.svelte';
-	import { formatCompactRelativeTime } from '$lib/format';
+	import { formatCompactRelativeTime, formatReadTime } from '$lib/format';
 
 	const SAVE_PROGRESS_DEBOUNCE_MS = 750;
 	const MEASURE_PX: Record<ReaderMeasure, number> = { narrow: 600, default: 680, wide: 760 };
@@ -85,9 +85,6 @@
 	});
 
 	let resolvedContentHtml = $derived(article ? api.resolveContentTokens(article.content_html) : '');
-	let minutesLeft = $derived(
-		article ? Math.max(1, Math.round(article.read_time_min * (1 - scrollProgress))) : 0
-	);
 
 	$effect(() => {
 		if (!containerEl) return;
@@ -272,7 +269,7 @@
 			<div class="card-meta reader-meta">
 				<span>{article.category_name ?? 'Uncategorized'}</span>
 				<span>·</span>
-				<span>{minutesLeft} min left</span>
+				<span>{formatReadTime(article.read_time_min)}</span>
 				<span>·</span>
 				<span>{formatCompactRelativeTime(article.published_at)}</span>
 			</div>

@@ -77,8 +77,8 @@ unless revisited later.)
   all four; the reader's "Aa" popover can override any of them for just
   the article being read (persisted per-article, with a "reset to global
   defaults" action), without touching the global setting. Reading
-  progress is persisted and restored (scroll position, "X min left",
-  library-card progress bar).
+  progress is persisted and restored (scroll position, the article's
+  fixed read time shown in the byline, library-card progress bar).
 - Library: card view and list view, filter by user-managed
   folder/category and by tag, unread/favorite counts, delete with confirm,
   "Favorites" as its own view. The Library search box (search-by-title)
