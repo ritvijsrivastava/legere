@@ -29,6 +29,11 @@ export interface ArticleSummary {
 	/** From the source feed's `<category>` elements; always empty for
 	 *  direct-link articles. */
 	tags: string[];
+	/** The article's original external URL. The library card/row shows
+	 *  just its host (e.g. `example.com`), not the full URL. */
+	link: string;
+	/** Name of the article's folder category, `null` when uncategorized. */
+	category_name: string | null;
 }
 
 export interface ArticleDetail extends ArticleSummary {

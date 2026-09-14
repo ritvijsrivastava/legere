@@ -9,6 +9,18 @@ export function formatReadTime(minutes: number): string {
 	return `${minutes} min`;
 }
 
+/** Just the host of an article's URL (e.g. `example.com` for
+ *  `https://example.com/v1/feed.html`), stripping a leading `www.` since
+ *  it adds noise without adding information. Falls back to the raw link
+ *  if it isn't a parseable absolute URL. */
+export function formatHost(link: string): string {
+	try {
+		return new URL(link).hostname.replace(/^www\./, '');
+	} catch {
+		return link;
+	}
+}
+
 /** Same relative-time buckets as `formatRelativeTime`, abbreviated
  *  (`2d ago` vs `2 days ago`) for tight spaces like the reader header. */
 export function formatCompactRelativeTime(iso: string | null): string {

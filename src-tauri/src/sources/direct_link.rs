@@ -52,5 +52,8 @@ pub async fn capture_direct_link(
         favorited: false,
         reading_progress: 0.0,
         tags: Vec::new(),
+        link: output.link,
+        // Freshly captured, never yet assigned a folder.
+        category_name: None,
     })
 }

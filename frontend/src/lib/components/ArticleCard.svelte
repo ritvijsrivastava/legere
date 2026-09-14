@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { ArticleSummary } from '$lib/types';
-	import { formatDate, formatReadTime } from '$lib/format';
+	import { formatDate, formatHost, formatReadTime } from '$lib/format';
 	import * as api from '$lib/api';
 	import { libraryStatsStore } from '$lib/stores/libraryStats.svelte';
 	import { sourceDotColor } from '$lib/sourceColor';
@@ -65,8 +65,8 @@
 		</div>
 		<div class="body">
 			<div class="top-row">
-				<span class="dot" style:background={sourceDotColor(article.source_name)}></span>
-				<span class="source-label">{article.source_name}</span>
+				<span class="dot" style:background={sourceDotColor(article.category_name ?? 'Uncategorized')}></span>
+				<span class="source-label">{article.category_name ?? 'Uncategorized'}</span>
 				<span class="spacer"></span>
 				<button
 					class="fav-btn"
@@ -85,7 +85,7 @@
 			</div>
 			<p class="card-body">{article.excerpt}</p>
 			<div class="card-meta">
-				<span>{article.source_name}</span>
+				<span>{formatHost(article.link)}</span>
 				<span>·</span>
 				<span>{formatDate(article.published_at)}</span>
 				<span>·</span>

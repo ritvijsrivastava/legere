@@ -51,12 +51,20 @@ fn article_summary_from_row(row: &Row) -> rusqlite::Result<ArticleSummary> {
         favorited: row.get::<_, i64>("favorited")? != 0,
         reading_progress: row.get("reading_progress")?,
         tags: parse_tags(row.get("tags")?),
+        link: row.get("link")?,
+        category_name: row.get("category_name")?,
     })
 }
 
 const ARTICLE_SUMMARY_COLUMNS: &str =
-    "id, title, source_name, source_type, excerpt, hero_image_path,
-                published_at, read_time_min, reading_state, favorited, reading_progress, tags";
+    "articles.id, articles.title, articles.source_name, articles.source_type, articles.excerpt,
+                articles.hero_image_path, articles.published_at, articles.read_time_min,
+                articles.reading_state, articles.favorited, articles.reading_progress, articles.tags,
+                articles.link, categories.name AS category_name";
+
+/// Every [`ARTICLE_SUMMARY_COLUMNS`] query joins through this so
+/// `category_name` resolves without a second round trip per article.
+const ARTICLE_SUMMARY_FROM: &str = "articles LEFT JOIN categories ON categories.id = articles.category_id";
 
 /// A cheap pre-check used to skip capturing (fetching + localizing +
 /// archiving) an article whose link is already known, before doing any of
@@ -313,7 +321,7 @@ pub fn update_captured_article(
 #[cfg_attr(not(test), allow(dead_code))]
 pub fn list_articles(conn: &Connection) -> rusqlite::Result<Vec<ArticleSummary>> {
     let mut stmt = conn.prepare(&format!(
-        "SELECT {ARTICLE_SUMMARY_COLUMNS} FROM articles ORDER BY fetched_at DESC"
+        "SELECT {ARTICLE_SUMMARY_COLUMNS} FROM {ARTICLE_SUMMARY_FROM} ORDER BY articles.fetched_at DESC"
     ))?;
     let rows = stmt.query_map([], article_summary_from_row)?;
     rows.collect()
@@ -375,21 +383,23 @@ pub fn list_articles_page(
     conn: &Connection,
     query: &ArticlePageQuery,
 ) -> rusqlite::Result<ArticlePageResult> {
-    let mut sql = format!("SELECT {ARTICLE_SUMMARY_COLUMNS}, fetched_at FROM articles WHERE 1 = 1");
+    let mut sql = format!(
+        "SELECT {ARTICLE_SUMMARY_COLUMNS}, articles.fetched_at AS fetched_at FROM {ARTICLE_SUMMARY_FROM} WHERE 1 = 1"
+    );
     let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
     if query.favorited_only {
-        sql.push_str(" AND favorited = 1");
+        sql.push_str(" AND articles.favorited = 1");
     }
     if let Some(search) = query.search {
-        sql.push_str(" AND title LIKE ? ESCAPE '\\'");
+        sql.push_str(" AND articles.title LIKE ? ESCAPE '\\'");
         params.push(Box::new(format!("%{}%", escape_like(search))));
     }
     if let Some(category_id) = query.category_id {
         if category_id == "__uncategorized__" {
-            sql.push_str(" AND category_id IS NULL");
+            sql.push_str(" AND articles.category_id IS NULL");
         } else {
-            sql.push_str(" AND category_id = ?");
+            sql.push_str(" AND articles.category_id = ?");
             params.push(Box::new(category_id.to_string()));
         }
     }
@@ -406,12 +416,12 @@ pub fn list_articles_page(
         }
     }
     if let Some((fetched_at, id)) = query.cursor {
-        sql.push_str(" AND (fetched_at < ? OR (fetched_at = ? AND id < ?))");
+        sql.push_str(" AND (articles.fetched_at < ? OR (articles.fetched_at = ? AND articles.id < ?))");
         params.push(Box::new(fetched_at.to_string()));
         params.push(Box::new(fetched_at.to_string()));
         params.push(Box::new(id.to_string()));
     }
-    sql.push_str(" ORDER BY fetched_at DESC, id DESC LIMIT ?");
+    sql.push_str(" ORDER BY articles.fetched_at DESC, articles.id DESC LIMIT ?");
     // Fetch one row past what was asked for, purely to answer `has_more`
     // without a second round trip.
     params.push(Box::new(query.limit + 1));
@@ -682,7 +692,7 @@ pub fn get_article_summary_by_link(
     link: &str,
 ) -> rusqlite::Result<Option<ArticleSummary>> {
     conn.query_row(
-        &format!("SELECT {ARTICLE_SUMMARY_COLUMNS} FROM articles WHERE link = ?1"),
+        &format!("SELECT {ARTICLE_SUMMARY_COLUMNS} FROM {ARTICLE_SUMMARY_FROM} WHERE articles.link = ?1"),
         params![link],
         article_summary_from_row,
     )

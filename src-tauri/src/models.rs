@@ -20,6 +20,15 @@ pub struct ArticleSummary {
     /// From the source feed's `<category>` elements (`feed_rs`); always
     /// empty for direct-link articles, which have no feed to draw from.
     pub tags: Vec<String>,
+    /// The article's original external URL — the library card/row shows
+    /// just its host (e.g. `example.com`), not the full capture
+    /// provenance (`source_name`), which is why this is included here
+    /// rather than requiring a separate detail fetch.
+    pub link: String,
+    /// Name of the article's folder category (via `articles.category_id`),
+    /// `None` when uncategorized. Resolved server-side so the label can't
+    /// drift from a stale/unloaded client-side category list.
+    pub category_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
