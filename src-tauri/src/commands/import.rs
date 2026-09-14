@@ -3,6 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use tauri::{AppHandle, Manager, State};
 
+use crate::db::queries;
 use crate::error::AppError;
 use crate::events::{self, ImportFailure, ImportFinished};
 use crate::sources::raindrop_import::{self, ImportEvent, ImportPreview};
@@ -37,17 +38,37 @@ pub async fn import_raindrop_csv(
     let csv_bytes = tokio::fs::read(&path).await?;
     raindrop_import::validate_csv(&csv_bytes)?;
 
+    // `Settings::import_concurrency` is already clamped to 5–10 by
+    // `queries::get_settings`/`update_settings`, but clamped again here
+    // rather than trusted, same defensive posture as those two.
+    let pool = state.pool.clone();
+    let concurrency = tokio::task::spawn_blocking(move || {
+        let conn = pool.get()?;
+        Ok::<_, AppError>(
+            queries::get_settings(&conn)?
+                .import_concurrency
+                .clamp(5, 10) as usize,
+        )
+    })
+    .await??;
+
     let cancel = Arc::new(AtomicBool::new(false));
     *state.import_cancel.lock().await = Some(cancel.clone());
 
     tauri::async_runtime::spawn(async move {
         let app_state = app.state::<AppState>();
         let result =
-            raindrop_import::run_import(&app_state, csv_bytes, cancel, |event| match event {
-                ImportEvent::Started { total } => events::emit_import_started(&app, total),
-                ImportEvent::Progress(progress) => events::emit_import_progress(&app, &progress),
-                ImportEvent::LibraryChanged => events::emit_articles_changed(&app),
-                ImportEvent::Finished(finished) => events::emit_import_finished(&app, &finished),
+            raindrop_import::run_import(&app_state, csv_bytes, concurrency, cancel, |event| {
+                match event {
+                    ImportEvent::Started { total } => events::emit_import_started(&app, total),
+                    ImportEvent::Progress(progress) => {
+                        events::emit_import_progress(&app, &progress)
+                    }
+                    ImportEvent::LibraryChanged => events::emit_articles_changed(&app),
+                    ImportEvent::Finished(finished) => {
+                        events::emit_import_finished(&app, &finished)
+                    }
+                }
             })
             .await;
 

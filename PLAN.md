@@ -53,7 +53,22 @@ convention) via `queries::find_or_create_category`, resolved once per
 distinct folder up front rather than per row. A link already saved is
 always skipped outright and its category is never changed by a
 re-import, even if the folder resolves differently this time; only new
-tags the CSV row carries get merged in.
+tags the CSV row carries get merged in. Import concurrency (how many
+rows capture in parallel) is a user setting, `Settings::import_concurrency`,
+clamped to 5–10 on both read and write (Settings section, "Concurrent
+captures" stepper) rather than the old fixed constant of 5; it's read
+once per import (not live-adjustable mid-run).
+
+Starting an import closes the dialog immediately rather than switching
+it to an inline progress view — the import runs in the background
+regardless (tracked by the module-level `importStore`, driven by
+`import:*` events), and Settings shows a live progress bar plus counts,
+with its "Import from Raindrop" button itself turning into
+`Importing… N%` while one is running. Once finished the button reverts to
+its normal label, but a "Last import: X imported · Y already saved · Z
+failed" summary stays visible in Settings (in-memory only, cleared by the
+next import or an explicit Dismiss, lost on app restart) so a result
+isn't missed just because nobody was watching the dialog when it finished.
 
 Direct-link captures ("Add a source") no longer prompt for a category —
 a new article has no `category_id` by construction, so it's simply

@@ -19,12 +19,13 @@
 //!
 //! Every row goes through the same local-capture pipeline
 //! (`capture::capture_local`) as manually adding a direct link, run
-//! through a small fixed-size worker pool (`CONCURRENCY`) rather than
-//! sequentially (a multi-thousand-row export would otherwise take hours)
-//! or fully in parallel (which would hammer every site in the export at
-//! once). A single row's failure never aborts the batch — a years-old
-//! export is expected to contain plenty of dead links — it's recorded in
-//! [`ImportSummary::failed`] instead.
+//! through a small fixed-size worker pool (`run_import`'s `concurrency`
+//! argument, user-configurable 5–10 via `Settings::import_concurrency`)
+//! rather than sequentially (a multi-thousand-row export would otherwise
+//! take hours) or fully in parallel (which would hammer every site in the
+//! export at once). A single row's failure never aborts the batch — a
+//! years-old export is expected to contain plenty of dead links — it's
+//! recorded in [`ImportSummary::failed`] instead.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -39,11 +40,6 @@ use crate::events::{ImportFailure, ImportFinished, ImportProgress};
 use crate::state::AppState;
 use crate::urlx::{canonicalize, strip_tracking_params};
 use crate::{capture, db};
-
-/// Fixed worker-pool size for concurrent row captures: fast enough that a
-/// multi-thousand-row export finishes in a reasonable time, without
-/// hammering every site in the export at once.
-const CONCURRENCY: usize = 5;
 
 /// How many successful imports accumulate before an
 /// [`ImportEvent::LibraryChanged`] fires, so a library screen left open
@@ -335,9 +331,11 @@ fn resolve_folder_categories(
 /// stored is always skipped, without changing that existing article's
 /// category.
 ///
-/// `cancel` is polled between dispatching rows to the worker pool, not
-/// mid-fetch: once set, no *new* row is dispatched, but up to
-/// `CONCURRENCY` already in-flight captures are allowed to finish so
+/// `concurrency` sizes the worker pool (see `Settings::import_concurrency`;
+/// callers are expected to have already clamped it to 5–10, but nothing
+/// here re-checks that). `cancel` is polled between dispatching rows to
+/// the pool, not mid-fetch: once set, no *new* row is dispatched, but up
+/// to `concurrency` already in-flight captures are allowed to finish so
 /// their network fetch isn't wasted. The returned [`ImportSummary`]
 /// reflects whatever completed either way.
 ///
@@ -350,6 +348,7 @@ fn resolve_folder_categories(
 pub async fn run_import(
     state: &AppState,
     csv_bytes: Vec<u8>,
+    concurrency: usize,
     cancel: Arc<AtomicBool>,
     mut on_event: impl FnMut(ImportEvent),
 ) -> Result<ImportSummary, AppError> {
@@ -384,10 +383,10 @@ pub async fn run_import(
     let mut since_last_library_refresh = 0u32;
 
     loop {
-        // Top up the worker pool up to `CONCURRENCY`, skipping rows whose
+        // Top up the worker pool up to `concurrency`, skipping rows whose
         // cleaned link is already stored (no network request paid for
         // those) and stopping entirely once cancellation is requested.
-        while join_set.len() < CONCURRENCY {
+        while join_set.len() < concurrency {
             if cancel.load(Ordering::Relaxed) {
                 break;
             }
@@ -625,6 +624,7 @@ mod tests {
                 "2024-01-01T00:00:00Z",
                 "false",
             )]),
+            5,
             Arc::new(AtomicBool::new(false)),
             |_| {},
         )
@@ -665,6 +665,7 @@ mod tests {
                 "2024-01-01T00:00:00Z",
                 "false",
             )]),
+            5,
             Arc::new(AtomicBool::new(false)),
             |_| {},
         )
@@ -698,6 +699,7 @@ mod tests {
         let first = run_import(
             &state,
             csv_bytes_with_folder(&[("First", &url, "Old", "", "2024-01-01T00:00:00Z", "false")]),
+            5,
             Arc::new(AtomicBool::new(false)),
             |_| {},
         )
@@ -708,6 +710,7 @@ mod tests {
         let second = run_import(
             &state,
             csv_bytes_with_folder(&[("Second", &url, "New", "", "2024-01-02T00:00:00Z", "false")]),
+            5,
             Arc::new(AtomicBool::new(false)),
             |_| {},
         )
@@ -743,7 +746,7 @@ mod tests {
             "true",
         )]);
 
-        let summary = run_import(&state, csv, Arc::new(AtomicBool::new(false)), |_| {})
+        let summary = run_import(&state, csv, 5, Arc::new(AtomicBool::new(false)), |_| {})
             .await
             .expect("valid csv should parse");
 
@@ -781,6 +784,7 @@ mod tests {
         let first = run_import(
             &state,
             csv_bytes(&[("First", &url, "", "2024-01-01T00:00:00Z", "false")]),
+            5,
             Arc::new(AtomicBool::new(false)),
             |_| {},
         )
@@ -791,6 +795,7 @@ mod tests {
         let second = run_import(
             &state,
             csv_bytes(&[("Second", &url, "", "2024-01-02T00:00:00Z", "false")]),
+            5,
             Arc::new(AtomicBool::new(false)),
             |_| {},
         )
@@ -819,6 +824,7 @@ mod tests {
         let first = run_import(
             &state,
             csv_bytes(&[("First", &url, "pdf", "2024-01-01T00:00:00Z", "false")]),
+            5,
             Arc::new(AtomicBool::new(false)),
             |_| {},
         )
@@ -835,6 +841,7 @@ mod tests {
                 "2024-01-02T00:00:00Z",
                 "false",
             )]),
+            5,
             Arc::new(AtomicBool::new(false)),
             |_| {},
         )
@@ -878,7 +885,7 @@ mod tests {
             ),
         ]);
 
-        let summary = run_import(&state, csv, Arc::new(AtomicBool::new(false)), |_| {})
+        let summary = run_import(&state, csv, 5, Arc::new(AtomicBool::new(false)), |_| {})
             .await
             .expect("valid csv should parse");
 
@@ -905,7 +912,7 @@ mod tests {
             ),
         ]);
 
-        let summary = run_import(&state, csv, Arc::new(AtomicBool::new(false)), |_| {})
+        let summary = run_import(&state, csv, 5, Arc::new(AtomicBool::new(false)), |_| {})
             .await
             .expect("valid csv should parse");
 
@@ -930,7 +937,7 @@ mod tests {
             "false",
         )]);
 
-        let summary = run_import(&state, csv, Arc::new(AtomicBool::new(true)), |_| {})
+        let summary = run_import(&state, csv, 5, Arc::new(AtomicBool::new(true)), |_| {})
             .await
             .expect("valid csv should parse");
 

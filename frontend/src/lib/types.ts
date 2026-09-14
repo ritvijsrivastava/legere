@@ -68,6 +68,9 @@ export interface Settings {
 	reader_leading: ReaderLeading;
 	app_theme: AppTheme;
 	reader_theme: ReaderTheme;
+	/** How many Raindrop CSV import rows capture concurrently. Clamped to
+	 *  5–10 by the backend regardless of what's sent here. */
+	import_concurrency: number;
 }
 
 export interface SyncResult {

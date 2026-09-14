@@ -126,6 +126,12 @@ pub struct Settings {
     /// tracks whatever `app_theme` currently is rather than forcing a
     /// literal light palette; `sepia`/`dark` are fixed overrides.
     pub reader_theme: String,
+    /// How many Raindrop CSV import rows (`sources::raindrop_import::run_import`)
+    /// capture concurrently. Clamped to 5–10 wherever it's read or written
+    /// (`queries::get_settings`/`update_settings`) rather than trusted as
+    /// free-form input — low enough to not hammer every site in an export
+    /// at once, high enough to matter for a multi-thousand-row one.
+    pub import_concurrency: i64,
 }
 
 impl Default for Settings {
@@ -139,6 +145,7 @@ impl Default for Settings {
             reader_leading: "default".into(),
             app_theme: "dark".into(),
             reader_theme: "light".into(),
+            import_concurrency: 5,
         }
     }
 }

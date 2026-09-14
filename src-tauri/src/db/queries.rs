@@ -998,6 +998,11 @@ pub fn get_settings(conn: &Connection) -> rusqlite::Result<Settings> {
             "reader_leading" => settings.reader_leading = value,
             "app_theme" => settings.app_theme = value,
             "reader_theme" => settings.reader_theme = value,
+            "import_concurrency" => {
+                if let Ok(concurrency) = value.parse::<i64>() {
+                    settings.import_concurrency = concurrency.clamp(5, 10);
+                }
+            }
             _ => {}
         }
     }
@@ -1045,6 +1050,11 @@ pub fn update_settings(conn: &Connection, settings: &Settings) -> rusqlite::Resu
          ON CONFLICT(key) DO UPDATE SET value = excluded.value",
         params![settings.reader_theme],
     )?;
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES ('import_concurrency', ?1)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![settings.import_concurrency.clamp(5, 10).to_string()],
+    )?;
     Ok(())
 }
 
@@ -1071,6 +1081,30 @@ mod tests {
             hero_image_path: None,
             extraction_confident: true,
         }
+    }
+
+    #[test]
+    fn get_settings_defaults_import_concurrency_to_five() {
+        let conn = migrated_conn();
+        assert_eq!(get_settings(&conn).unwrap().import_concurrency, 5);
+    }
+
+    #[test]
+    fn update_settings_clamps_import_concurrency_to_five_and_ten() {
+        let conn = migrated_conn();
+        let mut settings = Settings::default();
+
+        settings.import_concurrency = 25;
+        update_settings(&conn, &settings).unwrap();
+        assert_eq!(get_settings(&conn).unwrap().import_concurrency, 10);
+
+        settings.import_concurrency = 1;
+        update_settings(&conn, &settings).unwrap();
+        assert_eq!(get_settings(&conn).unwrap().import_concurrency, 5);
+
+        settings.import_concurrency = 8;
+        update_settings(&conn, &settings).unwrap();
+        assert_eq!(get_settings(&conn).unwrap().import_concurrency, 8);
     }
 
     #[test]

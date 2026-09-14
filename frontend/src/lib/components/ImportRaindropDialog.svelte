@@ -64,7 +64,11 @@
 		error = null;
 		try {
 			await api.importRaindropCsv(selectedPath);
-			clearSelection();
+			// The import now runs in the background (tracked by `importStore`,
+			// driven by `import:*` events) — close immediately rather than
+			// switching this dialog to a progress view. Settings shows progress
+			// inline and its button reopens this same dialog to monitor/cancel.
+			close();
 		} catch (e) {
 			error = api.errorMessage(e);
 		} finally {
@@ -209,7 +213,7 @@
 						<strong>{preview.total} bookmarks found</strong>
 						<span>
 							Each Raindrop folder becomes its own category automatically. Links already saved are
-							skipped and left as-is.
+							skipped and left as-is. New tags on those links are still merged in.
 						</span>
 					</div>
 
@@ -260,7 +264,8 @@
 		margin-bottom: 6px;
 	}
 	.file-btn {
-		width: 100%;
+		width: fit-content;
+		max-width: 100%;
 		justify-content: flex-start;
 		text-align: left;
 		overflow: hidden;
@@ -289,26 +294,27 @@
 	.folder-list {
 		list-style: none;
 		margin: 0;
-		padding: 0;
-		display: flex;
-		flex-direction: column;
-		gap: 6px;
+		padding: 0 2px;
 		max-height: min(390px, 42vh);
 		overflow-y: auto;
+		border-top: 1px solid var(--color-divider);
 	}
 	.folder-row {
 		display: flex;
 		align-items: baseline;
 		justify-content: space-between;
 		gap: 12px;
-		padding: 10px 12px;
-		border: 1px solid var(--color-divider);
-		border-radius: var(--radius-md);
+		padding: 10px 2px;
+		border-bottom: 1px solid var(--color-divider);
 		font-size: 14px;
+	}
+	.folder-row:last-child {
+		border-bottom: none;
 	}
 	.folder-row span {
 		font-size: 12px;
 		flex: none;
+		color: var(--color-muted);
 	}
 	.counts {
 		font-size: 12px;
@@ -367,6 +373,7 @@
 			align-items: flex-start;
 			flex-direction: column;
 			gap: 2px;
+			padding: 10px 0;
 		}
 	}
 </style>

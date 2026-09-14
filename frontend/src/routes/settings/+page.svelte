@@ -27,6 +27,10 @@
 		sourcesStore.refresh();
 	});
 
+	const importPct = $derived(
+		importStore.total > 0 ? Math.round((importStore.processed / importStore.total) * 100) : 0
+	);
+
 	// The web build has no installer to update, and the underlying Tauri
 	// plugin calls throw outside a Tauri context, so gate all of this off.
 	const tauri = isTauri();
@@ -188,6 +192,10 @@
 		const next = Math.max(16, Math.min(22, settingsStore.current.reader_font_size + delta));
 		settingsStore.update({ reader_font_size: next });
 	}
+	function setImportConcurrency(delta: number) {
+		const next = Math.max(5, Math.min(10, settingsStore.current.import_concurrency + delta));
+		settingsStore.update({ import_concurrency: next });
+	}
 
 	const readerThemeOptions: { value: ReaderTheme; label: string }[] = [
 		{ value: 'light', label: 'Light' },
@@ -308,21 +316,67 @@
 				Import bookmarks from a Raindrop.io CSV export. Links, tags, and folders are reviewed before capture;
 				notes and highlights are not imported.
 			</p>
+			<div class="row">
+				<span class="row-label">Concurrent captures</span>
+				<div class="stepper">
+					<button
+						class="btn btn-icon btn-secondary"
+						onclick={() => setImportConcurrency(-1)}
+						disabled={settingsStore.current.import_concurrency <= 5}
+						aria-label="Fewer concurrent captures"
+					>
+						–
+					</button>
+					<span class="stepper-value">{settingsStore.current.import_concurrency}</span>
+					<button
+						class="btn btn-icon btn-secondary"
+						onclick={() => setImportConcurrency(1)}
+						disabled={settingsStore.current.import_concurrency >= 10}
+						aria-label="More concurrent captures"
+					>
+						+
+					</button>
+				</div>
+			</div>
+			<p class="text-muted section-desc concurrency-desc">
+				How many links to capture at once during an import (5–10). Higher finishes a large export
+				faster; lower is gentler on the sites you're importing from. Takes effect on the next import.
+			</p>
 			<button class="btn btn-secondary" onclick={() => uiStore.openImportDialog()}>
-				Import from Raindrop
+				{importStore.running ? `Importing… ${importPct}%` : 'Import from Raindrop'}
 			</button>
 			{#if importStore.running}
-				{@const pct =
-					importStore.total > 0
-						? Math.round((importStore.processed / importStore.total) * 100)
-						: 0}
 				<div class="import-progress">
 					<div class="import-progress-track">
-						<div class="import-progress-fill" style:transform={`scaleX(${pct / 100})`}></div>
+						<div class="import-progress-fill" style:transform={`scaleX(${importPct / 100})`}></div>
 					</div>
 					<p class="text-muted import-progress-label">
 						Importing {importStore.processed} of {importStore.total}
 					</p>
+					<p class="text-muted import-progress-label">
+						{importStore.imported} imported · {importStore.skippedDuplicate} already saved · {importStore.failedCount}
+						failed
+					</p>
+				</div>
+			{:else if importStore.finished}
+				<!-- Stays visible — not tied to the dialog — until a new import starts
+				     or the user explicitly dismisses it below. Lost on app restart,
+				     same as the rest of this in-memory store; that's expected, not a bug. -->
+				<div class="import-progress">
+					<p class="text-muted import-progress-label">
+						Last import{importStore.cancelled ? ' (cancelled)' : ''}: {importStore.imported} imported ·
+						{importStore.skippedDuplicate} already saved · {importStore.failedCount} failed
+					</p>
+					<div class="import-summary-actions">
+						{#if importStore.failedCount > 0}
+							<button class="btn btn-ghost import-summary-btn" onclick={() => uiStore.openImportDialog()}>
+								View failed links
+							</button>
+						{/if}
+						<button class="btn btn-ghost import-summary-btn" onclick={() => importStore.dismiss()}>
+							Dismiss
+						</button>
+					</div>
 				</div>
 			{/if}
 		{/if}
@@ -535,6 +589,10 @@
 		font-size: 13px;
 		margin: 0 0 14px;
 	}
+	.concurrency-desc {
+		margin-top: -4px;
+		line-height: 1.5;
+	}
 	.import-progress {
 		margin-top: 12px;
 	}
@@ -554,6 +612,16 @@
 	.import-progress-label {
 		font-size: 12px;
 		margin: 6px 0 0;
+	}
+	.import-summary-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 4px 16px;
+		margin-top: 4px;
+	}
+	.import-summary-btn {
+		padding: 4px 0;
+		font-size: 12px;
 	}
 	.row {
 		display: flex;
