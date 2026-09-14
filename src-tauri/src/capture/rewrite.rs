@@ -101,13 +101,8 @@ fn rewrite_reference(
 /// (rewriting) and [`super::localize`] (discovering what to fetch), so the
 /// two passes can never disagree about which URLs a `srcset` references.
 pub(crate) fn srcset_url_parts(raw: &str) -> impl Iterator<Item = &str> {
-    raw.split(',').map(|entry| {
-        entry
-            .trim()
-            .splitn(2, char::is_whitespace)
-            .next()
-            .unwrap_or("")
-    })
+    raw.split(',')
+        .map(|entry| entry.trim().split(char::is_whitespace).next().unwrap_or(""))
 }
 
 /// Rewrites every URL in a `srcset` attribute value, preserving each

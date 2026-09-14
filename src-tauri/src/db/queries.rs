@@ -1114,9 +1114,10 @@ mod tests {
     #[test]
     fn update_settings_clamps_import_concurrency_to_five_and_ten() {
         let conn = migrated_conn();
-        let mut settings = Settings::default();
-
-        settings.import_concurrency = 25;
+        let mut settings = Settings {
+            import_concurrency: 25,
+            ..Settings::default()
+        };
         update_settings(&conn, &settings).unwrap();
         assert_eq!(get_settings(&conn).unwrap().import_concurrency, 10);
 

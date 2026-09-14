@@ -120,12 +120,10 @@ mod imp {
         if let Ok(output) = Command::new("dpkg-query")
             .args(["-W", "-f=${db:Status-Status}", "legere"])
             .output()
+            && output.status.success()
+            && String::from_utf8_lossy(&output.stdout).trim() == "installed"
         {
-            if output.status.success()
-                && String::from_utf8_lossy(&output.stdout).trim() == "installed"
-            {
-                return Some("deb");
-            }
+            return Some("deb");
         }
 
         // `.status()` inherits the parent's stdio by default, so without
@@ -136,10 +134,9 @@ mod imp {
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status()
+            && status.success()
         {
-            if status.success() {
-                return Some("rpm");
-            }
+            return Some("rpm");
         }
 
         None
