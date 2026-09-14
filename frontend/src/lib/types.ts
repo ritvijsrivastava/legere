@@ -2,6 +2,10 @@ export type SourceType = 'rss' | 'direct';
 export type SourceStatus = 'active' | 'paused' | 'error';
 export type FontSize = 'small' | 'medium' | 'large';
 export type LibraryView = 'cards' | 'list';
+/** Restricts the library search box to one kind of result — see
+ *  `ArticleCollection`'s search results grouping (articles, then
+ *  categories, then tags). */
+export type SearchScope = 'all' | 'articles' | 'categories' | 'tags';
 export type ReaderMeasure = 'narrow' | 'default' | 'wide';
 export type ReaderLeading = 'compact' | 'default' | 'airy';
 export type AppTheme = 'light' | 'dark';

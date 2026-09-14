@@ -79,9 +79,14 @@ unless revisited later.)
   defaults" action), without touching the global setting. Reading
   progress is persisted and restored (scroll position, "X min left",
   library-card progress bar).
-- Library: card view and list view, search-by-title, filter by
-  user-managed folder/category and by tag, unread/favorite counts, delete with
-  confirm, "Favorites" as its own view.
+- Library: card view and list view, filter by user-managed
+  folder/category and by tag, unread/favorite counts, delete with confirm,
+  "Favorites" as its own view. The Library search box (search-by-title)
+  also matches category and tag names, showing matched articles, then
+  matched categories, then matched tags, with a scope filter to narrow a
+  search to just one of the three; Favorites and single-category pages
+  keep the plain by-title search only, since they're already scoped to
+  one slice of the library.
 - Categories: flat, user-managed folders, managed from the sidebar/library
   (not Settings). Uncategorized is always first, then the rest
   alphabetically. Clicking one opens its own page (title + article list +

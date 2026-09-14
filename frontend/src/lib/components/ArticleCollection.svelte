@@ -1,17 +1,20 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
 	import { settingsStore } from '$lib/stores/settings.svelte';
 	import { sourcesStore } from '$lib/stores/sources.svelte';
 	import { uiStore } from '$lib/stores/ui.svelte';
 	import { libraryStatsStore } from '$lib/stores/libraryStats.svelte';
 	import { libraryFiltersStore } from '$lib/stores/libraryFilters.svelte';
+	import { sourceDotColor } from '$lib/sourceColor';
 	import * as api from '$lib/api';
 	import ArticleCard from './ArticleCard.svelte';
 	import ArticleListRow from './ArticleListRow.svelte';
+	import SearchScopeFilter from './SearchScopeFilter.svelte';
 	import Search from '$lib/icons/Search.svelte';
 	import Grid from '$lib/icons/Grid.svelte';
 	import ListIcon from '$lib/icons/ListIcon.svelte';
 	import Refresh from '$lib/icons/Refresh.svelte';
-	import type { ArticleSummary, LibraryView } from '$lib/types';
+	import type { ArticleSummary, LibraryView, SearchScope } from '$lib/types';
 	import type { Snippet } from 'svelte';
 
 	let {
@@ -21,6 +24,7 @@
 		emptyMessage,
 		showRefresh = false,
 		hideCategoryChips = false,
+		enableTypeSearch = false,
 		onopen,
 		headerActions
 	}: {
@@ -36,6 +40,13 @@
 		 *  silently desync the page's title/settings button from what's
 		 *  actually being shown. */
 		hideCategoryChips?: boolean;
+		/** Extends the search box to also match category/tag names (not just
+		 *  article titles) and renders them as grouped result sections below
+		 *  the article list, with a scope filter to search only one kind.
+		 *  Only enabled on the main Library view — `/favorites` and
+		 *  `/category/[id]` are already scoped to one slice of the library,
+		 *  where matching *other* categories/tags would be confusing. */
+		enableTypeSearch?: boolean;
 		onopen: (id: string) => void;
 		/** Extra controls rendered at the end of the header row, e.g. the
 		 *  category page's settings button. */
@@ -79,6 +90,54 @@
 			libraryFiltersStore.tags.length > 0
 	);
 
+	// ── Search scope (articles/categories/tags) ────────────────────────
+	// Only meaningful once `enableTypeSearch` is on and there's an actual
+	// query typed — with an empty box, or on a view that hasn't opted in,
+	// the article grid always shows its normal unfiltered/filtered-by-
+	// sidebar contents regardless of `searchScope`.
+	let searchScope = $state<SearchScope>('all');
+	let searchActive = $derived(enableTypeSearch && debouncedSearch.trim().length > 0);
+	let showArticlesSection = $derived(
+		!searchActive || searchScope === 'all' || searchScope === 'articles'
+	);
+	let showCategoriesSection = $derived(
+		searchActive && (searchScope === 'all' || searchScope === 'categories')
+	);
+	let showTagsSection = $derived(
+		searchActive && (searchScope === 'all' || searchScope === 'tags')
+	);
+	// Categories/tags are already fetched in full (with live counts) for
+	// the sidebar — see `libraryStatsStore` — so matching them against the
+	// query is just an in-memory filter, no extra round-trip needed.
+	let matchedCategories = $derived(
+		showCategoriesSection
+			? libraryStatsStore.categories.filter((c) =>
+					c.name.toLowerCase().includes(debouncedSearch.trim().toLowerCase())
+				)
+			: []
+	);
+	let matchedTags = $derived(
+		showTagsSection
+			? libraryStatsStore.tags.filter(([tag]) =>
+					tag.toLowerCase().includes(debouncedSearch.trim().toLowerCase())
+				)
+			: []
+	);
+
+	function openMatchedCategory(id: string) {
+		goto(`/category/${id}`);
+	}
+
+	/** Selecting a matched tag hands off to the sidebar's existing tag
+	 *  filter (also visible/toggleable there) and clears the search box —
+	 *  the typed query has done its job of finding the tag, the filter
+	 *  chip takes it from here. */
+	function selectMatchedTag(tag: string) {
+		libraryFiltersStore.toggleTag(tag);
+		search = '';
+		debouncedSearch = '';
+	}
+
 	// ── Paginated data ──────────────────────────────────────────────────
 	// Every filter (search/category/tags/favorited-only) is applied
 	// server-side (see `ArticlePageRequest`) — this component only ever
@@ -98,7 +157,9 @@
 	function baseRequestFields() {
 		return {
 			limit: PAGE_SIZE,
-			search: debouncedSearch.trim() || null,
+			// Suppressed entirely (not just left unfiltered) when the search
+			// scope excludes articles — see `showArticlesSection`.
+			search: showArticlesSection ? debouncedSearch.trim() || null : null,
 			category_id: libraryFiltersStore.categoryId,
 			tags: [...libraryFiltersStore.tags],
 			favorited_only: favoritedOnly
@@ -106,6 +167,16 @@
 	}
 
 	async function loadFirstPage() {
+		if (!showArticlesSection) {
+			// A categories/tags-only search: no article query at all, just
+			// invalidate whatever's in flight and clear the grid.
+			++loadSeq;
+			loadedItems = [];
+			hasMore = false;
+			nextCursor = null;
+			initialLoading = false;
+			return;
+		}
 		const seq = ++loadSeq;
 		initialLoading = true;
 		try {
@@ -175,6 +246,7 @@
 		void libraryFiltersStore.categoryId;
 		void libraryFiltersStore.tags;
 		void favoritedOnly;
+		void showArticlesSection;
 		if (scrollAreaEl) scrollAreaEl.scrollTop = 0;
 		scrollTop = 0;
 		loadFirstPage();
@@ -212,7 +284,7 @@
 	});
 
 	async function mergeInFreshFirstPage() {
-		if (initialLoading) return;
+		if (initialLoading || !showArticlesSection) return;
 		try {
 			const page = await api.listArticlesPage({
 				cursor_fetched_at: null,
@@ -365,7 +437,18 @@
 		<div class="header-controls">
 			<div class="search-box">
 				<Search />
-				<input type="text" placeholder="Search" bind:value={search} />
+				<input
+					type="text"
+					placeholder="Search"
+					bind:value={search}
+					spellcheck="false"
+					autocomplete="off"
+					autocorrect="off"
+					autocapitalize="off"
+				/>
+				{#if enableTypeSearch}
+					<SearchScopeFilter bind:scope={searchScope} />
+				{/if}
 			</div>
 			{#if headerActions}{@render headerActions()}{/if}
 			{#if showRefresh}
@@ -423,6 +506,7 @@
 	{/if}
 
 	<div class="scroll-area" bind:this={scrollAreaEl}>
+		{#if showArticlesSection}
 		{#if initialLoading}
 			<!-- Nothing yet — avoids a flash of `emptyMessage` while the
 			     first page is still in flight. -->
@@ -477,6 +561,48 @@
 				{/if}
 			</div>
 		{/if}
+		{/if}
+
+		{#if showCategoriesSection}
+			<section class="type-results">
+				<h2 class="type-results-heading">Categories</h2>
+				{#if matchedCategories.length === 0}
+					<p class="empty-state text-muted small">No matching categories.</p>
+				{:else}
+					<div class="matched-categories">
+						{#each matchedCategories as category (category.id)}
+							<button class="matched-row" onclick={() => openMatchedCategory(category.id)}>
+								<span class="dot" style:background={sourceDotColor(category.name)}></span>
+								<span class="row-label">{category.name}</span>
+								<span class="row-count">{category.article_count}</span>
+							</button>
+						{/each}
+					</div>
+				{/if}
+			</section>
+		{/if}
+
+		{#if showTagsSection}
+			<section class="type-results">
+				<h2 class="type-results-heading">Tags</h2>
+				{#if matchedTags.length === 0}
+					<p class="empty-state text-muted small">No matching tags.</p>
+				{:else}
+					<div class="matched-tags">
+						{#each matchedTags as [tag, count] (tag)}
+							<button
+								class="tag-chip"
+								class:active={libraryFiltersStore.tags.includes(tag)}
+								onclick={() => selectMatchedTag(tag)}
+							>
+								#{tag}
+								<span class="row-count">{count}</span>
+							</button>
+						{/each}
+					</div>
+				{/if}
+			</section>
+		{/if}
 	</div>
 </div>
 
@@ -515,7 +641,7 @@
 		gap: 8px;
 		background: var(--color-surface);
 		border-radius: 12px;
-		padding: 9px 14px;
+		padding: 9px 10px 9px 14px;
 		width: 220px;
 		color: var(--color-muted);
 	}
@@ -564,6 +690,93 @@
 	}
 	.empty-state {
 		padding: 40px 0;
+	}
+	.empty-state.small {
+		padding: 4px 0 8px;
+		font-size: 12.5px;
+	}
+
+	/* ── Categories/Tags search results ─────────────────────────────── */
+	.type-results {
+		margin-top: 28px;
+		padding-top: 20px;
+		border-top: 1px solid var(--color-divider);
+	}
+	.type-results:first-child {
+		margin-top: 0;
+		padding-top: 0;
+		border-top: none;
+	}
+	.type-results-heading {
+		font-size: 10.5px;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: var(--color-muted);
+		margin: 0 0 10px;
+		font-family: var(--font-body);
+		font-weight: 600;
+	}
+	.matched-categories {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+	}
+	.matched-row {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		width: 100%;
+		text-align: left;
+		background: none;
+		border: none;
+		border-radius: var(--radius-md);
+		padding: 9px 10px;
+		font-family: var(--font-body);
+		font-size: 13.5px;
+		color: var(--color-text);
+		cursor: pointer;
+	}
+	.matched-row:hover {
+		background: var(--color-surface);
+	}
+	.matched-row .dot {
+		width: 7px;
+		height: 7px;
+		border-radius: 50%;
+		flex: none;
+	}
+	.matched-row .row-label {
+		flex: 1;
+	}
+	.row-count {
+		font-size: 11px;
+		color: var(--color-muted);
+	}
+	.matched-tags {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+	}
+	.matched-tags .tag-chip {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		font-size: 12px;
+		padding: 7px 13px;
+		border-radius: 999px;
+		background: var(--color-surface);
+		color: var(--color-text);
+		border: none;
+		cursor: pointer;
+		font-family: var(--font-body);
+	}
+	.matched-tags .tag-chip.active {
+		background: var(--color-accent);
+		color: var(--color-accent-fg);
+	}
+	.matched-tags .tag-chip.active .row-count {
+		color: inherit;
+		opacity: 0.8;
 	}
 
 	.mobile-chips {

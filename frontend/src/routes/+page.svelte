@@ -13,5 +13,6 @@
 	subtitle="{libraryStatsStore.unreadCount} unread"
 	emptyMessage="No articles yet. Add a source or paste a direct link to get started."
 	showRefresh
+	enableTypeSearch
 	onopen={openArticle}
 />

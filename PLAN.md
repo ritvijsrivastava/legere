@@ -94,6 +94,26 @@ which lists existing categories as one-click suggestions alongside a
 "name a new or existing category" field that creates-and-moves in one
 step.
 
+## Addendum — Library search matches categories/tags, not just article titles
+
+The Library view's search box (`ArticleCollection`, `enableTypeSearch` prop —
+on only for the main `/` route, not `/favorites` or `/category/[id]`, which
+are already scoped to one slice of the library) matches article titles
+(server-side, unchanged `ArticlePageQuery.search`) *and* category/tag names,
+shown as three grouped result sections in a fixed order: matched articles
+first, then matched categories, then matched tags. Category/tag matching is
+a plain in-memory `.filter()` against `libraryStatsStore.categories`/`.tags`
+— both are already fetched in full for the sidebar, so no new backend
+query was needed. A `SearchScopeFilter` popover (search box's right side)
+lets a query be narrowed to just one of the three kinds; picking
+Articles-only suppresses the category/tag sections (and vice versa —
+picking Categories or Tags only skips the article query entirely rather
+than just hiding it, so the virtualized grid isn't fetched for nothing).
+Clicking a matched category navigates to its `/category/[id]` page;
+clicking a matched tag applies it via the existing
+`libraryFiltersStore.toggleTag` (same one-of-many-tags chip the sidebar
+uses) and clears the search box.
+
 ## Addendum — input freeze on `*`/digits, root-caused to a garbled title
 
 Typing `*` (or digits) into the library search box could freeze the whole
