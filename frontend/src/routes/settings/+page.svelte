@@ -10,9 +10,6 @@
 	import { errorMessage } from '$lib/api';
 	import {
 		currentVersion,
-		hasToken,
-		saveToken,
-		clearToken,
 		checkForUpdate,
 		installUpdate,
 		shouldShowLinuxUpdateWarning,
@@ -36,9 +33,6 @@
 	const tauri = isTauri();
 
 	let version = $state('');
-	let tokenSaved = $state(false);
-	let tokenInput = $state('');
-	let savingToken = $state(false);
 
 	let checkState = $state<'idle' | 'checking' | 'error'>('idle');
 	let checkError = $state('');
@@ -63,12 +57,9 @@
 	onMount(async () => {
 		if (!tauri) return;
 		version = await currentVersion();
-		tokenSaved = await hasToken();
 		shouldShowLinuxUpdateWarning().then((show) => (showLinuxWarning = show));
-		if (tokenSaved) {
-			handleCheck();
-			loadChangelog();
-		}
+		handleCheck();
+		loadChangelog();
 	});
 
 	async function loadChangelog() {
@@ -100,28 +91,6 @@
 			updateDetailsError = errorMessage(e);
 			updateDetailsState = 'error';
 		}
-	}
-
-	async function handleSaveToken() {
-		if (!tokenInput.trim()) return;
-		savingToken = true;
-		try {
-			await saveToken(tokenInput.trim());
-			tokenSaved = true;
-			tokenInput = '';
-			loadChangelog();
-			handleCheck();
-		} finally {
-			savingToken = false;
-		}
-	}
-
-	async function handleClearToken() {
-		await clearToken();
-		tokenSaved = false;
-		updateResult = null;
-		changelog = null;
-		changelogState = 'idle';
 	}
 
 	async function handleCheck() {
@@ -428,130 +397,101 @@
 				<span class="text-muted">{version || '—'}</span>
 			</div>
 
-			{#if !tokenSaved}
-				<p class="text-muted section-desc">
-					Legere's repo is private, so checking for updates needs a GitHub access token. Create a
-					fine-grained token with read-only access to this repo's contents, then paste it here —
-					it's stored locally and only needs to be entered once.
-				</p>
-				<div class="token-row">
-					<input
-						type="password"
-						placeholder="ghp_..."
-						autocomplete="off"
-						bind:value={tokenInput}
-						class="input"
-					/>
-					<button
-						class="btn btn-primary"
-						disabled={!tokenInput.trim() || savingToken}
-						onclick={handleSaveToken}
-					>
-						{savingToken ? 'Saving…' : 'Save'}
+			<div class="row">
+				<span class="row-label">Check for updates</span>
+				<button
+					class="btn btn-secondary"
+					disabled={checkState === 'checking'}
+					onclick={handleCheck}
+				>
+					{checkState === 'checking' ? 'Checking…' : 'Check now'}
+				</button>
+			</div>
+
+			{#if checkState === 'error'}
+				<p class="error-text">{checkError}</p>
+			{:else if updateResult?.available}
+				<div class="update-block">
+					<p class="update-available">Update available — v{updateResult.version}</p>
+					<button class="btn btn-ghost details-btn" onclick={toggleUpdateDetails}>
+						{updateDetailsExpanded ? 'Hide details' : 'Details'}
 					</button>
-				</div>
-			{:else}
-				<div class="row">
-					<span class="row-label">GitHub access token</span>
-					<button class="btn btn-secondary" onclick={handleClearToken}>Clear</button>
-				</div>
-
-				<div class="row">
-					<span class="row-label">Check for updates</span>
-					<button
-						class="btn btn-secondary"
-						disabled={checkState === 'checking'}
-						onclick={handleCheck}
-					>
-						{checkState === 'checking' ? 'Checking…' : 'Check now'}
-					</button>
-				</div>
-
-				{#if checkState === 'error'}
-					<p class="error-text">{checkError}</p>
-				{:else if updateResult?.available}
-					<div class="update-block">
-						<p class="update-available">Update available — v{updateResult.version}</p>
-						<button class="btn btn-ghost details-btn" onclick={toggleUpdateDetails}>
-							{updateDetailsExpanded ? 'Hide details' : 'Details'}
-						</button>
-						{#if updateDetailsExpanded}
-							{#if updateDetailsState === 'loading'}
-								<p class="text-muted">Loading…</p>
-							{:else if updateDetailsState === 'error'}
-								<p class="error-text">{updateDetailsError}</p>
-							{:else if updateChangelog.length}
-								<ul class="changelog text-muted">
-									{#each updateChangelog as change}
-										<li>{change}</li>
-									{/each}
-								</ul>
-							{:else if updateResult.notes}
-								<p class="changelog-fallback text-muted">{updateResult.notes}</p>
-							{:else}
-								<p class="text-muted">No changelog available.</p>
-							{/if}
-						{/if}
-
-						{#if installDone}
-							<p class="done-text">Installed — relaunching…</p>
-						{:else if installing}
-							<div class="progress-wrap">
-								<div class="progress-track">
-									<div
-										class="progress-fill"
-										class:indeterminate={installPhase === 'installing'}
-										style:transform={`scaleX(${(installPhase === 'installing' ? 100 : (installPct ?? 20)) / 100})`}
-									></div>
-								</div>
-								<p class="text-muted progress-label">
-									{installPhase === 'installing'
-										? 'Installing… confirm the prompt if one appears'
-										: (installPct !== null ? `${installPct}%` : 'Downloading…')}
-								</p>
-							</div>
+					{#if updateDetailsExpanded}
+						{#if updateDetailsState === 'loading'}
+							<p class="text-muted">Loading…</p>
+						{:else if updateDetailsState === 'error'}
+							<p class="error-text">{updateDetailsError}</p>
+						{:else if updateChangelog.length}
+							<ul class="changelog text-muted">
+								{#each updateChangelog as change}
+									<li>{change}</li>
+								{/each}
+							</ul>
+						{:else if updateResult.notes}
+							<p class="changelog-fallback text-muted">{updateResult.notes}</p>
 						{:else}
-							<button class="btn btn-primary install-btn" onclick={handleInstall}>
-								Download &amp; install
-							</button>
+							<p class="text-muted">No changelog available.</p>
 						{/if}
-
-						{#if installError}
-							<p class="error-text">{installError}</p>
-						{/if}
-					</div>
-				{:else if updateResult && !updateResult.available}
-					<p class="text-muted">You're up to date{version ? ` (v${version})` : ''}.</p>
-				{/if}
-
-				{#if showLinuxWarning}
-					<p class="text-muted linux-note">
-						Legere couldn't detect how it was installed, so auto-update isn't available. Check for
-						updates manually, or reinstall from the latest GitHub release.
-					</p>
-				{/if}
-
-				<div class="row">
-					<span class="row-label">What's new</span>
-				</div>
-				{#if changelogState === 'loading'}
-					<p class="text-muted">Loading…</p>
-				{:else if changelogState === 'error'}
-					<p class="error-text">{changelogError}</p>
-				{:else if changelogState === 'none'}
-					<p class="text-muted">No release notes found for v{version}.</p>
-				{:else if changelog}
-					{#if parseChangelog(changelog.notes).length}
-						<ul class="changelog text-muted">
-							{#each parseChangelog(changelog.notes) as change}
-								<li>{change}</li>
-							{/each}
-						</ul>
-					{:else if changelog.notes}
-						<p class="changelog-fallback text-muted">{changelog.notes}</p>
-					{:else}
-						<p class="text-muted">No changelog available.</p>
 					{/if}
+
+					{#if installDone}
+						<p class="done-text">Installed — relaunching…</p>
+					{:else if installing}
+						<div class="progress-wrap">
+							<div class="progress-track">
+								<div
+									class="progress-fill"
+									class:indeterminate={installPhase === 'installing'}
+									style:transform={`scaleX(${(installPhase === 'installing' ? 100 : (installPct ?? 20)) / 100})`}
+								></div>
+							</div>
+							<p class="text-muted progress-label">
+								{installPhase === 'installing'
+									? 'Installing… confirm the prompt if one appears'
+									: (installPct !== null ? `${installPct}%` : 'Downloading…')}
+							</p>
+						</div>
+					{:else}
+						<button class="btn btn-primary install-btn" onclick={handleInstall}>
+							Download &amp; install
+						</button>
+					{/if}
+
+					{#if installError}
+						<p class="error-text">{installError}</p>
+					{/if}
+				</div>
+			{:else if updateResult && !updateResult.available}
+				<p class="text-muted">You're up to date{version ? ` (v${version})` : ''}.</p>
+			{/if}
+
+			{#if showLinuxWarning}
+				<p class="text-muted linux-note">
+					Legere couldn't detect how it was installed, so auto-update isn't available. Check for
+					updates manually, or reinstall from the latest GitHub release.
+				</p>
+			{/if}
+
+			<div class="row">
+				<span class="row-label">What's new</span>
+			</div>
+			{#if changelogState === 'loading'}
+				<p class="text-muted">Loading…</p>
+			{:else if changelogState === 'error'}
+				<p class="error-text">{changelogError}</p>
+			{:else if changelogState === 'none'}
+				<p class="text-muted">No release notes found for v{version}.</p>
+			{:else if changelog}
+				{#if parseChangelog(changelog.notes).length}
+					<ul class="changelog text-muted">
+						{#each parseChangelog(changelog.notes) as change}
+							<li>{change}</li>
+						{/each}
+					</ul>
+				{:else if changelog.notes}
+					<p class="changelog-fallback text-muted">{changelog.notes}</p>
+				{:else}
+					<p class="text-muted">No changelog available.</p>
 				{/if}
 			{/if}
 		{/if}
@@ -673,14 +613,6 @@
 		margin: 0;
 	}
 
-	.token-row {
-		display: flex;
-		gap: 8px;
-		margin-top: 4px;
-	}
-	.token-row .input {
-		flex: 1;
-	}
 	.update-block {
 		margin-top: 10px;
 		padding-top: 10px;

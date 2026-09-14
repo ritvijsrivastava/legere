@@ -64,19 +64,7 @@ export function currentVersion(): Promise<string> {
 	return getVersion();
 }
 
-export function hasToken(): Promise<boolean> {
-	return invoke<boolean>('has_github_token');
-}
-
-export async function saveToken(token: string): Promise<void> {
-	await invoke('save_github_token', { token });
-}
-
-export async function clearToken(): Promise<void> {
-	await invoke('clear_github_token');
-}
-
-/** Check the private repo's latest release against the installed version. */
+/** Check the latest release against the installed version. */
 export async function checkForUpdate(): Promise<UpdateCheckResult> {
 	let command = 'check_for_update';
 	if (isAndroid()) {

@@ -97,7 +97,7 @@ mod imp {
     use tauri::{AppHandle, State, ipc::Channel};
 
     use super::{DownloadProgress, LinuxPackageKind, LinuxUpdate, Manifest, Release};
-    use crate::commands::update::{OWNER, REPO, USER_AGENT, read_token};
+    use crate::commands::update::{OWNER, REPO, USER_AGENT};
     use crate::error::AppError;
     use crate::models::UpdateInfo;
     use crate::state::AppState;
@@ -162,14 +162,12 @@ mod imp {
             }
         };
 
-        let token = read_token(&app)?;
         let client = reqwest::Client::new();
 
         let release: Release = client
             .get(format!(
                 "https://api.github.com/repos/{OWNER}/{REPO}/releases/latest"
             ))
-            .header("Authorization", format!("Bearer {token}"))
             .header("Accept", "application/vnd.github+json")
             .header("User-Agent", USER_AGENT)
             .send()
@@ -192,7 +190,6 @@ mod imp {
 
         let manifest: Manifest = client
             .get(&manifest_asset_url)
-            .header("Authorization", format!("Bearer {token}"))
             .header("Accept", "application/octet-stream")
             .header("User-Agent", USER_AGENT)
             .send()
@@ -252,10 +249,8 @@ mod imp {
                 AppError::Internal("No pending update. Check for updates first.".to_string())
             })?;
 
-        let token = read_token(&app)?;
         let response = reqwest::Client::new()
             .get(&update.url)
-            .header("Authorization", format!("Bearer {token}"))
             .header("Accept", "application/octet-stream")
             .header("User-Agent", USER_AGENT)
             .send()

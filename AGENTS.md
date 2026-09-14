@@ -14,7 +14,10 @@ content here.
 - Before touching capture/schema/event internals or planning a larger
   change, see **ARCHITECTURE.md** — it documents the architecture,
   locked design decisions, and the history behind superseded ones
-  (e.g. the removed ZIM/"Original" archive viewer).
+  (e.g. the removed ZIM/"Original" archive viewer). If the change
+  alters any of that — architecture, data flow, schema, or a locked
+  decision — update **ARCHITECTURE.md** in the same change, not as a
+  follow-up.
 - Before making product-scope or UX-copy decisions, see **PRODUCT.md**
   (positioning, principles, capabilities/constraints) and
   **DESIGN.md** (colors, typography, components, do's/don'ts) — new UI

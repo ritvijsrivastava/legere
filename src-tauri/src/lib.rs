@@ -22,10 +22,7 @@ use tokio::sync::Mutex;
 use commands::update::update_channel;
 #[cfg(not(target_os = "android"))]
 use commands::update::{check_for_update, install_update};
-use commands::update::{
-    clear_github_token, get_last_dismissed_version, get_release_notes, has_github_token,
-    save_github_token, set_last_dismissed_version,
-};
+use commands::update::{get_last_dismissed_version, get_release_notes, set_last_dismissed_version};
 #[cfg(all(target_os = "android", feature = "apk-self-update"))]
 use commands::update_android::{android_check_for_update, android_download_and_install};
 #[cfg(not(target_os = "android"))]
@@ -202,9 +199,6 @@ pub fn run() {
             commands::import::cancel_raindrop_import,
             commands::system::get_data_dir,
             commands::system::write_text_file,
-            save_github_token,
-            has_github_token,
-            clear_github_token,
             get_last_dismissed_version,
             set_last_dismissed_version,
             get_release_notes,

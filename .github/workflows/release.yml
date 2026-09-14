@@ -256,9 +256,8 @@ jobs:
           # Add an "android-aarch64" entry to the latest.json build-desktop's
           # tauri-action step already generated and uploaded, so the in-app
           # updater (Settings page) can find this APK too. Uses the
-          # api.github.com asset URL (not browser_download_url) since that's
-          # the form documented to work with a bare Authorization header
-          # against a private repo.
+          # api.github.com asset URL (the form `release.assets[].url` gives
+          # us) rather than browser_download_url.
           apk_sha256=$(sha256sum "$apk" | cut -d' ' -f1)
           apk_url=$(gh api "repos/${repo}/releases" \
             --jq "[.[] | select(.tag_name == \"${tag}\")][0].assets[] | select(.label == \"${asset_name}\") | .url")

@@ -1,9 +1,9 @@
 //! Self-update commands.
 //!
-//! GitHub token and "last dismissed version" persistence (via tauri-plugin-store)
-//! are shared between desktop and Android. The actual update check/install,
-//! below, is desktop-only — tauri-plugin-updater doesn't support mobile, so
-//! Android has its own commands in `update_android.rs`.
+//! "Last dismissed version" persistence (via tauri-plugin-store) is shared
+//! between desktop and Android. The actual update check/install, below, is
+//! desktop-only — tauri-plugin-updater doesn't support mobile, so Android
+//! has its own commands in `update_android.rs`.
 
 use serde::Deserialize;
 use serde_json::json;
@@ -14,57 +14,16 @@ use crate::error::AppError;
 use crate::models::UpdateInfo;
 
 const STORE_FILE: &str = "legere-store.json";
-const TOKEN_KEY: &str = "github_token";
 const DISMISSED_VERSION_KEY: &str = "last_dismissed_version";
 
 // Shared with update_android.rs, which talks to the same GitHub API directly
-// (tauri-plugin-updater doesn't support mobile).
+// (tauri-plugin-updater doesn't support mobile). The repo is public, so
+// these requests go out unauthenticated — subject to GitHub's standard
+// unauthenticated rate limit, which is generous enough for occasional
+// update checks.
 pub(crate) const OWNER: &str = "ritvijsrivastava";
 pub(crate) const REPO: &str = "legere";
 pub(crate) const USER_AGENT: &str = "legere-updater";
-
-/// Read the saved GitHub PAT. Internal only — never returned to the frontend.
-pub(crate) fn read_token(app: &AppHandle) -> Result<String, AppError> {
-    let store = app
-        .store(STORE_FILE)
-        .map_err(|e| AppError::Internal(e.to_string()))?;
-    store
-        .get(TOKEN_KEY)
-        .and_then(|v| v.as_str().map(str::to_string))
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| {
-            AppError::NotFound("No GitHub token configured. Add one in Settings.".to_string())
-        })
-}
-
-#[tauri::command]
-pub async fn save_github_token(app: AppHandle, token: String) -> Result<(), AppError> {
-    let store = app
-        .store(STORE_FILE)
-        .map_err(|e| AppError::Internal(e.to_string()))?;
-    store.set(TOKEN_KEY, json!(token));
-    store.save().map_err(|e| AppError::Internal(e.to_string()))
-}
-
-#[tauri::command]
-pub async fn has_github_token(app: AppHandle) -> Result<bool, AppError> {
-    let store = app
-        .store(STORE_FILE)
-        .map_err(|e| AppError::Internal(e.to_string()))?;
-    Ok(store
-        .get(TOKEN_KEY)
-        .and_then(|v| v.as_str().map(str::to_string))
-        .is_some_and(|s| !s.is_empty()))
-}
-
-#[tauri::command]
-pub async fn clear_github_token(app: AppHandle) -> Result<(), AppError> {
-    let store = app
-        .store(STORE_FILE)
-        .map_err(|e| AppError::Internal(e.to_string()))?;
-    store.delete(TOKEN_KEY);
-    store.save().map_err(|e| AppError::Internal(e.to_string()))
-}
 
 #[tauri::command]
 pub async fn get_last_dismissed_version(app: AppHandle) -> Result<Option<String>, AppError> {
@@ -123,18 +82,13 @@ struct GithubRelease {
 /// time a user would see it. This hits the release API directly instead, so
 /// it works identically on desktop and Android.
 #[tauri::command]
-pub async fn get_release_notes(
-    app: AppHandle,
-    version: String,
-) -> Result<Option<UpdateInfo>, AppError> {
-    let token = read_token(&app)?;
+pub async fn get_release_notes(version: String) -> Result<Option<UpdateInfo>, AppError> {
     let tag = format!("v{version}");
 
     let response = reqwest::Client::new()
         .get(format!(
             "https://api.github.com/repos/{OWNER}/{REPO}/releases/tags/{tag}"
         ))
-        .header("Authorization", format!("Bearer {token}"))
         .header("Accept", "application/vnd.github+json")
         .header("User-Agent", USER_AGENT)
         .send()
@@ -162,7 +116,6 @@ pub async fn get_release_notes(
 
 #[cfg(not(target_os = "android"))]
 mod desktop {
-    use super::read_token;
     use crate::error::AppError;
     use crate::models::UpdateInfo;
     use crate::state::AppState;
@@ -179,19 +132,14 @@ mod desktop {
         Finished,
     }
 
-    /// Check the private repo's `latest.json` for a newer version, authenticated
-    /// with the user's stored PAT. The token never leaves Rust.
+    /// Check the public repo's `latest.json` for a newer version.
     #[tauri::command]
     pub async fn check_for_update(
         app: AppHandle,
         state: State<'_, AppState>,
     ) -> Result<Option<UpdateInfo>, AppError> {
-        let token = read_token(&app)?;
-
         let update = app
             .updater_builder()
-            .header("Authorization", format!("Bearer {token}"))
-            .map_err(|e| AppError::Internal(e.to_string()))?
             .build()
             .map_err(|e| AppError::Internal(e.to_string()))?
             .check()

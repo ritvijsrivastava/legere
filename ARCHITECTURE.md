@@ -274,7 +274,8 @@ platform-specific ways:
   APK and hands it to the OS package installer via the custom plugin.
 
 All paths compare manifest versions with `semver` and verify sha256
-checksums; a GitHub token can be stored locally for private-repo checks.
+checksums. The repo is public, so all of these GitHub API/release requests
+go out unauthenticated.
 
 ## Frontend
 

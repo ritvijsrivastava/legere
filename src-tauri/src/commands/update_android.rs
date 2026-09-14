@@ -4,12 +4,11 @@
 //! to the local apk-installer plugin for the actual install-intent +
 //! permission dance.
 //!
-//! The repo is private, so both the manifest and the APK have to come from
-//! `api.github.com` (`Authorization: Bearer` + `Accept: application/vnd.github...`
-//! or `application/octet-stream`) rather than the `github.com/.../releases/
-//! latest/download/...` convenience URLs — those only authenticate a logged-in
-//! browser session, not a bare PAT, and 404 for everything else. The GitHub
-//! API also hard-requires a `User-Agent` header on every request.
+//! Both the manifest and the APK are fetched from `api.github.com`
+//! (`Accept: application/vnd.github...` or `application/octet-stream`)
+//! rather than the `github.com/.../releases/latest/download/...` convenience
+//! URLs, since that's the URL shape `release.assets[].url` gives us. The
+//! GitHub API also hard-requires a `User-Agent` header on every request.
 
 use std::collections::HashMap;
 
@@ -19,7 +18,7 @@ use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Manager, State, ipc::Channel};
 use tauri_plugin_apk_installer::ApkInstallerExt;
 
-use super::update::{OWNER, REPO, USER_AGENT, read_token};
+use super::update::{OWNER, REPO, USER_AGENT};
 use crate::error::AppError;
 use crate::models::UpdateInfo;
 use crate::state::AppState;
@@ -69,14 +68,12 @@ pub async fn android_check_for_update(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Option<UpdateInfo>, AppError> {
-    let token = read_token(&app)?;
     let client = reqwest::Client::new();
 
     let release: Release = client
         .get(format!(
             "https://api.github.com/repos/{OWNER}/{REPO}/releases/latest"
         ))
-        .header("Authorization", format!("Bearer {token}"))
         .header("Accept", "application/vnd.github+json")
         .header("User-Agent", USER_AGENT)
         .send()
@@ -99,7 +96,6 @@ pub async fn android_check_for_update(
 
     let manifest: Manifest = client
         .get(&manifest_asset_url)
-        .header("Authorization", format!("Bearer {token}"))
         .header("Accept", "application/octet-stream")
         .header("User-Agent", USER_AGENT)
         .send()
@@ -171,10 +167,8 @@ pub async fn android_download_and_install(
         }
     }
 
-    let token = read_token(&app)?;
     let response = reqwest::Client::new()
         .get(&update.url)
-        .header("Authorization", format!("Bearer {token}"))
         .header("Accept", "application/octet-stream")
         .header("User-Agent", USER_AGENT)
         .send()
