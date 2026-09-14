@@ -150,7 +150,6 @@ pub fn run() {
             commands::categories::set_article_category,
             commands::articles::get_article,
             commands::articles::open_for_reading,
-            commands::articles::mark_as_read,
             commands::articles::toggle_favorite,
             commands::articles::save_reading_progress,
             commands::articles::set_reading_overrides,

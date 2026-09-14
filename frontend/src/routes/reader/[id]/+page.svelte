@@ -12,7 +12,6 @@
 	import { uiStore } from '$lib/stores/ui.svelte';
 	import ChevronLeft from '$lib/icons/ChevronLeft.svelte';
 	import Star from '$lib/icons/Star.svelte';
-	import Check from '$lib/icons/Check.svelte';
 	import { formatCompactRelativeTime } from '$lib/format';
 
 	const SAVE_PROGRESS_DEBOUNCE_MS = 750;
@@ -187,15 +186,6 @@
 		libraryStatsStore.refresh();
 	}
 
-	async function markAsRead() {
-		if (!article) return;
-		// No explicit `libraryStatsStore.refresh()` here — the backend's
-		// `mark_as_read` command already emits `articles:changed`, which
-		// the app-wide listener (`events.ts`) turns into one.
-		await api.markAsRead(article.id);
-		article = { ...article, reading_state: 'read' };
-	}
-
 	let recapturing = $state(false);
 
 	async function recapture() {
@@ -260,14 +250,6 @@
 					aria-label="Favorite"
 				>
 					<Star filled={article.favorited} />
-				</button>
-				<button
-					class="btn btn-icon btn-secondary read-btn"
-					class:read={article.reading_state === 'read'}
-					onclick={markAsRead}
-					aria-label="Mark as read"
-				>
-					<Check />
 				</button>
 				<ArticleOverflowMenu
 					{recapturing}
@@ -384,12 +366,6 @@
 		color: var(--color-text);
 	}
 	.favorite-btn.favorited {
-		color: var(--color-accent);
-	}
-	.read-btn {
-		color: var(--color-text);
-	}
-	.read-btn.read {
 		color: var(--color-accent);
 	}
 	.hero {

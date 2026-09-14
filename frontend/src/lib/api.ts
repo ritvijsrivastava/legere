@@ -80,12 +80,6 @@ export function openForReading(id: string): Promise<ArticleDetail> {
 	return invoke<ArticleDetail>('open_for_reading', { id });
 }
 
-/** Transitions an article into `read` — the only path there, always a
- *  manual action. */
-export function markAsRead(id: string): Promise<void> {
-	return invoke<void>('mark_as_read', { id });
-}
-
 export function toggleFavorite(id: string): Promise<boolean> {
 	return invoke<boolean>('toggle_favorite', { id });
 }

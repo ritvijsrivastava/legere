@@ -7,7 +7,10 @@ export type ReaderLeading = 'compact' | 'default' | 'airy';
 export type AppTheme = 'light' | 'dark';
 
 /** `unread` -> `reading` on opening the reader (whether previously unread
- *  or read); `reading` -> `read` only via the manual "mark as read" action. */
+ *  or read). `read` has no writer left in the app (the manual "mark as
+ *  read" action/tick that used to reach it was removed) — kept as a
+ *  valid value only so a pre-existing row that already carries it still
+ *  round-trips. */
 export type ReadingState = 'unread' | 'reading' | 'read';
 
 export interface ArticleSummary {

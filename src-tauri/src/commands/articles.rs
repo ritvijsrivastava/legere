@@ -128,26 +128,6 @@ pub async fn open_for_reading(
     Ok(detail)
 }
 
-/// Transitions an article into `read` — the only path there, always a
-/// manual user action (no automatic completion on scroll progress).
-#[tauri::command]
-pub async fn mark_as_read(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    id: String,
-) -> Result<(), AppError> {
-    let pool = state.pool.clone();
-    let id_for_transition = id.clone();
-    tokio::task::spawn_blocking(move || {
-        let conn = pool.get()?;
-        Ok::<_, AppError>(queries::transition_to_read(&conn, &id_for_transition)?)
-    })
-    .await??;
-
-    events::emit_articles_changed(&app);
-    Ok(())
-}
-
 #[tauri::command]
 pub async fn toggle_favorite(state: State<'_, AppState>, id: String) -> Result<bool, AppError> {
     let pool = state.pool.clone();

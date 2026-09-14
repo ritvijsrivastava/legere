@@ -10,8 +10,10 @@ pub struct ArticleSummary {
     pub published_at: Option<String>,
     pub read_time_min: i64,
     /// `unread` | `reading` | `read`. Opening the reader transitions
-    /// `unread`/`read` -> `reading`; only the manual "mark as read" action
-    /// transitions `reading` -> `read`.
+    /// `unread`/`read` -> `reading`. `read` itself has no writer left in
+    /// the app (the manual "mark as read" action/tick that used to reach
+    /// it was removed) — kept as a valid value only so a pre-existing
+    /// row that already carries it doesn't fail the column's `CHECK`.
     pub reading_state: String,
     pub favorited: bool,
     /// 0.0-1.0 scroll fraction, for the library card's progress indicator.

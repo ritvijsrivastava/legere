@@ -857,16 +857,6 @@ pub fn transition_to_reading(conn: &Connection, id: &str) -> rusqlite::Result<()
     Ok(())
 }
 
-/// Transitions an article into `read` — only ever the manual "mark as
-/// read" action, never automatic.
-pub fn transition_to_read(conn: &Connection, id: &str) -> rusqlite::Result<()> {
-    conn.execute(
-        "UPDATE articles SET reading_state = 'read', updated_at = ?2 WHERE id = ?1",
-        params![id, Utc::now().to_rfc3339()],
-    )?;
-    Ok(())
-}
-
 pub fn toggle_favorite(conn: &Connection, id: &str) -> rusqlite::Result<bool> {
     conn.execute(
         "UPDATE articles SET favorited = 1 - favorited, updated_at = ?2 WHERE id = ?1",
@@ -1858,12 +1848,16 @@ mod tests {
             false,
         )
         .unwrap();
-        transition_to_read(&conn, "a2").unwrap();
+        // Anything other than `unread` (here, `reading`, the automatic
+        // state opening the reader transitions into) satisfies this
+        // test's "a2 is no longer unread" premise now that the manual
+        // "mark as read" action/state is gone.
+        transition_to_reading(&conn, "a2").unwrap();
 
         assert_eq!(count_all_articles(&conn).unwrap(), 2);
         assert_eq!(count_favorited(&conn).unwrap(), 1);
         // "a1" defaults to `unread` (never opened); "a2" was just
-        // transitioned to `read`.
+        // transitioned to `reading`.
         assert_eq!(count_unread(&conn).unwrap(), 1);
 
         assert_eq!(count_uncategorized(&conn).unwrap(), 2);
