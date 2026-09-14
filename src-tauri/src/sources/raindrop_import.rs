@@ -57,12 +57,6 @@ use crate::{capture, db};
 /// row import, not a less-live-feeling one.
 const LIBRARY_REFRESH_BATCH: u32 = 100;
 
-/// `source_name` stored on every imported article — provenance metadata
-/// that distinguishes these from manually-added direct links. It is not a
-/// category; folder/category assignment is stored separately in
-/// `articles.category_id`.
-const SOURCE_NAME: &str = "Raindrop import";
-
 /// [`run_import`]'s progress/lifecycle notifications, decoupled from
 /// `tauri::AppHandle::emit` so the import loop itself stays unit-testable
 /// with a plain no-op callback — the emitting side
@@ -215,7 +209,6 @@ async fn process_row(
     match queries::insert_imported_article_with_category(
         &conn,
         &id,
-        SOURCE_NAME,
         &output,
         &tags,
         &saved_at,
@@ -558,16 +551,7 @@ mod tests {
             extraction_confident: true,
         };
         let conn = state.pool.get().unwrap();
-        queries::insert_captured_article(
-            &conn,
-            "existing",
-            None,
-            "Direct link",
-            "direct",
-            &output,
-            &[],
-        )
-        .unwrap();
+        queries::insert_captured_article(&conn, "existing", None, "direct", &output, &[]).unwrap();
 
         let csv = csv_bytes_with_folder(&[
             (
@@ -758,7 +742,6 @@ mod tests {
         let conn = state.pool.get().unwrap();
         let articles = queries::list_articles(&conn).unwrap();
         assert_eq!(articles.len(), 1);
-        assert_eq!(articles[0].source_name, SOURCE_NAME);
         assert_eq!(articles[0].source_type, "direct");
         assert!(articles[0].favorited);
         assert_eq!(

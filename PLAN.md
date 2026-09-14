@@ -35,10 +35,15 @@ views and a sidebar tag list with counts (`list_tags`).
 ## Addendum — categories/folders (implemented)
 
 Categories are flat, user-managed folders stored in the `categories`
-table (migration V9), with nullable `articles.category_id`. They are
-separate from `source_name`, which remains provenance such as `Direct
-link`, `Raindrop import`, or an RSS feed title. Categories can be empty;
-deleting one preserves its articles and moves them to Uncategorized.
+table (migration V9), with nullable `articles.category_id`. Categories
+can be empty; deleting one preserves its articles and moves them to
+Uncategorized. `articles.source_name` — the old capture-time provenance
+label (`Direct link`, `Raindrop import`, or an RSS feed title) that
+categories superseded for display purposes — served no further purpose
+once nothing rendered it any more and was dropped entirely by migration
+V11; the reader now shows an article's live category name in its byline
+instead. `sources.name` (the RSS *feed's* own display name, kept in sync
+by `queries::set_source_name_if_default`) is unrelated and unaffected.
 Category names are unique case-insensitively (`idx_categories_name`);
 creating a duplicate name is rejected by the backend, and the one caller
 that can hit this on a normal path (`MoveToCategoryDialog`'s "create a

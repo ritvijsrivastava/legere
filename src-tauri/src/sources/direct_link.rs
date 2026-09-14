@@ -26,8 +26,7 @@ pub async fn capture_direct_link(
     let output = capture::capture_local(&state.http_client, &state.data_dir, &id, url).await?;
 
     let conn = state.pool.get()?;
-    let inserted =
-        queries::insert_captured_article(&conn, &id, None, "Direct link", "direct", &output, &[])?;
+    let inserted = queries::insert_captured_article(&conn, &id, None, "direct", &output, &[])?;
 
     // `output.link`'s cleaned form was already saved under a different id
     // (the user re-submitted a URL they already have) — the fresh `id`
@@ -42,7 +41,6 @@ pub async fn capture_direct_link(
     Ok(ArticleSummary {
         id,
         title: output.title,
-        source_name: "Direct link".to_string(),
         source_type: "direct".to_string(),
         excerpt: output.excerpt,
         hero_image_path: output.hero_image_path,

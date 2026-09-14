@@ -13,7 +13,6 @@ export type ReadingState = 'unread' | 'reading' | 'read';
 export interface ArticleSummary {
 	id: string;
 	title: string;
-	source_name: string;
 	source_type: SourceType;
 	excerpt: string;
 	hero_image_path: string | null;
@@ -125,10 +124,9 @@ export interface ArticlePage {
 /** `[name, count]` pairs, used for the tag aggregate endpoint. */
 export type NamedCount = [string, number];
 
-/** A user-managed, flat category ("folder") an article can belong to —
- *  distinct from `ArticleSummary.source_name` (provenance: "Direct link",
- *  "Raindrop import", or an RSS feed's name). `article_count` can be `0`:
- *  a category persists after its last article is reassigned elsewhere. */
+/** A user-managed, flat category ("folder") an article can belong to.
+ *  `article_count` can be `0`: a category persists after its last
+ *  article is reassigned elsewhere. */
 export interface Category {
 	id: string;
 	name: string;

@@ -417,6 +417,24 @@ ALTER TABLE articles ADD COLUMN theme_override TEXT;
 DELETE FROM settings WHERE key = 'reader_theme';
 ";
 
+// Drops `source_name`: originally captured provenance for display
+// ("Raindrop import", "Direct link", or an RSS feed's title at capture
+// time) but it never served any purpose beyond that label once real
+// categories (V9) took over folder/grouping duties — the reader/library
+// UI has stopped rendering it in favor of the article's live category
+// name (`ArticleSummary`/`ArticleDetail`'s `category_name`, resolved via
+// the `categories` join). The index `idx_articles_source_name` (V7) has
+// to be dropped first — SQLite's `ALTER TABLE ... DROP COLUMN` refuses to
+// drop a column that's still indexed.
+//
+// `sources.name` (the *feed's* own display name, used for RSS source
+// management, kept in sync by `queries::set_source_name_if_default`) is
+// a distinct column on a distinct table and is untouched here.
+const V11: &str = "
+ DROP INDEX idx_articles_source_name;
+ ALTER TABLE articles DROP COLUMN source_name;
+";
+
 pub fn migrations() -> Migrations<'static> {
     Migrations::new(vec![
         M::up(V1),
@@ -429,6 +447,7 @@ pub fn migrations() -> Migrations<'static> {
         M::up(V8),
         M::up(V9),
         M::up(V10),
+        M::up(V11),
     ])
 }
 
@@ -788,6 +807,23 @@ mod tests {
             "content_zim_path column should no longer exist after V6"
         );
     }
+
+    #[test]
+    fn v11_drops_source_name_column() {
+        let mut conn = v2_conn_with_test_data();
+        migrate(&mut conn).expect("migrate to latest");
+
+        let column_gone = conn.query_row(
+            "SELECT source_name FROM articles LIMIT 1",
+            [],
+            |row| row.get::<_, Option<String>>(0),
+        );
+        assert!(
+            column_gone.is_err(),
+            "source_name column should no longer exist after V11"
+        );
+    }
+
 
     #[test]
     fn v2_preserves_foreign_keys_enforcement_after_migrating() {

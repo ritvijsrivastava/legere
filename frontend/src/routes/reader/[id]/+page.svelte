@@ -288,7 +288,7 @@
 				</div>
 			{/if}
 			<div class="card-meta reader-meta">
-				<span>{article.source_name}</span>
+				<span>{article.category_name ?? 'Uncategorized'}</span>
 				<span>·</span>
 				<span>{minutesLeft} min left</span>
 				<span>·</span>

@@ -186,9 +186,9 @@ mod tests {
             let conn = state.pool.get().unwrap();
             conn.execute(
                 "INSERT INTO articles (
-                    id, source_name, source_type, title, link, excerpt,
+                    id, source_type, title, link, excerpt,
                     content_html, fetched_at, hero_image_path, updated_at
-                ) VALUES ('a1', 'Direct link', 'direct', 't', 'https://x/1', 'e',
+                ) VALUES ('a1', 'direct', 't', 'https://x/1', 'e',
                           '<p>x</p>', '2026-01-01T00:00:00Z',
                           'media/keep.jpg', '2026-01-01T00:00:00Z')",
                 [],

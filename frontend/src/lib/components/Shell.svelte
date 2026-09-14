@@ -73,10 +73,10 @@
 		return page.url.pathname === `/category/${id}`;
 	}
 
-	// Sidebar Categories/Tags: categories are real user-managed folders,
-	// separate from source_name provenance. Empty categories remain visible;
-	// Uncategorized is a virtual entry for articles whose category_id is
-	// null. Both lists come from SQL-backed aggregate stores rather than
+	// Sidebar Categories/Tags: categories are real user-managed folders.
+	// Empty categories remain visible; Uncategorized is a virtual entry for
+	// articles whose category_id is null. Both lists come from SQL-backed
+	// aggregate stores rather than
 	// scanning an in-memory copy of the whole library, which no longer
 	// exists once articles are paginated (see `ArticleCollection`).
 	let categories = $derived(libraryStatsStore.categories);

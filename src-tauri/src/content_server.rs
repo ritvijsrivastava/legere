@@ -156,9 +156,9 @@ mod tests {
         let conn = state.pool.get().expect("get conn");
         conn.execute(
             "INSERT INTO articles (
-                id, source_name, source_type, title, link, excerpt,
+                id, source_type, title, link, excerpt,
                 content_html, fetched_at, updated_at
-            ) VALUES (?1, 'Direct link', 'direct', 'Test', ?2, 'x',
+            ) VALUES (?1, 'direct', 'Test', ?2, 'x',
                       '<p>x</p>', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
             rusqlite::params![article_id, format!("https://example.com/{article_id}")],
         )

@@ -41,7 +41,6 @@ fn article_summary_from_row(row: &Row) -> rusqlite::Result<ArticleSummary> {
     Ok(ArticleSummary {
         id: row.get("id")?,
         title: row.get("title")?,
-        source_name: row.get("source_name")?,
         source_type: row.get("source_type")?,
         excerpt: row.get("excerpt")?,
         hero_image_path: row.get("hero_image_path")?,
@@ -57,7 +56,7 @@ fn article_summary_from_row(row: &Row) -> rusqlite::Result<ArticleSummary> {
 }
 
 const ARTICLE_SUMMARY_COLUMNS: &str =
-    "articles.id, articles.title, articles.source_name, articles.source_type, articles.excerpt,
+    "articles.id, articles.title, articles.source_type, articles.excerpt,
                 articles.hero_image_path, articles.published_at, articles.read_time_min,
                 articles.reading_state, articles.favorited, articles.reading_progress, articles.tags,
                 articles.link, categories.name AS category_name";
@@ -98,7 +97,6 @@ pub fn insert_captured_article(
     conn: &Connection,
     id: &str,
     source_id: Option<&str>,
-    source_name: &str,
     source_type: &str,
     output: &LocalCaptureOutput,
     tags: &[String],
@@ -106,15 +104,14 @@ pub fn insert_captured_article(
     let now = Utc::now().to_rfc3339();
     let inserted = conn.execute(
         "INSERT OR IGNORE INTO articles (
-            id, source_id, source_name, source_type, title, link, excerpt,
+            id, source_id, source_type, title, link, excerpt,
             content_html, hero_image_path, published_at, fetched_at,
             read_time_min, favorited,
             extraction_confident, tags, updated_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 0, ?13, ?14, ?15)",
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 0, ?12, ?13, ?14)",
         params![
             id,
             source_id,
-            source_name,
             source_type,
             output.title,
             output.link,
@@ -152,22 +149,12 @@ pub fn insert_captured_article(
 pub fn insert_imported_article(
     conn: &Connection,
     id: &str,
-    source_name: &str,
     output: &LocalCaptureOutput,
     tags: &[String],
     saved_at: &str,
     favorited: bool,
 ) -> rusqlite::Result<bool> {
-    insert_imported_article_with_category(
-        conn,
-        id,
-        source_name,
-        output,
-        tags,
-        saved_at,
-        favorited,
-        None,
-    )
+    insert_imported_article_with_category(conn, id, output, tags, saved_at, favorited, None)
 }
 
 /// Category-aware variant used by the Raindrop importer. The legacy
@@ -178,7 +165,6 @@ pub fn insert_imported_article(
 pub fn insert_imported_article_with_category(
     conn: &Connection,
     id: &str,
-    source_name: &str,
     output: &LocalCaptureOutput,
     tags: &[String],
     saved_at: &str,
@@ -188,14 +174,13 @@ pub fn insert_imported_article_with_category(
     let now = Utc::now().to_rfc3339();
     let inserted = conn.execute(
         "INSERT OR IGNORE INTO articles (
-            id, source_id, source_name, source_type, title, link, excerpt,
+            id, source_id, source_type, title, link, excerpt,
             content_html, hero_image_path, published_at, fetched_at,
             read_time_min, favorited,
             extraction_confident, tags, updated_at, category_id
-        ) VALUES (?1, NULL, ?2, 'direct', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+        ) VALUES (?1, NULL, 'direct', ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
         params![
             id,
-            source_name,
             output.title,
             output.link,
             output.excerpt,
@@ -657,17 +642,21 @@ pub fn set_article_category(
 
 pub fn get_article(conn: &Connection, id: &str) -> rusqlite::Result<Option<ArticleDetail>> {
     conn.query_row(
-        "SELECT id, title, source_name, source_type, excerpt, hero_image_path,
-                published_at, read_time_min, reading_state, favorited, link, content_html,
-                extraction_confident, reading_progress, tags,
-                font_size_override, measure_override, leading_override, theme_override
-         FROM articles WHERE id = ?1",
+        &format!(
+            "SELECT articles.id, articles.title, articles.source_type, articles.excerpt,
+                    articles.hero_image_path, articles.published_at, articles.read_time_min,
+                    articles.reading_state, articles.favorited, articles.link, articles.content_html,
+                    articles.extraction_confident, articles.reading_progress, articles.tags,
+                    articles.font_size_override, articles.measure_override,
+                    articles.leading_override, articles.theme_override,
+                    categories.name AS category_name
+             FROM {ARTICLE_SUMMARY_FROM} WHERE articles.id = ?1"
+        ),
         params![id],
         |row| {
             Ok(ArticleDetail {
                 id: row.get("id")?,
                 title: row.get("title")?,
-                source_name: row.get("source_name")?,
                 source_type: row.get("source_type")?,
                 excerpt: row.get("excerpt")?,
                 hero_image_path: row.get("hero_image_path")?,
@@ -680,6 +669,7 @@ pub fn get_article(conn: &Connection, id: &str) -> rusqlite::Result<Option<Artic
                 extraction_confident: row.get::<_, i64>("extraction_confident")? != 0,
                 reading_progress: row.get("reading_progress")?,
                 tags: parse_tags(row.get("tags")?),
+                category_name: row.get("category_name")?,
                 overrides: ReadingOverrides {
                     font_size: row.get("font_size_override")?,
                     measure: row.get("measure_override")?,
@@ -1187,16 +1177,8 @@ mod tests {
         let conn = migrated_conn();
         let source = insert_rss_source(&conn, "Feed", "https://example.com/feed.xml").unwrap();
         let output = sample_capture_output("https://example.com/article");
-        insert_captured_article(
-            &conn,
-            "art-1",
-            Some(&source.id),
-            &source.name,
-            "rss",
-            &output,
-            &[],
-        )
-        .unwrap();
+        insert_captured_article(&conn, "art-1", Some(&source.id), "rss", &output, &[])
+            .unwrap();
         assert_eq!(
             get_source(&conn, &source.id)
                 .unwrap()
@@ -1230,16 +1212,7 @@ mod tests {
             "WebDev".to_string(),
             "".to_string(),
         ];
-        insert_captured_article(
-            &conn,
-            "art-tagged",
-            None,
-            "Direct link",
-            "direct",
-            &output,
-            &tags,
-        )
-        .unwrap();
+        insert_captured_article(&conn, "art-tagged", None, "direct", &output, &tags).unwrap();
 
         let article = get_article(&conn, "art-tagged").unwrap().unwrap();
         assert_eq!(article.tags, vec!["rust".to_string(), "webdev".to_string()]);
@@ -1253,7 +1226,6 @@ mod tests {
             &conn,
             "art-retag",
             None,
-            "Direct link",
             "direct",
             &output,
             &["old-tag".to_string()],
@@ -1293,7 +1265,7 @@ mod tests {
         create_category(&conn, "Travel").unwrap();
 
         let output = sample_capture_output("https://example.com/recipe-1");
-        insert_captured_article(&conn, "art-1", None, "Direct link", "direct", &output, &[])
+        insert_captured_article(&conn, "art-1", None, "direct", &output, &[])
             .unwrap();
         set_article_category(&conn, "art-1", Some(&recipes.id)).unwrap();
 
@@ -1351,7 +1323,7 @@ mod tests {
         let conn = migrated_conn();
         let category = create_category(&conn, "Recipes").unwrap();
         let output = sample_capture_output("https://example.com/recipe-2");
-        insert_captured_article(&conn, "art-1", None, "Direct link", "direct", &output, &[])
+        insert_captured_article(&conn, "art-1", None, "direct", &output, &[])
             .unwrap();
         set_article_category(&conn, "art-1", Some(&category.id)).unwrap();
 
@@ -1383,7 +1355,7 @@ mod tests {
     fn set_article_category_rejects_an_unknown_category_id() {
         let conn = migrated_conn();
         let output = sample_capture_output("https://example.com/recipe-3");
-        insert_captured_article(&conn, "art-1", None, "Direct link", "direct", &output, &[])
+        insert_captured_article(&conn, "art-1", None, "direct", &output, &[])
             .unwrap();
 
         let result = set_article_category(&conn, "art-1", Some("does-not-exist"));
@@ -1398,7 +1370,7 @@ mod tests {
         let conn = migrated_conn();
         let category = create_category(&conn, "Recipes").unwrap();
         let output = sample_capture_output("https://example.com/recipe-4");
-        insert_captured_article(&conn, "art-1", None, "Direct link", "direct", &output, &[])
+        insert_captured_article(&conn, "art-1", None, "direct", &output, &[])
             .unwrap();
         set_article_category(&conn, "art-1", Some(&category.id)).unwrap();
 
@@ -1416,7 +1388,6 @@ mod tests {
         let inserted = insert_imported_article(
             &conn,
             "art-imported",
-            "Raindrop import",
             &output,
             &tags,
             "2024-10-02T16:40:49.533Z",
@@ -1447,7 +1418,6 @@ mod tests {
         let first = insert_imported_article(
             &conn,
             "art-1",
-            "Raindrop import",
             &output,
             &[],
             "2024-01-01T00:00:00Z",
@@ -1459,7 +1429,6 @@ mod tests {
         let second = insert_imported_article(
             &conn,
             "art-2",
-            "Raindrop import",
             &output,
             &[],
             "2024-01-02T00:00:00Z",
@@ -1480,7 +1449,6 @@ mod tests {
         insert_imported_article(
             &conn,
             "art-1",
-            "Raindrop import",
             &output,
             &["pdf".to_string()],
             "2024-01-01T00:00:00Z",
@@ -1495,7 +1463,6 @@ mod tests {
         let second = insert_imported_article(
             &conn,
             "art-2",
-            "Raindrop import",
             &output,
             &["PDF".to_string(), "file-system".to_string()],
             "2024-01-02T00:00:00Z",
@@ -1518,7 +1485,6 @@ mod tests {
         insert_imported_article(
             &conn,
             "art-1",
-            "Raindrop import",
             &output,
             &["pdf".to_string()],
             "2024-01-01T00:00:00Z",
@@ -1536,7 +1502,6 @@ mod tests {
         insert_imported_article(
             &conn,
             "art-2",
-            "Raindrop import",
             &output,
             &["pdf".to_string()],
             "2024-01-02T00:00:00Z",
@@ -1573,7 +1538,6 @@ mod tests {
                 &conn,
                 &format!("art-{i}"),
                 Some(&source.id),
-                &source.name,
                 "rss",
                 &output,
                 &[],
@@ -1649,7 +1613,6 @@ mod tests {
             insert_imported_article(
                 &conn,
                 id,
-                "Feed",
                 &sample_capture_output(&format!("https://example.com/{id}")),
                 &[],
                 fetched_at,
@@ -1706,7 +1669,6 @@ mod tests {
         insert_imported_article(
             &conn,
             "rust-1",
-            "Rust Blog",
             &titled_output("https://example.com/rust-1", "Understanding Ownership"),
             &["rust".to_string(), "systems".to_string()],
             "2024-01-01T00:00:00Z",
@@ -1716,7 +1678,6 @@ mod tests {
         insert_imported_article(
             &conn,
             "js-1",
-            "JS Weekly",
             &titled_output("https://example.com/js-1", "Async Await Patterns"),
             &["javascript".to_string()],
             "2024-01-02T00:00:00Z",
@@ -1790,7 +1751,6 @@ mod tests {
         insert_imported_article(
             &conn,
             "categorized",
-            "Feed",
             &sample_capture_output("https://example.com/categorized"),
             &[],
             "2024-01-01T00:00:00Z",
@@ -1800,7 +1760,6 @@ mod tests {
         insert_imported_article(
             &conn,
             "uncategorized",
-            "Feed",
             &sample_capture_output("https://example.com/uncategorized"),
             &[],
             "2024-01-02T00:00:00Z",
@@ -1838,7 +1797,6 @@ mod tests {
         insert_imported_article(
             &conn,
             "pct",
-            "Feed",
             &titled_output("https://example.com/pct", "Batteries at 50% capacity"),
             &[],
             "2024-01-01T00:00:00Z",
@@ -1885,7 +1843,6 @@ mod tests {
         insert_imported_article(
             &conn,
             "a1",
-            "Feed A",
             &titled_output("https://example.com/a1", "First"),
             &["tag-x".to_string()],
             "2024-01-01T00:00:00Z",
@@ -1895,7 +1852,6 @@ mod tests {
         insert_imported_article(
             &conn,
             "a2",
-            "Feed B",
             &titled_output("https://example.com/a2", "Second"),
             &["tag-x".to_string(), "tag-y".to_string()],
             "2024-01-02T00:00:00Z",

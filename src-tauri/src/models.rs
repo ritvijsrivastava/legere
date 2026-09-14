@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 pub struct ArticleSummary {
     pub id: String,
     pub title: String,
-    pub source_name: String,
     pub source_type: String,
     pub excerpt: String,
     pub hero_image_path: Option<String>,
@@ -21,9 +20,9 @@ pub struct ArticleSummary {
     /// empty for direct-link articles, which have no feed to draw from.
     pub tags: Vec<String>,
     /// The article's original external URL — the library card/row shows
-    /// just its host (e.g. `example.com`), not the full capture
-    /// provenance (`source_name`), which is why this is included here
-    /// rather than requiring a separate detail fetch.
+    /// just its host (e.g. `example.com`), not the full URL, which is why
+    /// this is included here rather than requiring a separate detail
+    /// fetch.
     pub link: String,
     /// Name of the article's folder category (via `articles.category_id`),
     /// `None` when uncategorized. Resolved server-side so the label can't
@@ -35,7 +34,6 @@ pub struct ArticleSummary {
 pub struct ArticleDetail {
     pub id: String,
     pub title: String,
-    pub source_name: String,
     pub source_type: String,
     pub excerpt: String,
     pub hero_image_path: Option<String>,
@@ -51,6 +49,10 @@ pub struct ArticleDetail {
     pub extraction_confident: bool,
     pub reading_progress: f64,
     pub tags: Vec<String>,
+    /// Name of the article's folder category, `None` when uncategorized —
+    /// shown in the reader's byline in place of the old, purposeless
+    /// `source_name` provenance label.
+    pub category_name: Option<String>,
     /// This article's reading-appearance overrides, each `None` where it
     /// instead follows the global `Settings` value — see `ReadingOverrides`.
     pub overrides: ReadingOverrides,
@@ -109,13 +111,10 @@ pub struct ArticlePage {
     pub next_cursor: Option<(String, String)>,
 }
 
-/// A user-managed, flat category ("folder") an article can belong to
-/// — distinct from `ArticleSummary::source_name` (which records
-/// *provenance*: "Direct link", "Raindrop import", or an RSS feed's
-/// name, and is never shown as this concept). `article_count` is
-/// computed at query time, not stored, and can legitimately be `0` — a
-/// category persists after its last article is reassigned elsewhere
-/// (see `db::schema`'s `V9` migration doc comment).
+/// A user-managed, flat category ("folder") an article can belong to.
+/// `article_count` is computed at query time, not stored, and can
+/// legitimately be `0` — a category persists after its last article is
+/// reassigned elsewhere (see `db::schema`'s `V9` migration doc comment).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Category {
     pub id: String,

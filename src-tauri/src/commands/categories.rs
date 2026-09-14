@@ -1,6 +1,6 @@
 //! Real, user-managed categories ("folders") — see `db::schema`'s `V9`
-//! migration and `models::Category`'s doc comment. These are separate
-//! from article provenance (`source_name`) and persist even when empty.
+//! migration and `models::Category`'s doc comment. They persist even when
+//! empty.
 
 use tauri::{AppHandle, State};
 

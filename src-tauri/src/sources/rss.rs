@@ -70,7 +70,6 @@ pub async fn sync_rss_source(state: &AppState, source: &Source) -> Result<u32, R
                     &conn,
                     &id,
                     Some(&source.id),
-                    &source.name,
                     "rss",
                     &output,
                     &tags,
