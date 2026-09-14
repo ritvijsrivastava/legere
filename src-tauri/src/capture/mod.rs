@@ -55,6 +55,10 @@ pub struct LocalCaptureOutput {
     /// article's own `content/<id>/` directory (see
     /// [`rewrite::rewrite_readable_asset_urls`]).
     pub content_html: String,
+    /// Always `Some` out of [`capture_local`] — defaults to capture time
+    /// when the source page didn't expose a machine-readable publish
+    /// date. Still `Option` because test fixtures build this struct
+    /// directly without going through that default.
     pub published_at: Option<String>,
     pub read_time_min: i64,
     /// Relative to `data_dir`, e.g. `media/<id>.jpg`.
@@ -135,13 +139,23 @@ pub async fn capture_local(
 
     archive::write_content_files(&content_dir, &localized).await?;
 
+    // Not every page exposes a machine-readable publish date (or
+    // `dom_smoothie` fails to find one) — rather than storing `NULL` and
+    // pushing the "what date do we show?" question onto every reader of
+    // `published_at`, default it to capture time right here, once, so the
+    // column is a real "this article's date" for display/sort purposes
+    // even when the source page didn't say.
+    let published_at = extracted
+        .published_at
+        .unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
+
     Ok(LocalCaptureOutput {
         title: extracted.title,
         link: cleaned_link,
         final_url: page.final_url.to_string(),
         excerpt: extracted.excerpt,
         content_html,
-        published_at: extracted.published_at,
+        published_at: Some(published_at),
         read_time_min: extracted.read_time_min,
         hero_image_path,
         extraction_confident: extracted.extraction_confident,

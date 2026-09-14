@@ -49,6 +49,15 @@ creating a duplicate name is rejected by the backend, and the one caller
 that can hit this on a normal path (`MoveToCategoryDialog`'s "create a
 new category") quietly reuses the existing category instead of erroring.
 
+`articles.published_at` is nullable in the schema but every capture path
+(`capture::capture_local`) now always writes a value: when the source
+page doesn't expose a machine-readable publish date, it defaults to
+capture time instead of storing `NULL`, so library/reader date display
+never has to special-case a missing value. Migration V12 backfills rows
+captured before that default existed (`published_at IS NULL`) to the
+migration's own run time — the exact original capture time is gone by
+that point, so "now" is the same fallback the app itself uses.
+
 Raindrop CSV imports preview folder names and row counts before capture
 (no category choice involved in the preview — it's read-only). A row's
 `folder` maps straight to a same-named category automatically when the

@@ -435,6 +435,19 @@ const V11: &str = "
  ALTER TABLE articles DROP COLUMN source_name;
 ";
 
+// Every capture path (`capture::capture_local`) now defaults
+// `published_at` to capture time whenever the source page didn't expose
+// one, rather than storing `NULL` and leaving "what date do we show?" to
+// every reader of the column — see that function's doc comment. This
+// backfills rows captured before that change existed: `published_at IS
+// NULL` becomes "now" (this migration's run time), same fallback the app
+// itself uses when a real publish date was never available, just applied
+// once retroactively instead of at each row's own original capture time
+// (which is gone — the column being NULL *is* that lost information).
+const V12: &str = "
+UPDATE articles SET published_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE published_at IS NULL;
+";
+
 pub fn migrations() -> Migrations<'static> {
     Migrations::new(vec![
         M::up(V1),
@@ -448,6 +461,7 @@ pub fn migrations() -> Migrations<'static> {
         M::up(V9),
         M::up(V10),
         M::up(V11),
+        M::up(V12),
     ])
 }
 
@@ -824,6 +838,46 @@ mod tests {
         );
     }
 
+
+    #[test]
+    fn v12_backfills_null_published_at_but_leaves_a_real_one_alone() {
+        let mut conn = v2_conn_with_test_data();
+        migrate(&mut conn).expect("migrate to latest");
+
+        conn.execute(
+            "UPDATE articles SET published_at = '2020-05-01T00:00:00Z' WHERE id = 'art-finished'",
+            [],
+        )
+        .expect("seed a real published_at");
+        conn.execute(
+            "UPDATE articles SET published_at = NULL WHERE id = 'art-unread'",
+            [],
+        )
+        .expect("clear published_at back to NULL, as pre-V12 rows had it");
+
+        // Re-running V12 alone (rather than a fresh migrate from V1) mimics
+        // what actually happened historically: rows already existed with
+        // NULL published_at before this migration was added.
+        conn.execute_batch(V12).expect("re-apply V12's backfill");
+
+        let published_at = |id: &str| -> Option<String> {
+            conn.query_row(
+                "SELECT published_at FROM articles WHERE id = ?1",
+                [id],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(
+            published_at("art-finished"),
+            Some("2020-05-01T00:00:00Z".to_string()),
+            "a real published_at must not be overwritten"
+        );
+        assert!(
+            published_at("art-unread").is_some(),
+            "a NULL published_at must be backfilled to a non-NULL value"
+        );
+    }
 
     #[test]
     fn v2_preserves_foreign_keys_enforcement_after_migrating() {
