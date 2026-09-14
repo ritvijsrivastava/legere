@@ -5,9 +5,6 @@ export type LibraryView = 'cards' | 'list';
 export type ReaderMeasure = 'narrow' | 'default' | 'wide';
 export type ReaderLeading = 'compact' | 'default' | 'airy';
 export type AppTheme = 'light' | 'dark';
-/** `light` tracks the current `AppTheme` rather than forcing a literal
- *  light palette; `sepia`/`dark` are fixed overrides. */
-export type ReaderTheme = 'light' | 'sepia' | 'dark';
 
 /** `unread` -> `reading` on opening the reader (whether previously unread
  *  or read); `reading` -> `read` only via the manual "mark as read" action. */
@@ -42,6 +39,20 @@ export interface ArticleDetail extends ArticleSummary {
 	/** `false` when captured via the naive extraction fallback; the readable
 	 *  view may be lower quality for such an article. */
 	extraction_confident: boolean;
+	/** This article's reading-appearance overrides — each field `null`
+	 *  where it instead follows the matching global `Settings` value. */
+	overrides: ReadingOverrides;
+}
+
+/** Per-article overrides of the global reading-appearance settings
+ *  (`reader_font_size`/`reader_measure`/`reader_leading`/`app_theme`), one
+ *  field per axis, `null` meaning "no override, use the global value".
+ *  Set via `setReadingOverrides` from the reader's "Aa" popover. */
+export interface ReadingOverrides {
+	font_size: number | null;
+	measure: ReaderMeasure | null;
+	leading: ReaderLeading | null;
+	theme: AppTheme | null;
 }
 
 export interface Source {
@@ -71,8 +82,10 @@ export interface Settings {
 	reader_font_size: number;
 	reader_measure: ReaderMeasure;
 	reader_leading: ReaderLeading;
+	/** The single app-wide color scheme, covering both the app chrome and
+	 *  the reader. An individual article can override just its own reader
+	 *  view via `ReadingOverrides.theme`. */
 	app_theme: AppTheme;
-	reader_theme: ReaderTheme;
 	/** How many Raindrop CSV import rows capture concurrently. Clamped to
 	 *  5–10 by the backend regardless of what's sent here. */
 	import_concurrency: number;

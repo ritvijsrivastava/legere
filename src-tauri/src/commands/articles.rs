@@ -4,7 +4,9 @@ use crate::capture;
 use crate::db::queries;
 use crate::error::AppError;
 use crate::events;
-use crate::models::{ArticleDetail, ArticlePage, ArticlePageRequest, ArticleSummary};
+use crate::models::{
+    ArticleDetail, ArticlePage, ArticlePageRequest, ArticleSummary, ReadingOverrides,
+};
 use crate::state::AppState;
 
 /// Keyset-paginated article listing backing the library/favorites views
@@ -167,6 +169,26 @@ pub async fn save_reading_progress(
     tokio::task::spawn_blocking(move || {
         let conn = pool.get()?;
         Ok(queries::save_reading_progress(&conn, &id, progress)?)
+    })
+    .await?
+}
+
+/// Persists an article's reading-appearance overrides (font size, text
+/// width, line height, theme) — called from the reader's "Aa" popover,
+/// which always sends the article's complete override set (so a
+/// "reset to global defaults" is just this same call with every field
+/// `None`). Doesn't emit `articles:changed`: these only affect the one
+/// article's own reader view, never the library list.
+#[tauri::command]
+pub async fn set_reading_overrides(
+    state: State<'_, AppState>,
+    id: String,
+    overrides: ReadingOverrides,
+) -> Result<(), AppError> {
+    let pool = state.pool.clone();
+    tokio::task::spawn_blocking(move || {
+        let conn = pool.get()?;
+        Ok(queries::set_reading_overrides(&conn, &id, &overrides)?)
     })
     .await?
 }

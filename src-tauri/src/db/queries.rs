@@ -5,7 +5,7 @@ use rusqlite::{Connection, OptionalExtension, Row, params};
 use uuid::Uuid;
 
 use crate::capture::LocalCaptureOutput;
-use crate::models::{ArticleDetail, ArticleSummary, Category, Settings, Source};
+use crate::models::{ArticleDetail, ArticleSummary, Category, ReadingOverrides, Settings, Source};
 
 /// `tags` is stored as a JSON array string; a row with anything other
 /// than a valid JSON array (shouldn't happen — only this module writes
@@ -64,7 +64,8 @@ const ARTICLE_SUMMARY_COLUMNS: &str =
 
 /// Every [`ARTICLE_SUMMARY_COLUMNS`] query joins through this so
 /// `category_name` resolves without a second round trip per article.
-const ARTICLE_SUMMARY_FROM: &str = "articles LEFT JOIN categories ON categories.id = articles.category_id";
+const ARTICLE_SUMMARY_FROM: &str =
+    "articles LEFT JOIN categories ON categories.id = articles.category_id";
 
 /// A cheap pre-check used to skip capturing (fetching + localizing +
 /// archiving) an article whose link is already known, before doing any of
@@ -416,7 +417,9 @@ pub fn list_articles_page(
         }
     }
     if let Some((fetched_at, id)) = query.cursor {
-        sql.push_str(" AND (articles.fetched_at < ? OR (articles.fetched_at = ? AND articles.id < ?))");
+        sql.push_str(
+            " AND (articles.fetched_at < ? OR (articles.fetched_at = ? AND articles.id < ?))",
+        );
         params.push(Box::new(fetched_at.to_string()));
         params.push(Box::new(fetched_at.to_string()));
         params.push(Box::new(id.to_string()));
@@ -656,7 +659,8 @@ pub fn get_article(conn: &Connection, id: &str) -> rusqlite::Result<Option<Artic
     conn.query_row(
         "SELECT id, title, source_name, source_type, excerpt, hero_image_path,
                 published_at, read_time_min, reading_state, favorited, link, content_html,
-                extraction_confident, reading_progress, tags
+                extraction_confident, reading_progress, tags,
+                font_size_override, measure_override, leading_override, theme_override
          FROM articles WHERE id = ?1",
         params![id],
         |row| {
@@ -676,10 +680,42 @@ pub fn get_article(conn: &Connection, id: &str) -> rusqlite::Result<Option<Artic
                 extraction_confident: row.get::<_, i64>("extraction_confident")? != 0,
                 reading_progress: row.get("reading_progress")?,
                 tags: parse_tags(row.get("tags")?),
+                overrides: ReadingOverrides {
+                    font_size: row.get("font_size_override")?,
+                    measure: row.get("measure_override")?,
+                    leading: row.get("leading_override")?,
+                    theme: row.get("theme_override")?,
+                },
             })
         },
     )
     .optional()
+}
+
+/// Persists an article's reading-appearance overrides (font size, text
+/// width, line height, theme), replacing all four at once — the reader's
+/// "Aa" popover always sends the article's whole current override set, so
+/// a field left unset by the caller is `None`/NULL, not left untouched.
+/// `None` on all four (the "reset to global defaults" action) is exactly
+/// as valid a call as setting one.
+pub fn set_reading_overrides(
+    conn: &Connection,
+    id: &str,
+    overrides: &ReadingOverrides,
+) -> rusqlite::Result<()> {
+    conn.execute(
+        "UPDATE articles
+         SET font_size_override = ?2, measure_override = ?3, leading_override = ?4, theme_override = ?5
+         WHERE id = ?1",
+        params![
+            id,
+            overrides.font_size,
+            overrides.measure,
+            overrides.leading,
+            overrides.theme
+        ],
+    )?;
+    Ok(())
 }
 
 /// Looks up an article's summary by its (cleaned) link — used when
@@ -692,7 +728,9 @@ pub fn get_article_summary_by_link(
     link: &str,
 ) -> rusqlite::Result<Option<ArticleSummary>> {
     conn.query_row(
-        &format!("SELECT {ARTICLE_SUMMARY_COLUMNS} FROM {ARTICLE_SUMMARY_FROM} WHERE articles.link = ?1"),
+        &format!(
+            "SELECT {ARTICLE_SUMMARY_COLUMNS} FROM {ARTICLE_SUMMARY_FROM} WHERE articles.link = ?1"
+        ),
         params![link],
         article_summary_from_row,
     )
@@ -1007,7 +1045,6 @@ pub fn get_settings(conn: &Connection) -> rusqlite::Result<Settings> {
             "reader_measure" => settings.reader_measure = value,
             "reader_leading" => settings.reader_leading = value,
             "app_theme" => settings.app_theme = value,
-            "reader_theme" => settings.reader_theme = value,
             "import_concurrency" => {
                 if let Ok(concurrency) = value.parse::<i64>() {
                     settings.import_concurrency = concurrency.clamp(5, 10);
@@ -1054,11 +1091,6 @@ pub fn update_settings(conn: &Connection, settings: &Settings) -> rusqlite::Resu
         "INSERT INTO settings (key, value) VALUES ('app_theme', ?1)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value",
         params![settings.app_theme],
-    )?;
-    conn.execute(
-        "INSERT INTO settings (key, value) VALUES ('reader_theme', ?1)
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-        params![settings.reader_theme],
     )?;
     conn.execute(
         "INSERT INTO settings (key, value) VALUES ('import_concurrency', ?1)

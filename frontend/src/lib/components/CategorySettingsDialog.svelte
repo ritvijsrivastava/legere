@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import * as api from '$lib/api';
 	import type { Category } from '$lib/types';
 
@@ -16,7 +17,7 @@
 		onDeleted: () => void;
 	} = $props();
 
-	let name = $state(category.name);
+	let name = $state(untrack(() => category.name));
 	let saving = $state(false);
 	let deleting = $state(false);
 	let error = $state<string | null>(null);

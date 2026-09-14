@@ -72,10 +72,13 @@ unless revisited later.)
   backfill, per-source status (active/paused/error) with retry.
 - Reading: readable-view toggle of font size (16–22px), text
   measure/width (narrow/default/wide), line-height (compact/default/
-  airy), and a reader theme (light — tracks app theme —, sepia, dark),
-  independent of the app-wide light/dark theme. Reading progress is
-  persisted and restored (scroll position, "X min left", library-card
-  progress bar).
+  airy), and theme (light/dark — the same single app-wide theme, not a
+  separate reader-only palette). Settings sets the global default for
+  all four; the reader's "Aa" popover can override any of them for just
+  the article being read (persisted per-article, with a "reset to global
+  defaults" action), without touching the global setting. Reading
+  progress is persisted and restored (scroll position, "X min left",
+  library-card progress bar).
 - Library: card view and list view, search-by-title, filter by
   user-managed folder/category and by tag, unread/favorite counts, delete with
   confirm, "Favorites" as its own view.
@@ -116,9 +119,12 @@ unless revisited later.)
   as dated/generic and is an **anti-reference**, not a constraint to
   preserve — it and the current token palette/typography are open for
   full replacement.
-- Existing reader-theme naming (`light` / `sepia` / `dark`) and the
-  "Aa" typography popover concept are working product conventions, not
-  binding visual style; keep the concepts, redesign the execution.
+- The "Aa" typography popover concept is a working product convention,
+  not binding visual style; keep the concept, redesign the execution.
+  The reader theme was previously a separate three-way axis (`light` /
+  `sepia` / `dark`, independent of the app-wide theme) — collapsed to a
+  single app-wide `light`/`dark` theme, overridable per article; `sepia`
+  is gone, not a hidden option to resurrect.
 
 ## Evidence on Hand
 

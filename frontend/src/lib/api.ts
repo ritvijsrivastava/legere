@@ -8,6 +8,7 @@ import type {
 	Category,
 	ImportPreview,
 	NamedCount,
+	ReadingOverrides,
 	Settings,
 	Source,
 	SourceType,
@@ -91,6 +92,14 @@ export function toggleFavorite(id: string): Promise<boolean> {
 
 export function saveReadingProgress(id: string, progress: number): Promise<void> {
 	return invoke<void>('save_reading_progress', { id, progress });
+}
+
+/** Persists an article's whole reading-appearance override set (font
+ *  size, text width, line height, theme) — send every field, not just the
+ *  one that changed; sending all `null` resets the article back to
+ *  tracking the global settings. */
+export function setReadingOverrides(id: string, overrides: ReadingOverrides): Promise<void> {
+	return invoke<void>('set_reading_overrides', { id, overrides });
 }
 
 /** Replaces an article's whole tag set. The backend normalizes to

@@ -5,10 +5,7 @@
 	import Star from '$lib/icons/Star.svelte';
 	import SettingsIcon from '$lib/icons/Settings.svelte';
 	import Plus from '$lib/icons/Plus.svelte';
-	import Moon from '$lib/icons/Moon.svelte';
-	import Sun from '$lib/icons/Sun.svelte';
 	import { libraryStatsStore } from '$lib/stores/libraryStats.svelte';
-	import { settingsStore } from '$lib/stores/settings.svelte';
 	import { uiStore } from '$lib/stores/ui.svelte';
 	import { libraryFiltersStore } from '$lib/stores/libraryFilters.svelte';
 	import { sourceDotColor } from '$lib/sourceColor';
@@ -76,11 +73,6 @@
 		return page.url.pathname === `/category/${id}`;
 	}
 
-	function toggleTheme() {
-		const next = settingsStore.current.app_theme === 'dark' ? 'light' : 'dark';
-		settingsStore.update({ app_theme: next });
-	}
-
 	// Sidebar Categories/Tags: categories are real user-managed folders,
 	// separate from source_name provenance. Empty categories remain visible;
 	// Uncategorized is a virtual entry for articles whose category_id is
@@ -145,17 +137,6 @@
 					<span class="brand-mark"><Logo size={17} /></span>
 					Legere
 				</div>
-				<button
-					class="btn btn-icon btn-secondary theme-toggle"
-					onclick={toggleTheme}
-					aria-label="Toggle theme"
-				>
-					{#if settingsStore.current.app_theme === 'light'}
-						<Moon size={14} />
-					{:else}
-						<Sun size={14} />
-					{/if}
-				</button>
 			</div>
 			<button onclick={() => uiStore.openAddSource()} class="add-source-btn">
 				<Plus size={15} />
@@ -181,17 +162,6 @@
 				Legere
 			</span>
 			<div class="topbar-actions">
-				<button
-					class="btn btn-icon btn-secondary"
-					onclick={toggleTheme}
-					aria-label="Toggle theme"
-				>
-					{#if settingsStore.current.app_theme === 'light'}
-						<Moon size={15} />
-					{:else}
-						<Sun size={15} />
-					{/if}
-				</button>
 				<button
 					onclick={() => uiStore.openAddSource()}
 					class="btn btn-icon btn-secondary"
@@ -271,13 +241,6 @@
 		color: var(--color-accent);
 		flex: none;
 	}
-	.theme-toggle {
-		width: 28px;
-		height: 28px;
-		border-radius: 50%;
-		flex: none;
-	}
-
 	.nav-list {
 		display: flex;
 		flex-direction: column;

@@ -153,6 +153,7 @@ pub fn run() {
             commands::articles::mark_as_read,
             commands::articles::toggle_favorite,
             commands::articles::save_reading_progress,
+            commands::articles::set_reading_overrides,
             commands::articles::set_article_tags,
             commands::articles::delete_article,
             commands::articles::delete_all_articles,

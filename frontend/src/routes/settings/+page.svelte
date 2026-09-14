@@ -5,7 +5,7 @@
 	import { uiStore } from '$lib/stores/ui.svelte';
 	import { importStore } from '$lib/stores/import.svelte';
 	import ChevronRight from '$lib/icons/ChevronRight.svelte';
-	import type { LibraryView, ReaderMeasure, ReaderTheme } from '$lib/types';
+	import type { AppTheme, LibraryView, ReaderMeasure } from '$lib/types';
 	import { isTauri } from '$lib/platform';
 	import { errorMessage } from '$lib/api';
 	import {
@@ -182,8 +182,8 @@
 	function setAutosync(enabled: boolean) {
 		settingsStore.update({ autosync: enabled });
 	}
-	function setReaderTheme(theme: ReaderTheme) {
-		settingsStore.update({ reader_theme: theme });
+	function setAppTheme(theme: AppTheme) {
+		settingsStore.update({ app_theme: theme });
 	}
 	function setReaderMeasure(measure: ReaderMeasure) {
 		settingsStore.update({ reader_measure: measure });
@@ -197,9 +197,8 @@
 		settingsStore.update({ import_concurrency: next });
 	}
 
-	const readerThemeOptions: { value: ReaderTheme; label: string }[] = [
+	const appThemeOptions: { value: AppTheme; label: string }[] = [
 		{ value: 'light', label: 'Light' },
-		{ value: 'sepia', label: 'Sepia' },
 		{ value: 'dark', label: 'Dark' }
 	];
 	const readerMeasureOptions: { value: ReaderMeasure; label: string }[] = [
@@ -213,24 +212,32 @@
 	<h1>Settings</h1>
 
 	<section>
-		<h4>Reading defaults</h4>
-		<p class="text-muted section-desc">Applied the next time you open an article.</p>
-		<div class="row">
-			<span class="row-label">Theme</span>
-			<div class="seg">
-				{#each readerThemeOptions as opt (opt.value)}
-					<label class="seg-opt">
-						<input
-							type="radio"
-							name="reader-theme2"
-							checked={settingsStore.current.reader_theme === opt.value}
-							onchange={() => setReaderTheme(opt.value)}
-						/>
-						<span>{opt.label}</span>
-					</label>
-				{/each}
-			</div>
+		<h4>Appearance</h4>
+		<p class="text-muted section-desc">
+			Applies everywhere, immediately. Override it for one article from its Aa menu while
+			reading — that doesn't change this.
+		</p>
+		<div class="seg">
+			{#each appThemeOptions as opt (opt.value)}
+				<label class="seg-opt">
+					<input
+						type="radio"
+						name="app-theme"
+						checked={settingsStore.current.app_theme === opt.value}
+						onchange={() => setAppTheme(opt.value)}
+					/>
+					<span>{opt.label}</span>
+				</label>
+			{/each}
 		</div>
+	</section>
+
+	<section>
+		<h4>Reading defaults</h4>
+		<p class="text-muted section-desc">
+			Default text settings for articles you open. Override them for one article from its Aa
+			menu while reading — that doesn't change this.
+		</p>
 		<div class="row">
 			<span class="row-label">Text width</span>
 			<div class="seg">

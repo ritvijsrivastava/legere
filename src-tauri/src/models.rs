@@ -51,6 +51,24 @@ pub struct ArticleDetail {
     pub extraction_confident: bool,
     pub reading_progress: f64,
     pub tags: Vec<String>,
+    /// This article's reading-appearance overrides, each `None` where it
+    /// instead follows the global `Settings` value — see `ReadingOverrides`.
+    pub overrides: ReadingOverrides,
+}
+
+/// Per-article overrides of the global reading-appearance settings
+/// (`Settings::reader_font_size`/`reader_measure`/`reader_leading`/`app_theme`),
+/// one field per axis, `None` meaning "no override, use the global value".
+/// Set via `commands::articles::set_reading_overrides` from the reader's
+/// "Aa" popover; resetting an article clears all four back to `None` in
+/// one call rather than requiring four separate ones.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ReadingOverrides {
+    pub font_size: Option<i64>,
+    pub measure: Option<String>,
+    pub leading: Option<String>,
+    /// `light` | `dark`, same two values as `Settings::app_theme`.
+    pub theme: Option<String>,
 }
 
 /// Request for a page of [`ArticleSummary`] rows, keyset-paginated on
@@ -129,12 +147,10 @@ pub struct Settings {
     pub reader_font_size: i64,
     pub reader_measure: String,
     pub reader_leading: String,
-    /// `light` | `dark` — the app chrome's own color scheme.
+    /// `light` | `dark` — the single app-wide color scheme, covering both
+    /// the app chrome and the reader. An individual article can override
+    /// just its own reader view via `ReadingOverrides::theme`.
     pub app_theme: String,
-    /// `light` | `sepia` | `dark` — the reader's own color scheme. `light`
-    /// tracks whatever `app_theme` currently is rather than forcing a
-    /// literal light palette; `sepia`/`dark` are fixed overrides.
-    pub reader_theme: String,
     /// How many Raindrop CSV import rows (`sources::raindrop_import::run_import`)
     /// capture concurrently. Clamped to 5–10 wherever it's read or written
     /// (`queries::get_settings`/`update_settings`) rather than trusted as
@@ -153,7 +169,6 @@ impl Default for Settings {
             reader_measure: "default".into(),
             reader_leading: "default".into(),
             app_theme: "dark".into(),
-            reader_theme: "light".into(),
             import_concurrency: 5,
         }
     }

@@ -4,11 +4,16 @@
    neutrals + one ink-green accent), Literata for reading (a serif
    purpose-built for long-form on-screen text) and Inter for UI chrome.
    Light is the base palette on :root, dark overrides live under
-   :root[data-theme="dark"] (see +layout.svelte for how the app-theme
-   setting drives that attribute). Fonts are vendored locally via
+   [data-theme="dark"] (see +layout.svelte for how the app-theme setting
+   drives that attribute on <html>). Both selectors are plain attribute
+   selectors rather than `:root`-anchored, so a `data-theme` attribute set
+   on some descendant element (the reader view's per-article theme
+   override) scopes the same variables to just that subtree instead of
+   the whole app. Fonts are vendored locally via
    @fontsource (imported in app.css) — this app must work fully offline. */
 
-:root {
+:root,
+[data-theme='light'] {
   --color-bg: #faf8f3;
   --color-surface: #f0eae0;
   --color-surface-raised: #ffffff;
@@ -62,7 +67,7 @@
   --duration-base: 0.18s;
 }
 
-:root[data-theme='dark'] {
+[data-theme='dark'] {
   --color-bg: #1a1814;
   --color-surface: #24211a;
   --color-surface-raised: #2b271f;

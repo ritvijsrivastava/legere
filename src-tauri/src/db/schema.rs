@@ -395,6 +395,28 @@ ALTER TABLE articles ADD COLUMN category_id TEXT REFERENCES categories(id) ON DE
 CREATE INDEX idx_articles_category_id ON articles(category_id);
 ";
 
+// Per-article reading-appearance overrides, all nullable — NULL means
+// "no override, follow the global setting" (`db::queries::get_settings`),
+// not "unset to a default value". Added so opening an article and
+// changing its typography/theme no longer silently rewrites the global
+// default for every other article (the previous behavior, and the bug
+// this migration exists to fix) — see `commands::articles::set_reading_overrides`.
+//
+// `theme_override` also folds in what used to be the separate
+// `reader_theme` global setting (`light`/`sepia`/`dark`): the app now has
+// exactly one theme axis (`light`/`dark`, `Settings.app_theme`), and an
+// article can only override it to the other of those same two values —
+// `sepia` is dropped entirely, not migrated forward. The now-orphaned
+// `reader_theme` row in `settings` is deleted rather than left inert.
+const V10: &str = "
+ALTER TABLE articles ADD COLUMN font_size_override INTEGER;
+ALTER TABLE articles ADD COLUMN measure_override TEXT;
+ALTER TABLE articles ADD COLUMN leading_override TEXT;
+ALTER TABLE articles ADD COLUMN theme_override TEXT;
+
+DELETE FROM settings WHERE key = 'reader_theme';
+";
+
 pub fn migrations() -> Migrations<'static> {
     Migrations::new(vec![
         M::up(V1),
@@ -406,6 +428,7 @@ pub fn migrations() -> Migrations<'static> {
         M::up(V7),
         M::up(V8),
         M::up(V9),
+        M::up(V10),
     ])
 }
 

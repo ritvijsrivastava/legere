@@ -1,24 +1,31 @@
 <script lang="ts">
-	import type { ReaderMeasure, ReaderLeading, ReaderTheme } from '$lib/types';
+	import type { AppTheme, ReaderMeasure, ReaderLeading } from '$lib/types';
 
 	let {
 		fontSize,
 		measure,
 		leading,
-		readerTheme,
+		theme,
+		hasOverride,
 		onFontSize,
 		onMeasure,
 		onLeading,
-		onReaderTheme
+		onTheme,
+		onReset
 	}: {
 		fontSize: number;
 		measure: ReaderMeasure;
 		leading: ReaderLeading;
-		readerTheme: ReaderTheme;
+		theme: AppTheme;
+		/** Whether this article currently overrides any of the settings
+		 *  above (font size/width/line height/theme) rather than following
+		 *  the global defaults — shows the "Reset" action below. */
+		hasOverride: boolean;
 		onFontSize: (size: number) => void;
 		onMeasure: (measure: ReaderMeasure) => void;
 		onLeading: (leading: ReaderLeading) => void;
-		onReaderTheme: (theme: ReaderTheme) => void;
+		onTheme: (theme: AppTheme) => void;
+		onReset: () => void;
 	} = $props();
 
 	let open = $state(false);
@@ -34,9 +41,8 @@
 		{ value: 'default', label: 'D' },
 		{ value: 'airy', label: 'A' }
 	];
-	const themeOptions: { value: ReaderTheme; label: string }[] = [
+	const themeOptions: { value: AppTheme; label: string }[] = [
 		{ value: 'light', label: 'Light' },
-		{ value: 'sepia', label: 'Sepia' },
 		{ value: 'dark', label: 'Dark' }
 	];
 
@@ -108,8 +114,8 @@
 				<input
 					type="radio"
 					name="reader-theme"
-					checked={readerTheme === opt.value}
-					onchange={() => onReaderTheme(opt.value)}
+					checked={theme === opt.value}
+					onchange={() => onTheme(opt.value)}
 				/>
 				<span>{opt.label}</span>
 			</label>
@@ -157,6 +163,11 @@
 				<span class="aa-label">Theme</span>
 				{@render themeSeg()}
 			</div>
+			{#if hasOverride}
+				<button class="btn btn-ghost reset-btn" onclick={onReset}>
+					Reset to global defaults
+				</button>
+			{/if}
 		</div>
 	{/if}
 </div>
@@ -203,5 +214,13 @@
 		text-align: center;
 		font-size: 13px;
 		font-variant-numeric: tabular-nums;
+	}
+	.reset-btn {
+		width: 100%;
+		justify-content: center;
+		padding: 6px 0 0;
+		font-size: 12px;
+		border-top: 1px solid var(--color-divider);
+		border-radius: 0;
 	}
 </style>

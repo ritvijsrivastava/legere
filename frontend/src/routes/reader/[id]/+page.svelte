@@ -4,7 +4,7 @@
 	import { libraryStatsStore } from '$lib/stores/libraryStats.svelte';
 	import { settingsStore } from '$lib/stores/settings.svelte';
 	import * as api from '$lib/api';
-	import type { ArticleDetail, ReaderMeasure, ReaderLeading, ReaderTheme } from '$lib/types';
+	import type { AppTheme, ArticleDetail, ReaderMeasure, ReaderLeading, ReadingOverrides } from '$lib/types';
 	import HeroImage from '$lib/components/HeroImage.svelte';
 	import ReaderControls from '$lib/components/ReaderControls.svelte';
 	import TagEditor from '$lib/components/TagEditor.svelte';
@@ -18,17 +18,6 @@
 	const SAVE_PROGRESS_DEBOUNCE_MS = 750;
 	const MEASURE_PX: Record<ReaderMeasure, number> = { narrow: 600, default: 680, wide: 760 };
 	const LEADING_VALUE: Record<ReaderLeading, number> = { compact: 1.6, default: 1.75, airy: 1.9 };
-	/** `light` tracks the app's own theme (no override, falls through to
-	 *  the ambient --color-* tokens); sepia/dark are fixed palettes,
-	 *  verbatim from the Legere.dc.html design's `readerThemeMap`. */
-	const READER_THEME_OVERRIDES: Record<
-		ReaderTheme,
-		{ bg: string; fg: string; muted: string; divider: string } | null
-	> = {
-		light: null,
-		sepia: { bg: '#f2e8d8', fg: '#3a2f20', muted: 'rgba(58,47,32,0.6)', divider: 'rgba(58,47,32,0.14)' },
-		dark: { bg: '#1a1712', fg: '#ece6d8', muted: 'rgba(236,230,216,0.55)', divider: 'rgba(255,255,255,0.1)' }
-	};
 
 	const BACK_LABELS: Record<string, string> = { '/': 'Library', '/favorites': 'Favorites' };
 	let backHref = $derived.by(() => {
@@ -59,20 +48,32 @@
 	let fontSize = $state(19);
 	let measure = $state<ReaderMeasure>('default');
 	let leading = $state<ReaderLeading>('default');
-	let readerTheme = $state<ReaderTheme>('light');
-	let initializedReaderSettings = false;
+	let theme = $state<AppTheme>('dark');
+	// Tracks which article's overrides are currently loaded into the four
+	// `$state` values above, so the effect below re-derives them exactly
+	// once per article (not once per whole session, and not on every
+	// unrelated `article` reassignment within the same article) — each
+	// article can carry its own overrides (`ReadingOverrides`), falling
+	// back field-by-field to the global `settingsStore` default.
+	let overridesLoadedForId: string | null = null;
 
 	$effect(() => {
-		if (settingsStore.loaded && !initializedReaderSettings) {
-			fontSize = settingsStore.current.reader_font_size;
-			measure = settingsStore.current.reader_measure;
-			leading = settingsStore.current.reader_leading;
-			readerTheme = settingsStore.current.reader_theme;
-			initializedReaderSettings = true;
-		}
+		if (!article || !settingsStore.loaded) return;
+		if (overridesLoadedForId === article.id) return;
+		overridesLoadedForId = article.id;
+		fontSize = article.overrides.font_size ?? settingsStore.current.reader_font_size;
+		measure = article.overrides.measure ?? settingsStore.current.reader_measure;
+		leading = article.overrides.leading ?? settingsStore.current.reader_leading;
+		theme = article.overrides.theme ?? settingsStore.current.app_theme;
 	});
 
-	let readerPalette = $derived(READER_THEME_OVERRIDES[readerTheme]);
+	let hasOverride = $derived(
+		article !== null &&
+			(article.overrides.font_size !== null ||
+				article.overrides.measure !== null ||
+				article.overrides.leading !== null ||
+				article.overrides.theme !== null)
+	);
 
 	$effect(() => {
 		const id = page.params.id;
@@ -134,21 +135,49 @@
 		}, SAVE_PROGRESS_DEBOUNCE_MS);
 	}
 
+	// Persists one changed field of this article's overrides, keeping the
+	// other three whatever they already were (an article previously
+	// overriding only its theme, say, doesn't lose that when its font size
+	// is then changed too) — unlike the old behavior, none of this ever
+	// touches the global `settingsStore`.
+	function persistOverrides(next: Partial<ReadingOverrides>) {
+		if (!article) return;
+		const overrides = { ...article.overrides, ...next };
+		article = { ...article, overrides };
+		api.setReadingOverrides(article.id, overrides);
+	}
 	function setFontSize(size: number) {
 		fontSize = size;
-		if (initializedReaderSettings) settingsStore.update({ reader_font_size: size });
+		persistOverrides({ font_size: size });
 	}
 	function setMeasure(value: ReaderMeasure) {
 		measure = value;
-		if (initializedReaderSettings) settingsStore.update({ reader_measure: value });
+		persistOverrides({ measure: value });
 	}
 	function setLeading(value: ReaderLeading) {
 		leading = value;
-		if (initializedReaderSettings) settingsStore.update({ reader_leading: value });
+		persistOverrides({ leading: value });
 	}
-	function setReaderTheme(value: ReaderTheme) {
-		readerTheme = value;
-		if (initializedReaderSettings) settingsStore.update({ reader_theme: value });
+	function setTheme(value: AppTheme) {
+		theme = value;
+		persistOverrides({ theme: value });
+	}
+	/** Clears every override on the current article, falling back to
+	 *  whatever the global settings are right now. */
+	function resetOverrides() {
+		if (!article) return;
+		const overrides: ReadingOverrides = {
+			font_size: null,
+			measure: null,
+			leading: null,
+			theme: null
+		};
+		article = { ...article, overrides };
+		api.setReadingOverrides(article.id, overrides);
+		fontSize = settingsStore.current.reader_font_size;
+		measure = settingsStore.current.reader_measure;
+		leading = settingsStore.current.reader_leading;
+		theme = settingsStore.current.app_theme;
 	}
 
 	async function toggleFavorite() {
@@ -199,11 +228,7 @@
 <div
 	bind:this={containerEl}
 	class="reader-root"
-	style:background={readerPalette ? readerPalette.bg : 'var(--color-bg)'}
-	style:color={readerPalette ? readerPalette.fg : 'var(--color-text)'}
-	style:--reader-fg={readerPalette ? readerPalette.fg : 'var(--color-text)'}
-	style:--reader-muted={readerPalette ? readerPalette.muted : 'var(--color-muted)'}
-	style:--reader-divider={readerPalette ? readerPalette.divider : 'var(--color-divider)'}
+	data-theme={theme}
 >
 	<div class="progress-track">
 		<div class="progress-fill" style:width="{Math.round(scrollProgress * 100)}%"></div>
@@ -220,11 +245,13 @@
 					{fontSize}
 					{measure}
 					{leading}
-					{readerTheme}
+					{theme}
+					{hasOverride}
 					onFontSize={setFontSize}
 					onMeasure={setMeasure}
 					onLeading={setLeading}
-					onReaderTheme={setReaderTheme}
+					onTheme={setTheme}
+					onReset={resetOverrides}
 				/>
 				<button
 					class="btn btn-icon btn-secondary favorite-btn"
@@ -293,12 +320,18 @@
 <style>
 	.reader-root {
 		min-height: 100%;
+		/* Own background/text color (not just inherited from `.content`)
+		 *  so a per-article theme override (`data-theme` set above) actually
+		 *  paints differently from the ambient app chrome around it — the
+		 *  `[data-theme]` variable scoping lives in `tokens.css`. */
+		background: var(--color-bg);
+		color: var(--color-text);
 	}
 	.progress-track {
 		position: sticky;
 		top: 0;
 		height: 2px;
-		background: var(--reader-divider, var(--color-divider));
+		background: var(--color-divider);
 		z-index: 4;
 	}
 	.progress-fill {
@@ -318,24 +351,24 @@
 		margin: 0 0 20px;
 		padding: calc(36px + env(safe-area-inset-top)) calc(36px + env(safe-area-inset-right)) 18px
 			calc(36px + env(safe-area-inset-left));
-		border-bottom: 1px solid var(--reader-divider, var(--color-divider));
+		border-bottom: 1px solid var(--color-divider);
 	}
 	.header-row :global(.btn-secondary) {
-		border-color: var(--reader-divider, var(--color-divider));
-		color: var(--reader-fg, var(--color-text));
+		border-color: var(--color-divider);
+		color: var(--color-text);
 	}
 	.header-row :global(.btn-secondary:hover:not(:disabled)) {
-		background: color-mix(in srgb, var(--reader-fg, var(--color-text)) 7%, transparent);
+		background: color-mix(in srgb, var(--color-text) 7%, transparent);
 	}
 	.header-row :global(.seg) {
-		border-color: var(--reader-divider, var(--color-divider));
+		border-color: var(--color-divider);
 	}
 	.header-row :global(.seg-opt) {
-		color: var(--reader-fg, var(--color-text));
-		border-color: var(--reader-divider, var(--color-divider));
+		color: var(--color-text);
+		border-color: var(--color-divider);
 	}
 	.header-row :global(.seg-opt:not(:has(input:checked)):hover) {
-		background: color-mix(in srgb, var(--reader-fg, var(--color-text)) 7%, transparent);
+		background: color-mix(in srgb, var(--color-text) 7%, transparent);
 	}
 	.back-btn {
 		padding-left: 0;
@@ -348,13 +381,13 @@
 		gap: 10px;
 	}
 	.favorite-btn {
-		color: var(--reader-fg, var(--color-text));
+		color: var(--color-text);
 	}
 	.favorite-btn.favorited {
 		color: var(--color-accent);
 	}
 	.read-btn {
-		color: var(--reader-fg, var(--color-text));
+		color: var(--color-text);
 	}
 	.read-btn.read {
 		color: var(--color-accent);
@@ -366,13 +399,13 @@
 		margin-bottom: 28px;
 		border-radius: var(--radius-lg);
 		overflow: hidden;
-		background: color-mix(in srgb, var(--reader-fg, var(--color-text)) 6%, transparent);
-		border: 1px solid var(--reader-divider, var(--color-divider));
+		background: color-mix(in srgb, var(--color-text) 6%, transparent);
+		border: 1px solid var(--color-divider);
 	}
 	.reader-meta {
 		font-size: 13px;
 		margin-bottom: 10px;
-		color: var(--reader-muted, var(--color-muted));
+		color: var(--color-muted);
 	}
 	.reader-tags {
 		margin: 0 0 28px;

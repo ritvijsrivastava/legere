@@ -9,7 +9,6 @@ const DEFAULT_SETTINGS: Settings = {
 	reader_measure: 'default',
 	reader_leading: 'default',
 	app_theme: 'dark',
-	reader_theme: 'light',
 	import_concurrency: 5
 };
 
