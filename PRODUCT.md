@@ -49,8 +49,8 @@ in-app — "view original" is a plain external link, opened in the system
 browser, with tracking params already cleaned off it. No server, no
 account, no cloud sync: every device keeps its own local library. (An
 earlier design captured a full-page ZIM/"Original" viewer per article;
-that was cut for the MVP — see PLAN.md's addendum — and is out of scope
-unless revisited later.)
+that was cut for the MVP — see ARCHITECTURE.md's historical decisions —
+and is out of scope unless revisited later.)
 
 ## Operating Context
 

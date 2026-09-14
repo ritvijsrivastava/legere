@@ -9,10 +9,6 @@ Releases are cut by pushing a `v*` tag. `.github/workflows/release.yml` then:
 
 The release stays a draft until every artifact has built successfully, so a broken Android build never leaves a public, half-finished release.
 
-## `wraith` sibling checkout
-
-`src-tauri/Cargo.toml` depends on `wraith-assets`/`wraith-sanitize`/`wraith-urlx`/`wraith-zim` via local `path = "../../wraith/crates/*"` dependencies (see the `TODO` comment above them — this is pending a switch to a pinned git dependency once non-interactive SSH auth to that repo is available). Because of that, every job that runs `cargo build`/`cargo check` checks out **both** `ritvijsrivastava/legere` (at `legere/`) and `ritvijsrivastava/wraith` (at `wraith/`) as siblings under the runner's workspace, so `legere/src-tauri/../../wraith/crates/*` resolves. The `wraith` checkout needs a **`WRAITH_PAT`** repo secret — a fine-grained PAT (or deploy key) with read-only access to `ritvijsrivastava/wraith` — which does not exist yet and must be created before this workflow can run.
-
 ## Desktop updater signing
 
 `src-tauri/tauri.conf.json` has `bundle.createUpdaterArtifacts: true` and a `plugins.updater.pubkey`. **The checked-in pubkey is a placeholder** (`REPLACE_ME_RUN_NPM_RUN_TAURI_SIGNER_GENERATE`) — generate a real keypair with:
@@ -67,7 +63,6 @@ None of these exist yet; the workflows will fail without them:
 
 | Secret | Used for |
 | --- | --- |
-| `WRAITH_PAT` | checking out the sibling `wraith` repo so `cargo build` can resolve its path dependencies |
 | `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | signing desktop updater artifacts (from `npm run tauri signer generate`) |
 | `ANDROID_KEY_ALIAS` / `ANDROID_KEY_PASSWORD` / `ANDROID_KEY_BASE64` | signing the release APK |
 

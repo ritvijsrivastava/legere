@@ -12,10 +12,9 @@ content here.
 - Before building/testing, see **README.md** for desktop/Android dev
   commands and prerequisites (Android SDK/NDK, JDK 17/21, `jq`).
 - Before touching capture/schema/event internals or planning a larger
-  change, see **PLAN.md** — it documents the architecture, locked
-  design decisions, and phase history; treat superseded sections
-  (marked as historical, e.g. the removed ZIM/"Original" archive
-  viewer) as context, not a spec to re-implement.
+  change, see **ARCHITECTURE.md** — it documents the architecture,
+  locked design decisions, and the history behind superseded ones
+  (e.g. the removed ZIM/"Original" archive viewer).
 - Before making product-scope or UX-copy decisions, see **PRODUCT.md**
   (positioning, principles, capabilities/constraints) and
   **DESIGN.md** (colors, typography, components, do's/don'ts) — new UI
@@ -28,8 +27,9 @@ content here.
   considering a change done: `cargo test`, `cargo clippy`, and
   `svelte-check`.
 - After any change, update all related docs and `.md` files
-  (README.md, PLAN.md, PRODUCT.md, DESIGN.md, docs/RELEASING.md, this
-  file) so they stay accurate — don't leave documentation stale.
+  (README.md, ARCHITECTURE.md, PRODUCT.md, DESIGN.md,
+  docs/RELEASING.md, this file) so they stay accurate — don't leave
+  documentation stale.
 
 ## Git commit messages
 

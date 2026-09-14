@@ -16,22 +16,9 @@ jobs:
       contents: write
     runs-on: ubuntu-22.04
     steps:
-      # legere/src-tauri depends on the wraith-* crates via a local path
-      # dependency (see src-tauri/Cargo.toml) rather than a registry/git
-      # dependency, so wraith has to be checked out as a sibling directory
-      # for `legere/src-tauri/../../wraith/crates/*` to resolve. Requires a
-      # WRAITH_PAT repo secret (a fine-grained PAT, or deploy key, with
-      # read-only access to ritvijsrivastava/wraith) — this workflow cannot
-      # build without it.
       - uses: actions/checkout@v7
         with:
           path: legere
-
-      - uses: actions/checkout@v7
-        with:
-          repository: ritvijsrivastava/wraith
-          path: wraith
-          token: ${{ secrets.WRAITH_PAT }}
 
       - name: Install Linux dependencies
         run: |
@@ -144,12 +131,6 @@ jobs:
       - uses: actions/checkout@v7
         with:
           path: legere
-
-      - uses: actions/checkout@v7
-        with:
-          repository: ritvijsrivastava/wraith
-          path: wraith
-          token: ${{ secrets.WRAITH_PAT }}
 
       - name: Setup Node
         uses: actions/setup-node@v7
