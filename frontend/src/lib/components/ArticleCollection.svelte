@@ -447,7 +447,7 @@
 						onclick={() => onopen(article.id)}
 						ondelete={() => handleDelete(article)}
 						onmove={() => handleMoveToCategory(article)}
-						onMountRoot={i === 0 ? bindFirstItem : undefined}
+						onMountRoot={startIndex + i === 0 ? bindFirstItem : undefined}
 					/>
 				{/each}
 				{#if endRow < totalRows}
@@ -469,7 +469,7 @@
 						onclick={() => onopen(article.id)}
 						ondelete={() => handleDelete(article)}
 						onmove={() => handleMoveToCategory(article)}
-						onMountRoot={i === 0 ? bindFirstItem : undefined}
+						onMountRoot={startIndex + i === 0 ? bindFirstItem : undefined}
 					/>
 				{/each}
 				{#if endRow < totalRows}
