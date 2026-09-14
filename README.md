@@ -122,3 +122,7 @@ access, no external services required).
 Legere is a personal project, developed in the open. It works today on Linux
 desktop and Android; macOS/Windows targets are configured but less exercised.
 There is no sync, no accounts, and no telemetry — by design.
+
+## License
+
+[MIT](LICENSE)
