@@ -41,6 +41,36 @@ const FOREGROUND_SYNC_MIN_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // On Linux desktop, every WebKitGTK text input is routed through
+    // whatever IBus engine the desktop has configured, and Fedora's
+    // default `ibus-typing-booster` has a long-documented bug: its
+    // predictive-completion lookups against digit/punctuation input
+    // (rather than actual dictionary words) are pathologically slow,
+    // freezing the *whole* GTK event loop — including totally
+    // unrelated keystrokes like Backspace — for several seconds (this
+    // is what made the library search box hang when searching numbers
+    // or `*`; it's an IBus/typing-booster bug, not application code, and
+    // reproduces the same way in any other GTK app's text field). Since
+    // this must be set before GTK initializes its input-method factory
+    // (i.e. before any window/webview is created), it has to happen
+    // here at the very top of `run()`, not from the frontend. Scoped to
+    // this process only — the user's other GTK apps keep using IBus
+    // exactly as configured — and skipped if they've deliberately set
+    // `GTK_IM_MODULE` themselves (e.g. because they actually need a CJK
+    // input method here): `gtk-im-context-simple` is GTK's own built-in
+    // context, which still supports dead-key/compose-sequence
+    // composition for European languages, just without IBus's
+    // predictive layer.
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("GTK_IM_MODULE").is_none() {
+        // SAFETY: called at the very start of `run()`, before Tauri/GTK
+        // spin up any other thread, so nothing else can be racing this
+        // process's environment yet.
+        unsafe {
+            std::env::set_var("GTK_IM_MODULE", "gtk-im-context-simple");
+        }
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();

@@ -94,6 +94,57 @@ which lists existing categories as one-click suggestions alongside a
 "name a new or existing category" field that creates-and-moves in one
 step.
 
+## Addendum — input freeze on `*`/digits, root-caused to a garbled title
+
+Typing `*` (or digits) into the library search box could freeze the whole
+window for several seconds, with even unrelated keystrokes like Backspace
+not registering until it cleared. Two platform-level theories were tried
+first and kept as real, worthwhile hardening even though **neither was
+the actual cause**: Android's `TextClassifier` (every WebView `<input>`
+is backed by a real `EditText`, which by default runs on-device
+phone/address entity detection on each edit — disabled in
+`gen/android/.../MainActivity.kt` via `webView.textClassifier =
+TextClassifier.NO_OP`), and a suspected IBus/`ibus-typing-booster`
+predictive-completion slowdown on Linux desktop (worked around in
+`run()`, `src-tauri/src/lib.rs`, by setting
+`GTK_IM_MODULE=gtk-im-context-simple` before Tauri/GTK initialize, unless
+the user already set that themselves). Both were ruled out by direct
+evidence — a `sqlite3` timing check against the real database showed the
+search query itself was never slow, and no `ibus` daemon was even running
+in the live session — so the freeze had to be reproduced live: the app
+was relaunched under `perf record`/`strace -f` attached to the real
+process while reproducing the input by hand.
+
+Before that trace was even needed, the user found it by hand: one
+article's title was binary garbage, and removing that article made the
+lag disappear entirely. The actual mechanism: `capture::fetch::fetch_page`
+reads a response body via `reqwest::Response::text()`, which does a
+*lossy* charset-aware decode that never fails — a misconfigured or
+actually-binary response (wrong `Content-Type`, a compression/charset
+mismatch, etc.) still decodes "successfully" into a `String` that's valid
+UTF-8 by Rust's own type guarantee, just full of `\u{FFFD}` replacement
+characters. If that garbage happened to land in whatever `extract::extract`
+pulled out as the title, it got stored as the article's title verbatim —
+and a title that's mostly high-entropy replacement/control-character
+noise is exactly the shape of input (like dense combining marks or an
+unbreakable multi-KB "word") known to make text shaping/line-breaking
+degrade badly in browser engines, hanging the whole renderer once it's
+displayed *or matched against a search query* (both card/list titles and
+the search box's own value get compared against it on every keystroke).
+
+Fixed at the single choke point both extraction paths
+(`from_article`/`naive_fallback`) go through in
+`src-tauri/src/capture/extract.rs`: `sanitize_title` rejects a title
+outright (falls back to "Untitled") if it contains *any* `\u{FFFD}` —
+proof the source was never proper UTF-8 to begin with — folds stray
+control characters into spaces as a second line of defense, and caps the
+result to 300 chars (`MAX_TITLE_CHARS`) so no title, garbled or not, can
+ever again be pathologically large. The two platform-level mitigations
+above stay in place as unrelated, still-legitimate hardening; the search
+input's `spellcheck="false" autocomplete="off" autocorrect="off"
+autocapitalize="off"` attributes likewise stay as cheap, harmless-
+everywhere defaults, without having been the fix either.
+
 ## Context
 
 Legere (`~/Code/legere`, Tauri 2 + SvelteKit/Svelte 5) is an existing MVP scaffold (~1k lines Rust, ~2.1k frontend, 2 commits) for an offline article reader. The user wants RSS/Atom + direct-URL ingestion where each article stores three things: (1) extracted readable HTML, (2) a self-contained single-page **.zim** archive (reusing the sibling `~/Code/wraith` crates, consumed as path deps), and (3) the original link with tracking params stripped. Reading experience anchored on **Matter**. Exploration found the scaffold sound but with structural gaps: the ZIM is write-only and not self-contained (raw HTML, zero assets), extracted articles reference remote images (offline reading is broken), `wraith-urlx` is imported but never called (and wraith has **no** tracking-param stripping anywhere — new work), there is no event system (library never refreshes after autosync), errored sources are unrecoverable, and archive/media files leak forever.

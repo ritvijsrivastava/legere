@@ -1,6 +1,8 @@
 package com.ritvijsrivastava.legere
 
 import android.os.Bundle
+import android.view.textclassifier.TextClassifier
+import android.webkit.WebView
 import androidx.activity.enableEdgeToEdge
 
 class MainActivity : TauriActivity() {
@@ -15,5 +17,21 @@ class MainActivity : TauriActivity() {
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
     initTls()
+  }
+
+  // Every <input>/<textarea> in the WebView is backed by a real Android
+  // EditText, which by default runs the system TextClassifier (on-device
+  // entity detection for phone numbers/addresses/etc., feeding autofill
+  // and "smart" text selection) on each edit. That classifier is known to
+  // be pathologically slow on digit-heavy input and phone-dialing
+  // punctuation ('*', '#') in particular, freezing the whole WebView—
+  // including unrelated keystrokes like Backspace — for seconds at a
+  // time (this is what made the library search box hang when searching
+  // numbers or '*'). Legere has no use for on-device entity detection
+  // anywhere in its UI, so disable it outright rather than trying to
+  // dodge it per-input.
+  override fun onWebViewCreate(webView: WebView) {
+    super.onWebViewCreate(webView)
+    webView.textClassifier = TextClassifier.NO_OP
   }
 }
