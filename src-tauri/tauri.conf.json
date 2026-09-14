@@ -44,7 +44,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "REPLACE_ME_RUN_NPM_RUN_TAURI_SIGNER_GENERATE",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDU2NDBEMjUzNTFFNzgxRjcKUldUM2dlZFJVOUpBVmdWRG1leXc2VmVXcFNvUkxhd3NyMkIxTU1sVkIwL1ZWZVBKQlZrbG9TcXcK",
       "endpoints": [
         "https://github.com/ritvijsrivastava/legere/releases/latest/download/latest.json"
       ]

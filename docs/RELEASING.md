@@ -11,13 +11,24 @@ The release stays a draft until every artifact has built successfully, so a brok
 
 ## Desktop updater signing
 
-`src-tauri/tauri.conf.json` has `bundle.createUpdaterArtifacts: true` and a `plugins.updater.pubkey`. **The checked-in pubkey is a placeholder** (`REPLACE_ME_RUN_NPM_RUN_TAURI_SIGNER_GENERATE`) — generate a real keypair with:
+`src-tauri/tauri.conf.json` has `bundle.createUpdaterArtifacts: true` and a real `plugins.updater.pubkey` (generated via `npm run tauri signer generate`, which is safe to commit — it's the *public* half). The matching private key:
+
+- is a minisign keypair kept **outside the repo**, on the maintainer's machine (by convention at `~/.tauri-keys/<project>/<project>.key`, mirroring the Android keystore convention below) — never commit it, never regenerate it casually (regenerating invalidates updates for everyone on the old key, since clients pin the pubkey baked into their own binary), and back it up somewhere durable.
+- is fed to CI as the raw file contents of `<project>.key` in the `TAURI_SIGNING_PRIVATE_KEY` secret, plus its password in `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
+
+Once *any* pubkey is configured (real or placeholder), the bundler hard-errors on **every** `tauri build` (including local, non-release builds) unless those same two values are set in the environment — this is expected, not a bug. Locally, export them (e.g. from a password manager, not a shell history entry) before running a desktop build:
 
 ```sh
-npm run tauri signer generate
+export TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.tauri-keys/legere/legere.key)"
+export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="..."
 ```
 
-then replace the placeholder with the printed public key. Once *any* pubkey is configured, the bundler hard-errors on **every** `tauri build` (including local, non-release builds) unless `TAURI_SIGNING_PRIVATE_KEY` (and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, if the key is password-protected) is set in the environment — this is expected, not a bug, but it means local desktop builds break the moment the real pubkey lands until those env vars are exported locally too. CI reads the same two values from repo secrets.
+### Setting up updater signing on a new machine (or for the first time)
+
+1. Get the existing `<project>.key` onto the machine from its durable backup — **do not run `tauri signer generate` again**; a new key can't verify updates signed under the old pubkey that's already baked into shipped clients.
+2. Export the two env vars above before running any local `tauri build`.
+
+Generating the keypair for the first time is the one case where you *do* run `npm run tauri signer generate` (e.g. with `-w ~/.tauri-keys/<project>/<project>.key -p <password>`), then copy the printed public key into `plugins.updater.pubkey` in `tauri.conf.json` and commit that.
 
 Keep `appimage` out of `tauri.conf.json`'s `bundle.targets` — it needs FUSE, which most local dev sandboxes lack. It's added at build time via the workflow's `--bundles deb,rpm,appimage` instead; only CI (which has FUSE) builds it.
 
@@ -39,8 +50,8 @@ A separate `warm-release-cache.yml` workflow rebuilds on every push to `main` (w
 
 Play Store requires every update to a given `applicationId` (`com.ritvijsrivastava.legere`) to be signed with the *same* key forever — even though this workflow's APK targets GitHub-release/sideload distribution today, not the Play Store, so getting the signing key right from the first release avoids having to migrate users off an unsigned/differently-signed build later. That signing key:
 
-- is a `.jks` keystore kept **outside the repo**, on the maintainer's machine — never commit it, never regenerate it casually, and back it up somewhere durable.
-- is referenced by `src-tauri/gen/android/keystore.properties`, which is **gitignored** — it holds the keystore path, alias, and password locally and is never committed.
+- is a `.jks` keystore kept **outside the repo**, on the maintainer's machine (by convention at `~/.android-keystores/<project>/upload-keystore.jks`, alongside other projects' keys — never in the repo checkout) — never commit it, never regenerate it casually, and back it up somewhere durable (a password manager entry or encrypted off-machine backup, not just the local disk).
+- is referenced by `src-tauri/gen/android/keystore.properties`, which is **gitignored** — it holds the keystore path, alias, and password locally and is never committed. This file has to be recreated by hand on any new machine (see below); it isn't derived from anything in the repo.
 - is fed to CI via three repo secrets, base64-encoding the `.jks` file itself:
 
   | Secret | Contents |
@@ -57,13 +68,25 @@ Tauri normally treats `gen/android` as disposable scaffolding you'd regenerate w
 
 If `gen/android` is ever deleted and recreated via `tauri android init`, this signing config will be silently lost. Recovering it means re-adding the `signingConfigs` block (see the Tauri guide above) and re-pointing a local `keystore.properties` at the **existing** keystore file — do not generate a new one.
 
+### Setting up signing on a new machine (or for the first time)
+
+`keystore.properties` is gitignored, so a fresh checkout has no signing config and local release builds will produce an unsigned APK until it's recreated:
+
+1. Get the existing `upload-keystore.jks` onto the machine (from its durable backup — **do not run `keytool -genkeypair` again**; a new keystore can never sign updates for the same `applicationId`).
+2. Write `src-tauri/gen/android/keystore.properties`:
+   ```properties
+   keyAlias=upload
+   password=<the keystore/key password>
+   storeFile=/absolute/path/to/upload-keystore.jks
+   ```
+
+CI needs no local setup — it reconstructs the same file from the `ANDROID_KEY_*` repo secrets on every run (see above).
+
 ## Required secrets checklist
 
-None of these exist yet; the workflows will fail without them:
-
-| Secret | Used for |
-| --- | --- |
-| `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | signing desktop updater artifacts (from `npm run tauri signer generate`) |
-| `ANDROID_KEY_ALIAS` / `ANDROID_KEY_PASSWORD` / `ANDROID_KEY_BASE64` | signing the release APK |
+| Secret | Used for | Status |
+| --- | --- | --- |
+| `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | signing desktop updater artifacts (from `npm run tauri signer generate`) | set — key generated at `~/.tauri-keys/legere/legere.key`, never committed; matching pubkey is in `tauri.conf.json` |
+| `ANDROID_KEY_ALIAS` / `ANDROID_KEY_PASSWORD` / `ANDROID_KEY_BASE64` | signing the release APK | set — keystore generated at `~/.android-keystores/legere/upload-keystore.jks` (alias `upload`), never committed |
 
 AppImage bundling requires FUSE, which most local dev sandboxes don't have — only the CI runner builds it locally-equivalent; if you need to test an AppImage build locally, do it on a machine with FUSE available rather than in a sandboxed environment.
