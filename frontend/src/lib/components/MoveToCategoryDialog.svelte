@@ -4,7 +4,7 @@
 	import type { Category } from '$lib/types';
 
 	let categories = $state<Category[]>([]);
-	let newName = $state('');
+	let search = $state('');
 	let creating = $state(false);
 	let moving = $state<string | null>(null);
 	let error = $state<string | null>(null);
@@ -13,9 +13,29 @@
 	let article = $derived(uiStore.moveCategoryArticle);
 	let open = $derived(article !== null);
 
+	// Uncategorized is a virtual row, not a real `Category` — folded into
+	// one filterable/scrollable list instead of a separate always-shown
+	// pill so the list stays one shape no matter how many real categories
+	// exist (see below: this is the whole point of this component).
+	let allRows = $derived([{ id: null, name: 'Uncategorized' }, ...categories]);
+
+	// One filter box instead of a search input plus a pill wall: typing
+	// narrows a scrollable list (bounded height, so 5 categories or 500
+	// look the same), and an exact case-insensitive match is never
+	// ambiguous with "create new" below it.
+	let filtered = $derived(
+		search.trim()
+			? allRows.filter((c) => c.name.toLowerCase().includes(search.trim().toLowerCase()))
+			: allRows
+	);
+	let exactMatch = $derived(
+		filtered.some((c) => c.name.toLowerCase() === search.trim().toLowerCase())
+	);
+	let showCreateRow = $derived(search.trim().length > 0 && !exactMatch);
+
 	$effect(() => {
 		if (!article) return;
-		newName = '';
+		search = '';
 		error = null;
 		api
 			.getCategories()
@@ -50,7 +70,7 @@
 	 *  obviously what "create" a duplicate-named category means here, and
 	 *  it saves a trip through the list below. */
 	async function createAndMove() {
-		const name = newName.trim();
+		const name = search.trim();
 		if (!article || !name) return;
 		creating = true;
 		error = null;
@@ -92,56 +112,49 @@
 			<div class="dialog-body move-article-title">{article.title}</div>
 
 			<div class="field">
-				<label for="move-new-category">New category</label>
-				<div class="new-category-row">
-					<input
-						id="move-new-category"
-						class="input"
-						list="move-category-suggestions"
-						placeholder="Name a new or existing category"
-						autocomplete="off"
-						bind:this={inputEl}
-						bind:value={newName}
-						onkeydown={(e) => {
-							if (e.key === 'Enter' && !creating && newName.trim()) createAndMove();
-						}}
-					/>
-					<datalist id="move-category-suggestions">
-						{#each categories as category (category.id)}
-							<option value={category.name}></option>
-						{/each}
-					</datalist>
-					<button
-						class="btn btn-secondary"
-						onclick={createAndMove}
-						disabled={creating || !newName.trim()}
-					>
-						{creating ? 'Moving…' : 'Create & move'}
-					</button>
-				</div>
+				<label for="move-search">Category</label>
+				<input
+					id="move-search"
+					class="input"
+					placeholder="Search or create a category"
+					autocomplete="off"
+					bind:this={inputEl}
+					bind:value={search}
+					onkeydown={(e) => {
+						if (e.key !== 'Enter' || creating || moving) return;
+						if (showCreateRow) createAndMove();
+						else if (filtered.length > 0) moveTo(filtered[0].id);
+					}}
+				/>
 			</div>
 
-			<div class="field">
-				<span class="suggestions-label">Or move into an existing category</span>
-				<div class="category-suggestions">
-					<button
-						class="category-option"
-						disabled={moving !== null}
-						onclick={() => moveTo(null)}
-					>
-						{moving === '__uncategorized__' ? 'Moving…' : 'Uncategorized'}
-					</button>
-					{#each categories as category (category.id)}
+			<ul class="category-list">
+				{#if showCreateRow}
+					<li>
+						<button class="category-row create-row" disabled={creating} onclick={createAndMove}>
+							<span>Create “{search.trim()}”</span>
+							<span class="category-row-action">{creating ? 'Creating…' : 'Create & move'}</span>
+						</button>
+					</li>
+				{/if}
+				{#each filtered as category (category.id ?? '__uncategorized__')}
+					<li>
 						<button
-							class="category-option"
+							class="category-row"
 							disabled={moving !== null}
 							onclick={() => moveTo(category.id)}
 						>
-							{moving === category.id ? 'Moving…' : category.name}
+							<span>{category.name}</span>
+							{#if moving === (category.id ?? '__uncategorized__')}
+								<span class="category-row-action">Moving…</span>
+							{/if}
 						</button>
-					{/each}
-				</div>
-			</div>
+					</li>
+				{/each}
+				{#if filtered.length === 0 && !showCreateRow}
+					<li class="category-empty">No categories yet.</li>
+				{/if}
+			</ul>
 
 			{#if error}<div class="dialog-body dialog-body-error">{error}</div>{/if}
 			<div class="dialog-actions">
@@ -161,40 +174,59 @@
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
-	.new-category-row {
+	.category-list {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		max-height: 240px;
+		overflow-y: auto;
+		border: 1px solid var(--color-divider);
+		border-radius: var(--radius-md);
+	}
+	.category-row {
 		display: flex;
+		align-items: center;
+		justify-content: space-between;
 		gap: 8px;
+		width: 100%;
+		padding: 9px 12px;
+		border: none;
+		border-bottom: 1px solid var(--color-divider);
+		background: none;
+		color: var(--color-text);
+		font-size: 13.5px;
+		font-family: var(--font-body);
+		text-align: left;
+		cursor: pointer;
+		overflow: hidden;
 	}
-	.new-category-row .input {
+	.category-row span:first-child {
 		min-width: 0;
-		flex: 1;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
-	.suggestions-label {
+	.category-list li:last-child .category-row {
+		border-bottom: none;
+	}
+	.category-row:hover:not(:disabled) {
+		background: color-mix(in srgb, var(--color-text) 6%, transparent);
+	}
+	.category-row:disabled {
+		cursor: not-allowed;
+		opacity: 0.6;
+	}
+	.category-row-action {
+		flex: none;
+		font-size: 12px;
+		color: var(--color-muted);
+	}
+	.create-row span:first-child {
+		font-weight: 600;
+	}
+	.category-empty {
+		padding: 12px;
 		font-size: 13px;
 		color: var(--color-muted);
-		display: block;
-		margin-bottom: 6px;
-	}
-	.category-suggestions {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 6px;
-	}
-	.category-option {
-		font-size: 12.5px;
-		padding: 7px 13px;
-		border-radius: 999px;
-		background: var(--color-surface);
-		color: var(--color-text);
-		border: none;
-		cursor: pointer;
-		font-family: var(--font-body);
-	}
-	.category-option:hover:not(:disabled) {
-		background: color-mix(in srgb, var(--color-text) 10%, var(--color-surface));
-	}
-	.category-option:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
 	}
 </style>
