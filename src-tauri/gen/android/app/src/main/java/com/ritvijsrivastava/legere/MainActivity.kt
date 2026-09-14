@@ -32,6 +32,6 @@ class MainActivity : TauriActivity() {
   // dodge it per-input.
   override fun onWebViewCreate(webView: WebView) {
     super.onWebViewCreate(webView)
-    webView.textClassifier = TextClassifier.NO_OP
+    webView.setTextClassifier(TextClassifier.NO_OP)
   }
 }
