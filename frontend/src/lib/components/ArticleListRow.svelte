@@ -7,16 +7,19 @@
 	import HeroImage from './HeroImage.svelte';
 	import Star from '$lib/icons/Star.svelte';
 	import Trash from '$lib/icons/Trash.svelte';
+	import FolderMove from '$lib/icons/FolderMove.svelte';
 
 	let {
 		article,
 		onclick,
 		ondelete,
+		onmove,
 		onMountRoot
 	}: {
 		article: ArticleSummary;
 		onclick: () => void;
 		ondelete: () => void;
+		onmove: () => void;
 		/** Called once this row's root element exists — `ArticleCollection`
 		 *  uses it (only on the window's first rendered row) to measure a
 		 *  real row height for its virtualized list. */
@@ -74,6 +77,9 @@
 	>
 		<Star size={15} filled={article.favorited} />
 	</button>
+	<button class="move-btn" onclick={onmove} aria-label="Move to category">
+		<FolderMove size={14} />
+	</button>
 	<button class="delete-btn" onclick={ondelete} aria-label="Delete article">
 		<Trash size={14} />
 	</button>
@@ -89,7 +95,8 @@
 	.row-wrapper:hover {
 		background: var(--color-surface);
 	}
-	.row-wrapper:not(:hover):not(:focus-within) .delete-btn {
+	.row-wrapper:not(:hover):not(:focus-within) .delete-btn,
+	.row-wrapper:not(:hover):not(:focus-within) .move-btn {
 		opacity: 0;
 	}
 	.article-row {
@@ -108,6 +115,7 @@
 		min-width: 0;
 	}
 	.fav-btn,
+	.move-btn,
 	.delete-btn {
 		flex: none;
 		display: flex;
@@ -126,6 +134,7 @@
 		color: var(--color-accent);
 	}
 	.fav-btn:hover,
+	.move-btn:hover,
 	.delete-btn:hover {
 		background: color-mix(in srgb, var(--color-text) 8%, transparent);
 	}

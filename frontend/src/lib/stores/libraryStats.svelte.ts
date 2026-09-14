@@ -34,11 +34,16 @@ class LibraryStatsStore {
 		this.totalCount = totalCount;
 		this.unreadCount = unreadCount;
 		this.favoritedCount = favoritedCount;
+		// Uncategorized is always first, ahead of the real (alphabetically
+		// sorted, see `fetch_categories`) categories — it's the default
+		// destination, not just another folder, and should stay easy to find
+		// even at 0 articles as long as there's at least one real category
+		// to move something into it from.
 		this.categories =
-			uncategorizedCount > 0
+			categories.length > 0 || uncategorizedCount > 0
 				? [
-					...categories,
-					{ id: '__uncategorized__', name: 'Uncategorized', article_count: uncategorizedCount }
+					{ id: '__uncategorized__', name: 'Uncategorized', article_count: uncategorizedCount },
+					...categories
 				]
 				: categories;
 		this.tags = tags;

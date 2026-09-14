@@ -1,16 +1,19 @@
 <script lang="ts">
 	import MoreVertical from '$lib/icons/MoreVertical.svelte';
 	import ExternalLink from '$lib/icons/ExternalLink.svelte';
+	import FolderMove from '$lib/icons/FolderMove.svelte';
 
 	let {
 		recapturing,
 		link,
 		onRecapture,
+		onMoveCategory,
 		onDelete
 	}: {
 		recapturing: boolean;
 		link: string;
 		onRecapture: () => void;
+		onMoveCategory: () => void;
 		onDelete: () => void;
 	} = $props();
 
@@ -63,6 +66,17 @@
 				}}
 			>
 				{recapturing ? 'Re-capturing…' : 'Re-capture'}
+			</button>
+			<button
+				class="overflow-item"
+				role="menuitem"
+				onclick={() => {
+					open = false;
+					onMoveCategory();
+				}}
+			>
+				<FolderMove size={14} />
+				Move to category
 			</button>
 			<button
 				class="overflow-item danger"

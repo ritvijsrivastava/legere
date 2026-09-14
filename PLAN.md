@@ -39,14 +39,36 @@ table (migration V9), with nullable `articles.category_id`. They are
 separate from `source_name`, which remains provenance such as `Direct
 link`, `Raindrop import`, or an RSS feed title. Categories can be empty;
 deleting one preserves its articles and moves them to Uncategorized.
+Category names are unique case-insensitively (`idx_categories_name`);
+creating a duplicate name is rejected by the backend, and the one caller
+that can hit this on a normal path (`MoveToCategoryDialog`'s "create a
+new category") quietly reuses the existing category instead of erroring.
 
 Raindrop CSV imports preview folder names and row counts before capture.
 The user explicitly maps every folder to an existing/new category or
 Uncategorized. Duplicate links show existing category names once per
 folder and support keeping the current category or moving all duplicates
 to the selected category. Re-imports merge newly available tags without
-recapturing duplicate links. Direct-link captures use the same explicit
-category choice and never default to a `Direct link` category.
+recapturing duplicate links.
+
+Direct-link captures ("Add a source") no longer prompt for a category —
+a new article has no `category_id` by construction, so it's simply
+Uncategorized until moved. Category management lives outside Settings
+entirely: the sidebar lists Uncategorized first (always, whenever any
+category is visible, even at 0 articles) followed by real categories
+alphabetically (`LibraryStatsStore`), each linking to a dedicated
+`/category/[id]` page (`ArticleCollection` scoped via
+`libraryFiltersStore.categoryId`) whose header carries a settings button
+(hidden for the virtual Uncategorized id) opening `CategorySettingsDialog`
+for rename/delete. Deleting asks a plain `confirm()` (articles fall back
+to Uncategorized via `ON DELETE SET NULL`, same as before) rather than a
+typed confirmation — unlike "delete all articles", this is low-stakes and
+non-destructive to content. Moving an article to a category is available
+from its card/row (hover action) and the reader's overflow menu, all
+opening the one globally-mounted `MoveToCategoryDialog` (`uiStore`),
+which lists existing categories as one-click suggestions alongside a
+"name a new or existing category" field that creates-and-moves in one
+step.
 
 ## Context
 

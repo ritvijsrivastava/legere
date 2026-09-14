@@ -12,6 +12,7 @@
 	import ListIcon from '$lib/icons/ListIcon.svelte';
 	import Refresh from '$lib/icons/Refresh.svelte';
 	import type { ArticleSummary, LibraryView } from '$lib/types';
+	import type { Snippet } from 'svelte';
 
 	let {
 		title,
@@ -19,7 +20,9 @@
 		favoritedOnly = false,
 		emptyMessage,
 		showRefresh = false,
-		onopen
+		hideCategoryChips = false,
+		onopen,
+		headerActions
 	}: {
 		title: string;
 		subtitle?: string;
@@ -28,7 +31,15 @@
 		favoritedOnly?: boolean;
 		emptyMessage: string;
 		showRefresh?: boolean;
+		/** Hides the mobile category-chip row — used by the dedicated
+		 *  `/category/[id]` page, where switching category via a chip would
+		 *  silently desync the page's title/settings button from what's
+		 *  actually being shown. */
+		hideCategoryChips?: boolean;
 		onopen: (id: string) => void;
+		/** Extra controls rendered at the end of the header row, e.g. the
+		 *  category page's settings button. */
+		headerActions?: Snippet;
 	} = $props();
 
 	let search = $state('');
@@ -139,6 +150,21 @@
 		if (!confirm(`Delete "${article.title}"? This can't be undone.`)) return;
 		await api.deleteArticle(article.id);
 		loadedItems = loadedItems.filter((a) => a.id !== article.id);
+	}
+
+	// Opens the shared `MoveToCategoryDialog` (mounted once in the root
+	// layout). When this view is scoped to a single category (either the
+	// dedicated category page or a sidebar/chip filter), a successful move
+	// necessarily takes the article out of that scope, so it's dropped from
+	// `loadedItems` immediately rather than waiting for the next
+	// `changeVersion` merge (which only ever adds rows, never removes
+	// stale ones — see `mergeInFreshFirstPage` above).
+	function handleMoveToCategory(article: ArticleSummary) {
+		uiStore.openMoveCategory({ id: article.id, title: article.title }, () => {
+			if (libraryFiltersStore.categoryId !== null) {
+				loadedItems = loadedItems.filter((a) => a.id !== article.id);
+			}
+		});
 	}
 
 	// Re-query from the top whenever a filter (or the favorited-only scope
@@ -341,6 +367,7 @@
 				<Search />
 				<input type="text" placeholder="Search" bind:value={search} />
 			</div>
+			{#if headerActions}{@render headerActions()}{/if}
 			{#if showRefresh}
 				<button
 					class="btn btn-icon btn-secondary"
@@ -374,7 +401,7 @@
 		</div>
 	</div>
 
-	{#if libraryStatsStore.categories.length > 0}
+	{#if !hideCategoryChips && libraryStatsStore.categories.length > 0}
 		<div class="mobile-chips">
 			<button
 				class="chip"
@@ -419,6 +446,7 @@
 						{article}
 						onclick={() => onopen(article.id)}
 						ondelete={() => handleDelete(article)}
+						onmove={() => handleMoveToCategory(article)}
 						onMountRoot={i === 0 ? bindFirstItem : undefined}
 					/>
 				{/each}
@@ -440,6 +468,7 @@
 						{article}
 						onclick={() => onopen(article.id)}
 						ondelete={() => handleDelete(article)}
+						onmove={() => handleMoveToCategory(article)}
 						onMountRoot={i === 0 ? bindFirstItem : undefined}
 					/>
 				{/each}

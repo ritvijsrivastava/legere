@@ -72,6 +72,10 @@
 		return href === '/' ? page.url.pathname === '/' : page.url.pathname.startsWith(href);
 	}
 
+	function isActiveCategory(id: string): boolean {
+		return page.url.pathname === `/category/${id}`;
+	}
+
 	function toggleTheme() {
 		const next = settingsStore.current.app_theme === 'dark' ? 'light' : 'dark';
 		settingsStore.update({ app_theme: next });
@@ -104,15 +108,15 @@
 		<div class="divider"></div>
 		<div class="section-label">Categories</div>
 		{#each categories as category (category.id)}
-			<button
+			<a
+				href="/category/{category.id}"
 				class="row-item"
-				class:active={libraryFiltersStore.categoryId === category.id}
-				onclick={() => libraryFiltersStore.toggleCategory(category.id)}
+				class:active={isActiveCategory(category.id)}
 			>
 				<span class="dot" style:background={sourceDotColor(category.name)}></span>
 				<span class="row-label">{category.name}</span>
 				<span class="nav-count">{category.article_count}</span>
-			</button>
+			</a>
 		{/each}
 	{/if}
 

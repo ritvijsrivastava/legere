@@ -5,6 +5,7 @@
 	import AddSourceDialog from '$lib/components/AddSourceDialog.svelte';
 	import ImportRaindropDialog from '$lib/components/ImportRaindropDialog.svelte';
 	import DeleteAllArticlesDialog from '$lib/components/DeleteAllArticlesDialog.svelte';
+	import MoveToCategoryDialog from '$lib/components/MoveToCategoryDialog.svelte';
 	import Toast from '$lib/components/Toast.svelte';
 	import { libraryStatsStore } from '$lib/stores/libraryStats.svelte';
 	import { settingsStore } from '$lib/stores/settings.svelte';
@@ -33,4 +34,5 @@
 <AddSourceDialog />
 <ImportRaindropDialog />
 <DeleteAllArticlesDialog />
+<MoveToCategoryDialog />
 <Toast />

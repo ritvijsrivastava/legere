@@ -9,6 +9,7 @@
 	import ReaderControls from '$lib/components/ReaderControls.svelte';
 	import TagEditor from '$lib/components/TagEditor.svelte';
 	import ArticleOverflowMenu from '$lib/components/ArticleOverflowMenu.svelte';
+	import { uiStore } from '$lib/stores/ui.svelte';
 	import ChevronLeft from '$lib/icons/ChevronLeft.svelte';
 	import Star from '$lib/icons/Star.svelte';
 	import Check from '$lib/icons/Check.svelte';
@@ -32,9 +33,21 @@
 	const BACK_LABELS: Record<string, string> = { '/': 'Library', '/favorites': 'Favorites' };
 	let backHref = $derived.by(() => {
 		const from = page.url.searchParams.get('from');
-		return from && from in BACK_LABELS ? from : '/';
+		if (from && (from in BACK_LABELS || from.startsWith('/category/'))) return from;
+		return '/';
 	});
-	let backLabel = $derived(BACK_LABELS[backHref]);
+	// `/category/<id>` isn't in the static map — its label is the
+	// category's live name, looked up from the sidebar's aggregate list
+	// (already fetched for the whole app; see `libraryStatsStore`).
+	let backLabel = $derived.by(() => {
+		if (backHref in BACK_LABELS) return BACK_LABELS[backHref];
+		if (backHref.startsWith('/category/')) {
+			const id = backHref.slice('/category/'.length);
+			const category = libraryStatsStore.categories.find((c) => c.id === id);
+			return category?.name ?? 'Category';
+		}
+		return 'Library';
+	});
 
 	let article = $state<ArticleDetail | null>(null);
 	let scrollProgress = $state(0);
@@ -166,6 +179,11 @@
 		}
 	}
 
+	function moveToCategory() {
+		if (!article) return;
+		uiStore.openMoveCategory({ id: article.id, title: article.title });
+	}
+
 	async function deleteArticle() {
 		if (!article) return;
 		if (!confirm(`Delete "${article.title}"? This can't be undone.`)) return;
@@ -228,6 +246,7 @@
 					{recapturing}
 					link={article.link}
 					onRecapture={recapture}
+					onMoveCategory={moveToCategory}
 					onDelete={deleteArticle}
 				/>
 			</div>

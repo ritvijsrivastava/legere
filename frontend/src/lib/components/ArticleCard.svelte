@@ -7,16 +7,19 @@
 	import HeroImage from './HeroImage.svelte';
 	import Star from '$lib/icons/Star.svelte';
 	import Trash from '$lib/icons/Trash.svelte';
+	import FolderMove from '$lib/icons/FolderMove.svelte';
 
 	let {
 		article,
 		onclick,
 		ondelete,
+		onmove,
 		onMountRoot
 	}: {
 		article: ArticleSummary;
 		onclick: () => void;
 		ondelete: () => void;
+		onmove: () => void;
 		/** Called once this card's root element exists — `ArticleCollection`
 		 *  uses it (only on the window's first rendered card) to measure a
 		 *  real row height for its virtualized grid. */
@@ -90,16 +93,21 @@
 			</div>
 		</div>
 	</div>
-	<button class="delete-btn" onclick={ondelete} aria-label="Delete article">
-		<Trash size={13} />
-	</button>
+	<div class="card-actions">
+		<button class="card-action-btn" onclick={onmove} aria-label="Move to category">
+			<FolderMove size={13} />
+		</button>
+		<button class="card-action-btn danger" onclick={ondelete} aria-label="Delete article">
+			<Trash size={13} />
+		</button>
+	</div>
 </div>
 
 <style>
 	.card-wrapper {
 		position: relative;
 	}
-	.card-wrapper:not(:hover):not(:focus-within) .delete-btn {
+	.card-wrapper:not(:hover):not(:focus-within) .card-actions {
 		opacity: 0;
 	}
 	.article-card {
@@ -126,11 +134,16 @@
 	.article-card:active {
 		transform: translateY(-1px);
 	}
-	.delete-btn {
+	.card-actions {
 		position: absolute;
 		top: 8px;
 		right: 8px;
 		z-index: 2;
+		display: flex;
+		gap: 4px;
+		transition: opacity 0.1s;
+	}
+	.card-action-btn {
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -141,10 +154,11 @@
 		background: color-mix(in srgb, black 55%, transparent);
 		color: #fff;
 		cursor: pointer;
-		transition: opacity 0.1s;
 	}
-	.delete-btn:hover {
+	.card-action-btn:hover {
 		background: color-mix(in srgb, black 70%, transparent);
+	}
+	.card-action-btn.danger:hover {
 		color: var(--color-danger);
 	}
 	.hero {

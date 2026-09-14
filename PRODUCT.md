@@ -79,13 +79,23 @@ unless revisited later.)
 - Library: card view and list view, search-by-title, filter by
   user-managed folder/category and by tag, unread/favorite counts, delete with
   confirm, "Favorites" as its own view.
+- Categories: flat, user-managed folders, managed from the sidebar/library
+  (not Settings). Uncategorized is always first, then the rest
+  alphabetically. Clicking one opens its own page (title + article list +
+  a settings button for rename/delete, delete asks a plain confirm and
+  moves its articles back to Uncategorized). Any article can be moved to a
+  category from its card/row or the reader's overflow menu, via a dialog
+  that lists existing categories as one-click suggestions and can
+  create-and-move into a new one in the same step. A fresh direct-link
+  capture starts Uncategorized with no prompt.
 - **Highlights is a stub today** — the nav item and route exist, the
   reader shows "Tap a marked passage to highlight it and add a note,"
   but no highlighting/annotation feature is implemented yet. Treat it as
   a real near-term surface, not decoration to hide, but don't invent
   interaction details for it beyond what's asked.
 - Settings: reading defaults, library default view, autosync on/off,
-  source and folder/category management, in-app update check/install, about.
+  source management (not folder/category management — that lives in the
+  sidebar/library, see above), in-app update check/install, about.
 - Constraint: fully offline-capable by design — no remote fonts/icons,
   vendored fonts only (`@fontsource*`), a real (non-null) CSP, SSRF-
   guarded fetches. Any new visual asset (fonts, icons, the app icon)
