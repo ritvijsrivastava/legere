@@ -13,6 +13,7 @@
 	import { openExternalUrl, shareArticleLink } from '$lib/articleActions';
 	import ChevronLeft from '$lib/icons/ChevronLeft.svelte';
 	import ExternalLink from '$lib/icons/ExternalLink.svelte';
+	import FolderMove from '$lib/icons/FolderMove.svelte';
 	import Share from '$lib/icons/Share.svelte';
 	import Star from '$lib/icons/Star.svelte';
 	import { formatCompactRelativeTime, formatReadTime } from '$lib/format';
@@ -279,13 +280,15 @@
 				>
 					<Star filled={article.favorited} />
 				</button>
-				<ArticleOverflowMenu
-					{recapturing}
-					onOpenOriginal={() => void openOriginal()}
-					onRecapture={recapture}
-					onMoveCategory={moveToCategory}
-					onDelete={deleteArticle}
-				/>
+				<button
+					class="btn btn-icon btn-secondary move-btn"
+					onclick={moveToCategory}
+					aria-label="Move to category"
+					title="Move to category"
+				>
+					<FolderMove size={16} />
+				</button>
+				<ArticleOverflowMenu {recapturing} onRecapture={recapture} onDelete={deleteArticle} />
 			</div>
 		{/if}
 	</div>
@@ -405,11 +408,13 @@
 		gap: 10px;
 	}
 	.share-btn,
-	.favorite-btn {
+	.favorite-btn,
+	.move-btn {
 		color: var(--color-text);
 	}
 	.share-btn:hover:not(:disabled),
-	.favorite-btn:hover:not(:disabled) {
+	.favorite-btn:hover:not(:disabled),
+	.move-btn:hover:not(:disabled) {
 		color: var(--color-accent);
 	}
 	.favorite-btn {

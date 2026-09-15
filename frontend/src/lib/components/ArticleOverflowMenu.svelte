@@ -1,19 +1,15 @@
 <script lang="ts">
 	import MoreVertical from '$lib/icons/MoreVertical.svelte';
-	import ExternalLink from '$lib/icons/ExternalLink.svelte';
-	import FolderMove from '$lib/icons/FolderMove.svelte';
+	import Refresh from '$lib/icons/Refresh.svelte';
+	import Trash from '$lib/icons/Trash.svelte';
 
 	let {
 		recapturing,
-		onOpenOriginal,
 		onRecapture,
-		onMoveCategory,
 		onDelete
 	}: {
 		recapturing: boolean;
-		onOpenOriginal: () => void;
 		onRecapture: () => void;
-		onMoveCategory: () => void;
 		onDelete: () => void;
 	} = $props();
 
@@ -48,35 +44,14 @@
 			<button
 				class="overflow-item"
 				role="menuitem"
-				onclick={() => {
-					open = false;
-					onOpenOriginal();
-				}}
-			>
-				<ExternalLink />
-				View original
-			</button>
-			<button
-				class="overflow-item"
-				role="menuitem"
 				disabled={recapturing}
 				onclick={() => {
 					open = false;
 					onRecapture();
 				}}
 			>
+				<Refresh size={14} spinning={recapturing} />
 				{recapturing ? 'Re-capturing…' : 'Re-capture'}
-			</button>
-			<button
-				class="overflow-item"
-				role="menuitem"
-				onclick={() => {
-					open = false;
-					onMoveCategory();
-				}}
-			>
-				<FolderMove size={14} />
-				Move to category
 			</button>
 			<button
 				class="overflow-item danger"
@@ -86,6 +61,7 @@
 					onDelete();
 				}}
 			>
+				<Trash size={14} />
 				Delete article
 			</button>
 		</div>
@@ -103,7 +79,7 @@
 		z-index: 5;
 		display: flex;
 		flex-direction: column;
-		width: 180px;
+		width: 172px;
 		padding: var(--space-2);
 		border-radius: var(--radius-lg);
 		background: var(--color-surface);
