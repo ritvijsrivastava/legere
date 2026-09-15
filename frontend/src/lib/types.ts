@@ -128,6 +128,14 @@ export interface ArticlePage {
 	next_cursor: [string, string] | null;
 }
 
+/** Scopes `list_tags_filtered` to the sidebar's own active filters —
+ *  deliberately narrower than `ArticlePageRequest`, since the tag facet
+ *  is never scoped by the page-local search box or Favorites' `favorited_only`. */
+export interface TagFacetRequest {
+	category_id: string | null;
+	tags: string[];
+}
+
 /** `[name, count]` pairs, used for the tag aggregate endpoint. */
 export type NamedCount = [string, number];
 

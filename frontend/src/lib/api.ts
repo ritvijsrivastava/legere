@@ -12,7 +12,8 @@ import type {
 	Settings,
 	Source,
 	SourceType,
-	SyncResult
+	SyncResult,
+	TagFacetRequest
 } from './types';
 
 export { open as pickCsvFile, save as saveCsvFile } from '@tauri-apps/plugin-dialog';
@@ -46,6 +47,26 @@ export function countUncategorized(): Promise<number> {
 
 export function listTags(): Promise<NamedCount[]> {
 	return invoke<NamedCount[]>('list_tags');
+}
+
+/** Same shape as `listTags`, but narrowed to tags that co-occur with
+ *  `request`'s already-selected category/tags — the sidebar's own facet
+ *  narrowing, not the `/tags` management page (which always wants the
+ *  unfiltered `listTags`). */
+export function listTagsFiltered(request: TagFacetRequest): Promise<NamedCount[]> {
+	return invoke<NamedCount[]>('list_tags_filtered', { request });
+}
+
+/** Renames a tag everywhere it's used. Merges into `next` (de-duped) on
+ *  any article that already carries both. */
+export function renameTag(old: string, next: string): Promise<void> {
+	return invoke<void>('rename_tag', { old, new: next });
+}
+
+/** Removes a tag from every article that carries it. Articles themselves
+ *  are never deleted. */
+export function deleteTag(tag: string): Promise<void> {
+	return invoke<void>('delete_tag', { tag });
 }
 
 /** Real, user-managed categories stored in the `categories` table. */

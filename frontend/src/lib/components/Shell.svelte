@@ -5,6 +5,9 @@
 	import Star from '$lib/icons/Star.svelte';
 	import SettingsIcon from '$lib/icons/Settings.svelte';
 	import Plus from '$lib/icons/Plus.svelte';
+	import Search from '$lib/icons/Search.svelte';
+	import X from '$lib/icons/X.svelte';
+	import ChevronRight from '$lib/icons/ChevronRight.svelte';
 	import { libraryStatsStore } from '$lib/stores/libraryStats.svelte';
 	import { uiStore } from '$lib/stores/ui.svelte';
 	import { libraryFiltersStore } from '$lib/stores/libraryFilters.svelte';
@@ -13,6 +16,8 @@
 	import { isTauri } from '$lib/platform';
 	import { checkForUpdate, getLastDismissedVersion, setLastDismissedVersion } from '$lib/update';
 	import UpdateToast from '$lib/components/UpdateToast.svelte';
+	import * as api from '$lib/api';
+	import type { NamedCount } from '$lib/types';
 
 	let { children } = $props();
 
@@ -81,6 +86,47 @@
 	// exists once articles are paginated (see `ArticleCollection`).
 	let categories = $derived(libraryStatsStore.categories);
 	let tags = $derived(libraryStatsStore.tags);
+
+	// Tags section: collapsible (state survives navigation — this
+	// component never remounts between routes), with its own name search
+	// and a facet-narrowed list. Selecting a tag pins it above the list
+	// (removable via its ✕) and re-scopes the rest of the list to only
+	// tags that actually co-occur with the current selection—computed
+	// server-side by `list_tags_filtered` using the exact same filters as
+	// the article list itself (see `ARCHITECTURE.md`).
+	let tagsOpen = $state(true);
+	let tagSearch = $state('');
+	let facetTags = $state<NamedCount[]>([]);
+
+	$effect(() => {
+		const categoryId = libraryFiltersStore.categoryId;
+		const selected = libraryFiltersStore.tags;
+		// Re-run on any tag/article mutation too (capture, edit, rename,
+		// delete), not just when the sidebar's own filters change.
+		void libraryStatsStore.changeVersion;
+		let cancelled = false;
+		api
+			.listTagsFiltered({ category_id: categoryId, tags: selected })
+			.then((result) => {
+				if (!cancelled) facetTags = result;
+			})
+			.catch(() => {
+				// Best-effort UI narrowing — leave the previous list showing
+				// rather than surface an error toast for a background refresh.
+			});
+		return () => {
+			cancelled = true;
+		};
+	});
+
+	// Already-selected tags are pinned separately above; the browsing list
+	// below excludes them and applies the name search.
+	let visibleTags = $derived(
+		facetTags.filter(
+			([tag]) =>
+				!libraryFiltersStore.tags.includes(tag) && tag.includes(tagSearch.trim().toLowerCase())
+		)
+	);
 </script>
 
 {#snippet sidebarNav()}
@@ -114,18 +160,56 @@
 
 	{#if tags.length > 0}
 		<div class="divider"></div>
-		<div class="section-label">Tags</div>
-		<div class="tag-chips">
-			{#each tags as [tag] (tag)}
-				<button
-					class="tag-chip"
-					class:active={libraryFiltersStore.tags.includes(tag)}
-					onclick={() => libraryFiltersStore.toggleTag(tag)}
-				>
-					#{tag}
-				</button>
-			{/each}
-		</div>
+		<button
+			class="section-header"
+			onclick={() => (tagsOpen = !tagsOpen)}
+			aria-expanded={tagsOpen}
+		>
+			<span class="section-label">Tags</span>
+			<span class="chevron" class:open={tagsOpen}><ChevronRight size={13} /></span>
+		</button>
+		{#if tagsOpen}
+			<div class="tag-search">
+				<Search size={13} />
+				<input
+					type="text"
+					placeholder="Search tags..."
+					bind:value={tagSearch}
+					spellcheck="false"
+					autocomplete="off"
+					autocorrect="off"
+					autocapitalize="off"
+				/>
+			</div>
+			{#if libraryFiltersStore.tags.length > 0}
+				<div class="tag-list tag-list-selected">
+					{#each libraryFiltersStore.tags as tag (tag)}
+						<div class="tag-row tag-row-selected">
+							<span class="row-label">#{tag}</span>
+							<button
+								class="tag-remove"
+								aria-label={`Remove ${tag} filter`}
+								onclick={() => libraryFiltersStore.toggleTag(tag)}
+							>
+								<X size={11} />
+							</button>
+						</div>
+					{/each}
+				</div>
+			{/if}
+			<div class="tag-list">
+				{#each visibleTags as [tag, count] (tag)}
+					<button class="tag-row" onclick={() => libraryFiltersStore.toggleTag(tag)}>
+						<span class="row-label">#{tag}</span>
+						<span class="nav-count">{count}</span>
+					</button>
+				{/each}
+				{#if visibleTags.length === 0 && libraryFiltersStore.tags.length === 0}
+					<div class="tag-empty">No tags match</div>
+				{/if}
+			</div>
+			<a href="/tags" class="manage-tags-link">Manage Tags</a>
+		{/if}
 	{/if}
 {/snippet}
 
@@ -313,25 +397,120 @@
 		margin: 2px 0 8px 10px;
 	}
 
-	.tag-chips {
+	.section-header {
 		display: flex;
-		flex-wrap: wrap;
-		gap: 6px;
-		padding: 0 6px;
-	}
-	.tag-chip {
-		font-size: 11px;
-		padding: 5px 11px;
-		border-radius: 999px;
-		background: var(--color-surface);
-		color: var(--color-muted);
+		align-items: center;
+		justify-content: space-between;
+		width: 100%;
+		background: none;
 		border: none;
 		cursor: pointer;
-		font-family: var(--font-body);
+		padding: 0 4px 0 10px;
+		margin: 2px 0 8px 0;
 	}
-	.tag-chip.active {
-		background: var(--color-accent);
-		color: var(--color-accent-fg);
+	.section-header .section-label {
+		margin: 0;
+	}
+	.chevron {
+		display: flex;
+		color: var(--color-muted);
+		transition: transform var(--duration-fast) var(--ease-snap);
+	}
+	.chevron.open {
+		transform: rotate(90deg);
+	}
+	.tag-search {
+		display: flex;
+		align-items: center;
+		gap: 7px;
+		background: var(--color-surface);
+		border-radius: 10px;
+		padding: 7px 10px;
+		margin: 0 6px 10px;
+		color: var(--color-muted);
+	}
+	.tag-search input {
+		border: none;
+		background: transparent;
+		outline: none;
+		font: inherit;
+		font-size: 12.5px;
+		width: 100%;
+		color: var(--color-text);
+	}
+	.tag-list {
+		display: flex;
+		flex-direction: column;
+		gap: 1px;
+		max-height: 220px;
+		overflow-y: auto;
+	}
+	.tag-list-selected {
+		max-height: none;
+		overflow: visible;
+		margin-bottom: 4px;
+	}
+	.tag-row {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		width: 100%;
+		background: transparent;
+		border: none;
+		border-radius: 8px;
+		padding: 6px 10px;
+		cursor: pointer;
+		font-family: var(--font-body);
+		font-size: 12.5px;
+		color: var(--color-text);
+		text-align: left;
+	}
+	.tag-row:hover {
+		background: var(--color-surface);
+	}
+	.tag-row-selected {
+		background: color-mix(in srgb, var(--color-accent) 14%, var(--color-surface));
+		color: var(--color-accent);
+		cursor: default;
+		font-weight: 600;
+	}
+	.tag-row .row-label {
+		flex: 1;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.tag-remove {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: none;
+		border: none;
+		color: inherit;
+		cursor: pointer;
+		padding: 3px;
+		border-radius: 6px;
+		flex: none;
+	}
+	.tag-remove:hover {
+		background: color-mix(in srgb, var(--color-accent) 20%, transparent);
+	}
+	.tag-empty {
+		padding: 8px 10px;
+		font-size: 12px;
+		color: var(--color-muted);
+	}
+	.manage-tags-link {
+		display: block;
+		margin: 10px 6px 0;
+		font-size: 11.5px;
+		color: var(--color-muted);
+		text-decoration: none;
+		padding: 4px;
+	}
+	.manage-tags-link:hover {
+		color: var(--color-accent);
+		text-decoration: underline;
 	}
 
 	.sidebar-spacer {
