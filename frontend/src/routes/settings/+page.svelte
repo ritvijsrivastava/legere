@@ -180,33 +180,30 @@
 <div class="settings-page">
 	<h1>Settings</h1>
 
-	<section>
-		<h4>Appearance</h4>
+	<!-- Reading & library -->
+	<section class="settings-card">
+		<h3>Appearance</h3>
 		<p class="text-muted section-desc">
-			Applies everywhere, immediately. Override it for one article from its Aa menu while
-			reading — that doesn't change this.
+			Applies everywhere, immediately. Override any of it for one article from its Aa menu
+			while reading — that doesn't change this default.
 		</p>
-		<div class="seg">
-			{#each appThemeOptions as opt (opt.value)}
-				<label class="seg-opt">
-					<input
-						type="radio"
-						name="app-theme"
-						checked={settingsStore.current.app_theme === opt.value}
-						onchange={() => setAppTheme(opt.value)}
-					/>
-					<span>{opt.label}</span>
-				</label>
-			{/each}
+		<div class="row">
+			<span class="row-label">Theme</span>
+			<div class="seg">
+				{#each appThemeOptions as opt (opt.value)}
+					<label class="seg-opt">
+						<input
+							type="radio"
+							name="app-theme"
+							checked={settingsStore.current.app_theme === opt.value}
+							onchange={() => setAppTheme(opt.value)}
+						/>
+						<span>{opt.label}</span>
+					</label>
+				{/each}
+			</div>
 		</div>
-	</section>
-
-	<section>
-		<h4>Reading defaults</h4>
-		<p class="text-muted section-desc">
-			Default text settings for articles you open. Override them for one article from its Aa
-			menu while reading — that doesn't change this.
-		</p>
+		<div class="card-divider"></div>
 		<div class="row">
 			<span class="row-label">Text width</span>
 			<div class="seg">
@@ -234,7 +231,7 @@
 				>
 					–
 				</button>
-				<span class="stepper-value">{settingsStore.current.reader_font_size}</span>
+				<span class="stepper-value tabular-nums">{settingsStore.current.reader_font_size}</span>
 				<button
 					class="btn btn-icon btn-secondary"
 					onclick={() => setReaderFontSize(1)}
@@ -247,8 +244,8 @@
 		</div>
 	</section>
 
-	<section>
-		<h4>Library</h4>
+	<section class="settings-card">
+		<h3>Library</h3>
 		<p class="text-muted section-desc">Default view for the library.</p>
 		<div class="seg">
 			<label class="seg-opt">
@@ -272,8 +269,9 @@
 		</div>
 	</section>
 
-	<section>
-		<h4>Sources</h4>
+	<!-- Content: sources, import, sync -->
+	<section class="settings-card zone-start">
+		<h3>Sources</h3>
 		<a href="/sources" class="sources-link">
 			<span>Manage sources</span>
 			<span class="sources-count text-muted">{sourcesStore.items.length}</span>
@@ -281,8 +279,8 @@
 		</a>
 	</section>
 
-	<section>
-		<h4>Import</h4>
+	<section class="settings-card">
+		<h3>Import</h3>
 		{#if !tauri}
 			<p class="text-muted section-desc">
 				Not available in the web build — install the desktop or Android app to import bookmarks.
@@ -303,7 +301,7 @@
 					>
 						–
 					</button>
-					<span class="stepper-value">{settingsStore.current.import_concurrency}</span>
+					<span class="stepper-value tabular-nums">{settingsStore.current.import_concurrency}</span>
 					<button
 						class="btn btn-icon btn-secondary"
 						onclick={() => setImportConcurrency(1)}
@@ -358,8 +356,8 @@
 		{/if}
 	</section>
 
-	<section>
-		<h4>Sync</h4>
+	<section class="settings-card">
+		<h3>Sync</h3>
 		<p class="text-muted section-desc">
 			Automatically fetch new articles from all sources while Legere is open.
 		</p>
@@ -385,8 +383,9 @@
 		</div>
 	</section>
 
-	<section>
-		<h4>Updates</h4>
+	<!-- App -->
+	<section class="settings-card zone-start">
+		<h3>Updates</h3>
 		{#if !tauri}
 			<p class="text-muted section-desc">
 				Not available in the web build — install the desktop or Android app to get in-app updates.
@@ -472,6 +471,7 @@
 				</p>
 			{/if}
 
+			<div class="card-divider"></div>
 			<div class="row">
 				<span class="row-label">What's new</span>
 			</div>
@@ -497,8 +497,8 @@
 		{/if}
 	</section>
 
-	<section>
-		<h4 class="danger-heading">Danger zone</h4>
+	<section class="settings-card danger-card">
+		<h3 class="danger-heading">Danger zone</h3>
 		<p class="text-muted section-desc">
 			Permanently delete every saved article and its files. Sources are kept, but everything
 			captured from them is gone — this cannot be undone.
@@ -508,26 +508,54 @@
 		</button>
 	</section>
 
-	<section>
-		<h4>About</h4>
+	<div class="settings-footer">
 		<p class="text-muted version">Legere — offline article reader.</p>
-	</section>
+	</div>
 </div>
 
 <style>
 	.settings-page {
-		max-width: 600px;
-		padding: 36px 36px 56px;
+		/* Matches the reader's own "default" measure — reusing an existing
+		   comfortable-width token instead of inventing a new one. Centered
+		   (rather than left-pinned) so the column reads as a deliberate,
+		   contained page on genuinely wide windows instead of a narrow
+		   strip stranded against a huge void of empty background. */
+		max-width: 680px;
+		margin-inline: auto;
+		padding: 48px 36px 56px;
 	}
 	.settings-page h1 {
 		font-size: 24px;
-		margin: 0 0 24px;
+		margin: 0 0 28px;
 	}
-	section {
-		margin-bottom: 26px;
+	.settings-card {
+		margin-top: 18px;
+		padding: 24px 26px 26px;
+		border-radius: var(--radius-lg);
+		background: var(--color-surface);
+		box-shadow: var(--shadow-sm);
 	}
-	section h4 {
+	.settings-card:first-of-type {
+		margin-top: 0;
+	}
+	.settings-card.zone-start {
+		margin-top: 40px;
+	}
+	.settings-card.danger-card {
+		margin-top: 56px;
+		box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-danger) 32%, transparent);
+	}
+	.settings-card h3 {
 		margin: 0 0 4px;
+	}
+	.settings-card > .row:first-of-type,
+	.settings-card > .seg:first-of-type {
+		margin-top: 2px;
+	}
+	.card-divider {
+		height: 1px;
+		margin: 12px 0;
+		background: var(--color-divider);
 	}
 	.danger-heading {
 		color: var(--color-danger);
@@ -588,25 +616,30 @@
 		min-width: 22px;
 		text-align: center;
 		font-size: 12px;
-		font-variant-numeric: tabular-nums;
 	}
 	.sources-link {
 		display: flex;
 		align-items: center;
 		gap: 8px;
 		padding: 10px 12px;
-		margin: 0 -12px;
+		margin: 2px -12px -2px;
 		border-radius: var(--radius-md);
 		text-decoration: none;
 		color: var(--color-text);
 		font-size: 14px;
+		transition: background var(--duration-base) var(--ease-snap);
 	}
 	.sources-link:hover {
-		background: var(--color-surface);
+		background: color-mix(in srgb, var(--color-text) 6%, transparent);
 	}
 	.sources-count {
 		margin-left: auto;
 		font-size: 12px;
+	}
+	.settings-footer {
+		margin-top: 32px;
+		padding-top: 20px;
+		border-top: 1px solid var(--color-divider);
 	}
 	.version {
 		font-size: 12px;
@@ -700,6 +733,15 @@
 	@media (max-width: 768px) {
 		.settings-page {
 			padding: 20px 16px 32px;
+		}
+		.settings-card {
+			padding: 18px 16px 20px;
+		}
+		.settings-card.zone-start {
+			margin-top: 28px;
+		}
+		.settings-card.danger-card {
+			margin-top: 40px;
 		}
 	}
 </style>
