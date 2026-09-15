@@ -295,7 +295,9 @@ go out unauthenticated.
 
 - **Svelte 5 runes** (`$props`, `$state`, `$effect`, `$derived`) throughout;
   stores are `.svelte.ts` modules.
-- **Routes** — `/` (library), `/favorites`, `/category/[id]`,
+- **Routes** — `/` (library), `/favorites`, `/category/[id]`, `/tags`
+  (rename/delete every tag in the library, unlike the sidebar's own
+  filtered/narrowed Tags section — see Storage and schema above),
   `/reader/[id]`, `/sources`, `/settings`. Global dialogs (add source,
   Raindrop import, delete-all, move-to-category) are mounted once in the
   root layout and driven by `uiStore`.

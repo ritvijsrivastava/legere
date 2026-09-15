@@ -98,6 +98,14 @@ and is out of scope unless revisited later.)
   that lists existing categories as one-click suggestions and can
   create-and-move into a new one in the same step. A fresh direct-link
   capture starts Uncategorized with no prompt.
+- Tags: the sidebar's Tags section (desktop only, like Categories) is
+  collapsible, has its own name search, and narrows itself — selecting a
+  tag pins it above the list (removable) and the rest of the list shrinks
+  to only tags that actually co-occur with the current selection, rather
+  than staying the whole library's tag set. A "Manage Tags" link opens
+  `/tags`, a dedicated page listing every tag with its article count and
+  inline rename/delete (delete only untags affected articles, never
+  deletes them; renaming onto an existing tag merges the two).
 - **Highlights is a stub today** — the nav item and route exist, the
   reader shows "Tap a marked passage to highlight it and add a note,"
   but no highlighting/annotation feature is implemented yet. Treat it as
