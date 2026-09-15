@@ -132,8 +132,21 @@
 								if (e.key === 'Enter') saveRename(tag);
 								if (e.key === 'Escape') cancelRename();
 							}}
-							onblur={() => saveRename(tag)}
 						/>
+						<span class="row-actions">
+							<button class="btn btn-secondary" onclick={cancelRename} disabled={saving}>
+								Cancel
+							</button>
+							<button
+								class="btn btn-primary"
+								onclick={() => saveRename(tag)}
+								disabled={saving ||
+									!renameValue.trim() ||
+									renameValue.trim().toLowerCase() === tag}
+							>
+								{saving ? 'Saving…' : 'Save'}
+							</button>
+						</span>
 					{:else}
 						<button class="name" onclick={() => startRename(tag)}>#{tag}</button>
 						<span class="count">{count} article{count === 1 ? '' : 's'}</span>

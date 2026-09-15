@@ -104,6 +104,17 @@
 		// Re-run on any tag/article mutation too (capture, edit, rename,
 		// delete), not just when the sidebar's own filters change.
 		void libraryStatsStore.changeVersion;
+
+		// No active filter: `libraryStatsStore.tags` (already fetched —
+		// it's also what gates this whole section's visibility below) is
+		// exactly what `list_tags_filtered` would return for empty
+		// filters. Reusing it directly means the default view never
+		// depends on a second round trip landing before anything shows.
+		if (!categoryId && selected.length === 0) {
+			facetTags = libraryStatsStore.tags;
+			return;
+		}
+
 		let cancelled = false;
 		api
 			.listTagsFiltered({ category_id: categoryId, tags: selected })
@@ -198,17 +209,20 @@
 				</div>
 			{/if}
 			<div class="tag-list">
-				{#each visibleTags as [tag, count] (tag)}
+				{#each visibleTags.slice(0, 7) as [tag, count] (tag)}
 					<button class="tag-row" onclick={() => libraryFiltersStore.toggleTag(tag)}>
 						<span class="row-label">#{tag}</span>
 						<span class="nav-count">{count}</span>
 					</button>
 				{/each}
-				{#if visibleTags.length === 0 && libraryFiltersStore.tags.length === 0}
+				{#if visibleTags.length === 0}
 					<div class="tag-empty">No tags match</div>
 				{/if}
 			</div>
-			<a href="/tags" class="manage-tags-link">Manage Tags</a>
+			<a href="/tags" class="manage-tags-link">
+				<span>Manage Tags</span>
+				<span class="nav-count">{tags.length}</span>
+			</a>
 		{/if}
 	{/if}
 {/snippet}
@@ -442,8 +456,6 @@
 		display: flex;
 		flex-direction: column;
 		gap: 1px;
-		max-height: 220px;
-		overflow-y: auto;
 	}
 	.tag-list-selected {
 		max-height: none;
@@ -501,16 +513,21 @@
 		color: var(--color-muted);
 	}
 	.manage-tags-link {
-		display: block;
-		margin: 10px 6px 0;
-		font-size: 11.5px;
-		color: var(--color-muted);
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
+		margin: 10px 2px 0;
+		padding: 6px 10px;
+		border-radius: 8px;
+		font-size: 12.5px;
+		font-weight: 500;
+		color: var(--color-text);
 		text-decoration: none;
-		padding: 4px;
 	}
 	.manage-tags-link:hover {
+		background: var(--color-surface);
 		color: var(--color-accent);
-		text-decoration: underline;
 	}
 
 	.sidebar-spacer {
