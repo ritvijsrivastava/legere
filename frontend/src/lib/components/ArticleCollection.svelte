@@ -230,6 +230,16 @@
 	// `loadedItems` immediately rather than waiting for the next
 	// `changeVersion` merge (which only ever adds rows, never removes
 	// stale ones — see `mergeInFreshFirstPage` above).
+	// Mirrors `handleMoveToCategory` below — in the Favorites view, an
+	// unfavorited article no longer belongs in `loadedItems` and won't
+	// self-correct until the next `changeVersion` merge (which only adds
+	// rows, never removes them), so drop it immediately.
+	function handleFavoriteToggled(article: ArticleSummary) {
+		if (favoritedOnly && !article.favorited) {
+			loadedItems = loadedItems.filter((a) => a.id !== article.id);
+		}
+	}
+
 	function handleMoveToCategory(article: ArticleSummary) {
 		uiStore.openMoveCategory({ id: article.id, title: article.title }, () => {
 			if (libraryFiltersStore.categoryId !== null) {
@@ -531,6 +541,7 @@
 						onclick={() => onopen(article.id)}
 						ondelete={() => handleDelete(article)}
 						onmove={() => handleMoveToCategory(article)}
+						onfavorite={() => handleFavoriteToggled(article)}
 						onMountRoot={startIndex + i === 0 ? bindFirstItem : undefined}
 					/>
 				{/each}
@@ -553,6 +564,7 @@
 						onclick={() => onopen(article.id)}
 						ondelete={() => handleDelete(article)}
 						onmove={() => handleMoveToCategory(article)}
+						onfavorite={() => handleFavoriteToggled(article)}
 						onMountRoot={startIndex + i === 0 ? bindFirstItem : undefined}
 					/>
 				{/each}

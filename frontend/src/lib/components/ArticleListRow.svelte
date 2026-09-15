@@ -14,12 +14,14 @@
 		onclick,
 		ondelete,
 		onmove,
+		onfavorite,
 		onMountRoot
 	}: {
 		article: ArticleSummary;
 		onclick: () => void;
 		ondelete: () => void;
 		onmove: () => void;
+		onfavorite?: () => void;
 		/** Called once this row's root element exists — `ArticleCollection`
 		 *  uses it (only on the window's first rendered row) to measure a
 		 *  real row height for its virtualized list. */
@@ -33,11 +35,14 @@
 
 	async function toggleFavorite(e: MouseEvent) {
 		e.stopPropagation();
+		// Blur immediately — see the matching comment in `ArticleCard`.
+		(e.currentTarget as HTMLElement).blur();
 		// Mutating `article` directly (rather than going through a shared
 		// store) works because it's the same reactive object the caller's
 		// paginated `loadedItems` array holds — see `ArticleCollection`.
 		article.favorited = await api.toggleFavorite(article.id);
 		libraryStatsStore.refresh();
+		onfavorite?.();
 	}
 </script>
 

@@ -14,12 +14,14 @@
 		onclick,
 		ondelete,
 		onmove,
+		onfavorite,
 		onMountRoot
 	}: {
 		article: ArticleSummary;
 		onclick: () => void;
 		ondelete: () => void;
 		onmove: () => void;
+		onfavorite?: () => void;
 		/** Called once this card's root element exists — `ArticleCollection`
 		 *  uses it (only on the window's first rendered card) to measure a
 		 *  real row height for its virtualized grid. */
@@ -33,11 +35,18 @@
 
 	async function toggleFavorite(e: MouseEvent) {
 		e.stopPropagation();
+		// Blur immediately — otherwise the button keeps focus after the
+		// click, which keeps `.card-wrapper:focus-within` true and the
+		// hover-only `.card-actions` pinned visible until focus moves to
+		// another card or a blank area, reading as the card staying
+		// "selected".
+		(e.currentTarget as HTMLElement).blur();
 		// Mutating `article` directly (rather than going through a shared
 		// store) works because it's the same reactive object the caller's
 		// paginated `loadedItems` array holds — see `ArticleCollection`.
 		article.favorited = await api.toggleFavorite(article.id);
 		libraryStatsStore.refresh();
+		onfavorite?.();
 	}
 </script>
 
