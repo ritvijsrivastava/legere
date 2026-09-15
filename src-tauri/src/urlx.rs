@@ -95,6 +95,22 @@ fn is_tracking_param(name: &str) -> bool {
     name.starts_with("utm_") || EXACT_TRACKING_PARAMS.contains(&name)
 }
 
+/// Prepends `https://` to `input` when it has no scheme, so the "Add a
+/// source" field accepts a bare domain/path (`example.com/feed`) the same
+/// way a browser address bar does, instead of failing the fetch with an
+/// "invalid URL" error. Detection is just "does it contain `://`" rather
+/// than a strict scheme parse: good enough to leave `http://`, `https://`,
+/// or anything else the user explicitly typed untouched, while still
+/// catching the common bare-domain/bare-path case.
+pub fn normalize_source_url(input: &str) -> String {
+    let trimmed = input.trim();
+    if trimmed.contains("://") {
+        trimmed.to_string()
+    } else {
+        format!("https://{trimmed}")
+    }
+}
+
 /// Strips known tracking query parameters from `url`, returning a new
 /// [`Url`] with the rest kept in their original relative order. This is a
 /// display/storage-time cleanup for the article's saved link — never apply
@@ -289,6 +305,26 @@ fn disambiguate_last_segment(segments: &mut [String], source_url: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn normalize_adds_https_scheme_when_missing() {
+        assert_eq!(
+            normalize_source_url("example.com/feed"),
+            "https://example.com/feed"
+        );
+    }
+
+    #[test]
+    fn normalize_leaves_explicit_scheme_alone() {
+        assert_eq!(
+            normalize_source_url("http://example.com/feed"),
+            "http://example.com/feed"
+        );
+        assert_eq!(
+            normalize_source_url("  https://example.com/feed  "),
+            "https://example.com/feed"
+        );
+    }
 
     #[test]
     fn strips_default_https_port() {

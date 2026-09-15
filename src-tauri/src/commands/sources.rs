@@ -7,6 +7,7 @@ use crate::models::{AddSourceAutoResult, Source, SyncResult};
 use crate::sources::rss;
 use crate::state::AppState;
 use crate::sync::sync_all_sources;
+use crate::urlx::normalize_source_url;
 
 #[tauri::command]
 pub async fn list_sources(state: State<'_, AppState>) -> Result<Vec<Source>, AppError> {
@@ -30,7 +31,7 @@ pub async fn add_source(
     value: String,
 ) -> Result<Source, AppError> {
     match source_type.as_str() {
-        "rss" => insert_rss_source_and_sync(&app, &state, value).await,
+        "rss" => insert_rss_source_and_sync(&app, &state, normalize_source_url(&value)).await,
         other => Err(AppError::Internal(format!("unknown source type: {other}"))),
     }
 }
@@ -77,7 +78,7 @@ pub async fn add_source_auto(
     state: State<'_, AppState>,
     value: String,
 ) -> Result<AddSourceAutoResult, AppError> {
-    let value = value.trim().to_string();
+    let value = normalize_source_url(&value);
     let bytes = state
         .http_client
         .get(&value)
