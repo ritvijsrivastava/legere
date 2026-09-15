@@ -515,11 +515,11 @@
 
 <style>
 	.settings-page {
-		/* Matches the reader's own "default" measure — reusing an existing
-		   comfortable-width token instead of inventing a new one. Centered
-		   (rather than left-pinned) so the column reads as a deliberate,
-		   contained page on genuinely wide windows instead of a narrow
-		   strip stranded against a huge void of empty background. */
+		/* Matches the reader's own "default" measure at typical window sizes —
+		   reusing an existing comfortable-width token instead of inventing a
+		   new one. Widened in steps (below) on genuinely wide windows so the
+		   cards don't look stranded as a thin strip in a huge void. Centered
+		   either way. */
 		max-width: 680px;
 		margin-inline: auto;
 		padding: 48px 36px 56px;
@@ -728,6 +728,17 @@
 		padding-top: 10px;
 		border-top: 1px solid var(--color-divider);
 		line-height: 1.5;
+	}
+
+	@media (min-width: 1100px) {
+		.settings-page {
+			max-width: 800px;
+		}
+	}
+	@media (min-width: 1500px) {
+		.settings-page {
+			max-width: 920px;
+		}
 	}
 
 	@media (max-width: 768px) {
