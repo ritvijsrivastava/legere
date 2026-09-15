@@ -213,12 +213,26 @@ clamped user setting). Design points:
   folders, case-insensitively unique names, `ON DELETE SET NULL` so deleting
   a category un-categorizes rather than deletes), `settings` (KV).
 - **Tags** — always lowercase/trimmed/deduped; `db::queries::normalize_tags`
-  is the single choke point every tag-writing path goes through.
+  is the single choke point every tag-writing path goes through. There is no
+  separate tags table — a tag is just a string inside each article's `tags`
+  JSON array, so global rename/delete (`queries::rename_tag`/`delete_tag`,
+  backing the `/tags` management page) scan every article carrying that tag
+  and rewrite its array in place, rather than a single `UPDATE`/`json_each`
+  statement. Renaming onto a name that already exists on a given article
+  merges/de-dupes instead of erroring or duplicating.
 - **Library queries** — keyset-paginated on `(fetched_at, id)` DESC
   (`list_articles_page`) with server-side search/category/tag/favorite
   filters, so the frontend never holds the whole table. Category/tag name
   matching for the search box is client-side against the sidebar's already-
-  fully-fetched stats.
+  fully-fetched stats. `list_articles_page`'s filter predicates
+  (search/category/tags/favorited) live in `queries::article_filter_clause`,
+  shared with `list_tags_filtered` — the sidebar's Tags section narrows to
+  only the tags that actually co-occur on articles matching whatever's
+  already selected (category and/or other tags), computed with the exact
+  same `WHERE` the article list itself would use. `list_tags` (unfiltered,
+  whole-library) stays the one the `/tags` management page reads, since
+  renaming/deleting a tag there should never be scoped by whatever the
+  sidebar currently happens to have selected.
 - **Reading state** — opening the reader transitions `unread`/`read` →
   `reading`; scroll progress is persisted debounced from the reader's scroll
   handler and restored on open. Per-article font/measure/leading/theme

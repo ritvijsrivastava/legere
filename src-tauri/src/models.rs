@@ -98,6 +98,18 @@ pub struct ArticlePageRequest {
     pub favorited_only: bool,
 }
 
+/// Scopes [`crate::db::queries::list_tags_filtered`] to the sidebar's own
+/// active filters (category + already-selected tags) — deliberately a
+/// narrower struct than `ArticlePageRequest` rather than reusing it
+/// wholesale, since the tag facet is never scoped by the page-local
+/// search box or the Favorites view's `favorited_only`, both of which
+/// live outside the sidebar's shared filter state.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TagFacetRequest {
+    pub category_id: Option<String>,
+    pub tags: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArticlePage {
     pub items: Vec<ArticleSummary>,

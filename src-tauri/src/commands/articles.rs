@@ -6,6 +6,7 @@ use crate::error::AppError;
 use crate::events;
 use crate::models::{
     ArticleDetail, ArticlePage, ArticlePageRequest, ArticleSummary, ReadingOverrides,
+    TagFacetRequest,
 };
 use crate::state::AppState;
 
@@ -89,6 +90,81 @@ pub async fn list_tags(state: State<'_, AppState>) -> Result<Vec<(String, i64)>,
         Ok(queries::list_tags(&conn)?)
     })
     .await?
+}
+
+/// Scoped counterpart to [`list_tags`] for the sidebar's tag-facet
+/// narrowing (see `queries::list_tags_filtered`) — always the *full*,
+/// unfiltered list for the `/tags` management page, which needs every
+/// tag in the library to rename/delete regardless of whatever's
+/// currently selected in the sidebar.
+#[tauri::command]
+pub async fn list_tags_filtered(
+    state: State<'_, AppState>,
+    request: TagFacetRequest,
+) -> Result<Vec<(String, i64)>, AppError> {
+    let pool = state.pool.clone();
+    tokio::task::spawn_blocking(move || {
+        let conn = pool.get()?;
+        Ok(queries::list_tags_filtered(
+            &conn,
+            &queries::ArticlePageQuery {
+                cursor: None,
+                limit: 0,
+                search: None,
+                category_id: request.category_id.as_deref(),
+                tags: &request.tags,
+                favorited_only: false,
+            },
+        )?)
+    })
+    .await?
+}
+
+/// Renames a tag everywhere it's used — the `/tags` management page's
+/// rename action. Rejects an empty/whitespace-only name up front rather
+/// than letting it silently no-op through `queries::rename_tag`'s own
+/// empty-name guard, so the caller gets a clear error instead of a
+/// button that appears to do nothing.
+#[tauri::command]
+pub async fn rename_tag(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    old: String,
+    new: String,
+) -> Result<(), AppError> {
+    if new.trim().is_empty() {
+        return Err(AppError::Internal("tag name can't be empty".to_string()));
+    }
+
+    let pool = state.pool.clone();
+    tokio::task::spawn_blocking(move || {
+        let conn = pool.get()?;
+        Ok::<_, AppError>(queries::rename_tag(&conn, &old, &new)?)
+    })
+    .await??;
+
+    events::emit_articles_changed(&app);
+    Ok(())
+}
+
+/// Deletes a tag everywhere it's used — the `/tags` management page's
+/// delete action. Only untags affected articles; nothing about the
+/// articles themselves is deleted.
+#[tauri::command]
+pub async fn delete_tag(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    tag: String,
+) -> Result<(), AppError> {
+    let pool = state.pool.clone();
+    tokio::task::spawn_blocking(move || {
+        let conn = pool.get()?;
+        Ok::<_, AppError>(queries::delete_tag(&conn, &tag)?)
+    })
+    .await??;
+
+    events::emit_articles_changed(&app);
+    Ok(())
 }
 
 #[tauri::command]

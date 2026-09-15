@@ -354,24 +354,14 @@ pub struct ArticlePageResult {
     pub next_cursor: Option<(String, String)>,
 }
 
-/// Keyset-paginated (not `OFFSET`-based, which would mean re-scanning and
-/// discarding an ever-growing prefix as the user pages deeper) article
-/// listing, ordered by `fetched_at DESC, id DESC` — the `id` tiebreak
-/// makes the sort fully deterministic (two rows can share a `fetched_at`,
-/// e.g. backdated Raindrop imports), which keyset pagination depends on
-/// to never skip or repeat a row across pages. Every filter predicate is
-/// applied in SQL so a page reflects the *whole* table, not just whatever
-/// happens to already be loaded client-side.
-///
-/// `has_more` comes from fetching one extra row past `limit`, not from
-/// comparing the returned count to `limit`.
-pub fn list_articles_page(
-    conn: &Connection,
-    query: &ArticlePageQuery,
-) -> rusqlite::Result<ArticlePageResult> {
-    let mut sql = format!(
-        "SELECT {ARTICLE_SUMMARY_COLUMNS}, articles.fetched_at AS fetched_at FROM {ARTICLE_SUMMARY_FROM} WHERE 1 = 1"
-    );
+/// The `search`/`category_id`/`tags`/`favorited_only` half of
+/// [`ArticlePageQuery`], rendered as a standalone `AND ...` fragment (no
+/// leading `WHERE`, no cursor/pagination) plus its bound params in the
+/// same order. Shared by [`list_articles_page`] and [`list_tags_filtered`]
+/// so the sidebar's tag facet always narrows to exactly the same article
+/// set the list itself would show for the same filters.
+fn article_filter_clause(query: &ArticlePageQuery) -> (String, Vec<Box<dyn rusqlite::ToSql>>) {
+    let mut sql = String::new();
     let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
     if query.favorited_only {
@@ -401,6 +391,30 @@ pub fn list_articles_page(
             params.push(Box::new(tag.trim().to_lowercase()));
         }
     }
+    (sql, params)
+}
+
+/// Keyset-paginated (not `OFFSET`-based, which would mean re-scanning and
+/// discarding an ever-growing prefix as the user pages deeper) article
+/// listing, ordered by `fetched_at DESC, id DESC` — the `id` tiebreak
+/// makes the sort fully deterministic (two rows can share a `fetched_at`,
+/// e.g. backdated Raindrop imports), which keyset pagination depends on
+/// to never skip or repeat a row across pages. Every filter predicate is
+/// applied in SQL so a page reflects the *whole* table, not just whatever
+/// happens to already be loaded client-side.
+///
+/// `has_more` comes from fetching one extra row past `limit`, not from
+/// comparing the returned count to `limit`.
+pub fn list_articles_page(
+    conn: &Connection,
+    query: &ArticlePageQuery,
+) -> rusqlite::Result<ArticlePageResult> {
+    let mut sql = format!(
+        "SELECT {ARTICLE_SUMMARY_COLUMNS}, articles.fetched_at AS fetched_at FROM {ARTICLE_SUMMARY_FROM} WHERE 1 = 1"
+    );
+    let (filter_sql, mut params) = article_filter_clause(query);
+    sql.push_str(&filter_sql);
+
     if let Some((fetched_at, id)) = query.cursor {
         sql.push_str(
             " AND (articles.fetched_at < ? OR (articles.fetched_at = ? AND articles.id < ?))",
@@ -470,6 +484,30 @@ pub fn list_tags(conn: &Connection) -> rusqlite::Result<Vec<(String, i64)>> {
          GROUP BY value ORDER BY value COLLATE NOCASE",
     )?;
     let rows = stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+    })?;
+    rows.collect()
+}
+
+/// Same aggregate as [`list_tags`], but scoped by `query`'s filters (via
+/// the same [`article_filter_clause`] `list_articles_page` uses) — powers
+/// the sidebar's tag-facet narrowing: once a tag (and/or category) is
+/// selected, the rest of the tag list shrinks to only tags that actually
+/// co-occur on articles already matching the active filters, instead of
+/// staying the whole library's tag set. `query.cursor`/`query.limit` are
+/// ignored — this never paginates.
+pub fn list_tags_filtered(
+    conn: &Connection,
+    query: &ArticlePageQuery,
+) -> rusqlite::Result<Vec<(String, i64)>> {
+    let (filter_sql, params) = article_filter_clause(query);
+    let sql = format!(
+        "SELECT je.value, COUNT(*) FROM articles, json_each(articles.tags) AS je \
+         WHERE 1 = 1{filter_sql} GROUP BY je.value ORDER BY je.value COLLATE NOCASE"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    let rows = stmt.query_map(param_refs.as_slice(), |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
     })?;
     rows.collect()
@@ -887,6 +925,74 @@ pub fn set_article_tags(
         params![id, tags_to_json(&normalized), Utc::now().to_rfc3339()],
     )?;
     Ok((changed > 0).then_some(normalized))
+}
+
+/// Every article whose `tags` JSON array contains `tag` (already
+/// lowercased/trimmed by the caller) — the shared row-scan behind
+/// [`rename_tag`] and [`delete_tag`], neither of which can be expressed
+/// as a single `UPDATE`/`json_each` statement since each row's array
+/// needs its own de-duped rewrite, not a blanket replace.
+fn articles_with_tag(conn: &Connection, tag: &str) -> rusqlite::Result<Vec<(String, Vec<String>)>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, tags FROM articles \
+         WHERE EXISTS (SELECT 1 FROM json_each(articles.tags) WHERE json_each.value = ?1)",
+    )?;
+    let rows = stmt.query_map(params![tag], |row| {
+        Ok((row.get::<_, String>(0)?, parse_tags(row.get(1)?)))
+    })?;
+    rows.collect()
+}
+
+/// Renames `old` to `new` on every article that carries it — the `/tags`
+/// management page's rename action. `new` goes through the same
+/// [`normalize_tags`] pipeline as every other tag write, so renaming to
+/// (say) "AI" still lands as `ai`; renaming onto a tag that already
+/// exists on a given article merges the two (de-duped, no error) rather
+/// than producing a duplicate entry. Renaming to an empty/whitespace-only
+/// name, or to `old` itself, is a no-op. Returns the number of articles
+/// updated.
+pub fn rename_tag(conn: &Connection, old: &str, new: &str) -> rusqlite::Result<i64> {
+    let old = old.trim().to_lowercase();
+    let Some(new) = normalize_tags(std::slice::from_ref(&new.to_string()))
+        .into_iter()
+        .next()
+    else {
+        return Ok(0);
+    };
+    if old == new {
+        return Ok(0);
+    }
+
+    let rows = articles_with_tag(conn, &old)?;
+    let now = Utc::now().to_rfc3339();
+    for (id, tags) in &rows {
+        let mapped: Vec<String> = tags
+            .iter()
+            .map(|t| if *t == old { new.clone() } else { t.clone() })
+            .collect();
+        conn.execute(
+            "UPDATE articles SET tags = ?2, updated_at = ?3 WHERE id = ?1",
+            params![id, tags_to_json(&normalize_tags(&mapped)), now],
+        )?;
+    }
+    Ok(rows.len() as i64)
+}
+
+/// Removes `tag` from every article that carries it — the `/tags`
+/// management page's delete action. Articles themselves are never
+/// deleted, only untagged. Returns the number of articles updated.
+pub fn delete_tag(conn: &Connection, tag: &str) -> rusqlite::Result<i64> {
+    let tag = tag.trim().to_lowercase();
+    let rows = articles_with_tag(conn, &tag)?;
+    let now = Utc::now().to_rfc3339();
+    for (id, tags) in &rows {
+        let next: Vec<String> = tags.iter().filter(|t| **t != tag).cloned().collect();
+        conn.execute(
+            "UPDATE articles SET tags = ?2, updated_at = ?3 WHERE id = ?1",
+            params![id, tags_to_json(&next), now],
+        )?;
+    }
+    Ok(rows.len() as i64)
 }
 
 fn source_from_row(row: &Row) -> rusqlite::Result<Source> {
@@ -1848,6 +1954,195 @@ mod tests {
         assert_eq!(
             list_tags(&conn).unwrap(),
             vec![("tag-x".to_string(), 2), ("tag-y".to_string(), 1)]
+        );
+    }
+
+    /// A no-filter `ArticlePageQuery`, cursor/limit included only because
+    /// the struct requires them — [`list_tags_filtered`] ignores both.
+    fn empty_page_query() -> ArticlePageQuery<'static> {
+        ArticlePageQuery {
+            cursor: None,
+            limit: 0,
+            search: None,
+            category_id: None,
+            tags: &[],
+            favorited_only: false,
+        }
+    }
+
+    #[test]
+    fn list_tags_filtered_narrows_to_tags_that_co_occur_with_the_selection() {
+        let conn = migrated_conn();
+        insert_imported_article(
+            &conn,
+            "a1",
+            &titled_output("https://example.com/a1", "First"),
+            &["ai".to_string(), "accessibility".to_string()],
+            "2024-01-01T00:00:00Z",
+            false,
+        )
+        .unwrap();
+        insert_imported_article(
+            &conn,
+            "a2",
+            &titled_output("https://example.com/a2", "Second"),
+            &["ai".to_string(), "design".to_string()],
+            "2024-01-02T00:00:00Z",
+            false,
+        )
+        .unwrap();
+        insert_imported_article(
+            &conn,
+            "a3",
+            &titled_output("https://example.com/a3", "Third"),
+            &["unrelated".to_string()],
+            "2024-01-03T00:00:00Z",
+            false,
+        )
+        .unwrap();
+
+        // Unfiltered: every tag in the library.
+        assert_eq!(
+            list_tags_filtered(&conn, &empty_page_query()).unwrap(),
+            vec![
+                ("accessibility".to_string(), 1),
+                ("ai".to_string(), 2),
+                ("design".to_string(), 1),
+                ("unrelated".to_string(), 1),
+            ]
+        );
+
+        // Selecting "ai" narrows to only the tags that co-occur on
+        // articles already matching it — "unrelated" (only on a3, which
+        // has no "ai") drops out.
+        let selected_ai = vec!["ai".to_string()];
+        let scoped = ArticlePageQuery {
+            tags: &selected_ai,
+            ..empty_page_query()
+        };
+        assert_eq!(
+            list_tags_filtered(&conn, &scoped).unwrap(),
+            vec![
+                ("accessibility".to_string(), 1),
+                ("ai".to_string(), 2),
+                ("design".to_string(), 1),
+            ]
+        );
+    }
+
+    #[test]
+    fn rename_tag_renames_and_merges_across_every_article() {
+        let conn = migrated_conn();
+        insert_imported_article(
+            &conn,
+            "a1",
+            &titled_output("https://example.com/a1", "First"),
+            &["tag-x".to_string()],
+            "2024-01-01T00:00:00Z",
+            false,
+        )
+        .unwrap();
+        // Already has the rename target — renaming tag-x -> tag-y here
+        // must merge/de-dupe, not produce ["tag-y", "tag-y"].
+        insert_imported_article(
+            &conn,
+            "a2",
+            &titled_output("https://example.com/a2", "Second"),
+            &["tag-x".to_string(), "tag-y".to_string()],
+            "2024-01-02T00:00:00Z",
+            false,
+        )
+        .unwrap();
+        insert_imported_article(
+            &conn,
+            "a3",
+            &titled_output("https://example.com/a3", "Third"),
+            &["other".to_string()],
+            "2024-01-03T00:00:00Z",
+            false,
+        )
+        .unwrap();
+
+        // Renaming through a mixed-case/untrimmed input still normalizes,
+        // same convention as every other tag write.
+        let updated = rename_tag(&conn, "tag-x", " Tag-Y ").unwrap();
+        assert_eq!(updated, 2);
+
+        assert_eq!(
+            get_article(&conn, "a1").unwrap().unwrap().tags,
+            vec!["tag-y".to_string()]
+        );
+        assert_eq!(
+            get_article(&conn, "a2").unwrap().unwrap().tags,
+            vec!["tag-y".to_string()],
+            "merging onto an existing tag must de-dupe, not duplicate"
+        );
+        assert_eq!(
+            get_article(&conn, "a3").unwrap().unwrap().tags,
+            vec!["other".to_string()],
+            "an unrelated article's tags must be untouched"
+        );
+    }
+
+    #[test]
+    fn rename_tag_is_a_no_op_for_an_empty_name_or_the_same_name() {
+        let conn = migrated_conn();
+        insert_imported_article(
+            &conn,
+            "a1",
+            &titled_output("https://example.com/a1", "First"),
+            &["tag-x".to_string()],
+            "2024-01-01T00:00:00Z",
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(rename_tag(&conn, "tag-x", "   ").unwrap(), 0);
+        assert_eq!(rename_tag(&conn, "tag-x", "TAG-X").unwrap(), 0);
+        assert_eq!(
+            get_article(&conn, "a1").unwrap().unwrap().tags,
+            vec!["tag-x".to_string()]
+        );
+    }
+
+    #[test]
+    fn delete_tag_removes_it_from_every_article_without_deleting_the_article() {
+        let conn = migrated_conn();
+        insert_imported_article(
+            &conn,
+            "a1",
+            &titled_output("https://example.com/a1", "First"),
+            &["tag-x".to_string(), "tag-y".to_string()],
+            "2024-01-01T00:00:00Z",
+            false,
+        )
+        .unwrap();
+        insert_imported_article(
+            &conn,
+            "a2",
+            &titled_output("https://example.com/a2", "Second"),
+            &["tag-y".to_string()],
+            "2024-01-02T00:00:00Z",
+            false,
+        )
+        .unwrap();
+
+        let updated = delete_tag(&conn, " Tag-X ").unwrap();
+        assert_eq!(updated, 1);
+
+        assert_eq!(
+            get_article(&conn, "a1").unwrap().unwrap().tags,
+            vec!["tag-y".to_string()]
+        );
+        assert_eq!(
+            get_article(&conn, "a2").unwrap().unwrap().tags,
+            vec!["tag-y".to_string()],
+            "an article that never had the deleted tag must be untouched"
+        );
+        assert_eq!(
+            count_all_articles(&conn).unwrap(),
+            2,
+            "articles are never deleted"
         );
     }
 }
