@@ -76,6 +76,17 @@ export NDK_HOME=~/Android/Sdk/ndk/<version>
 npx --prefix frontend tauri android build --debug --target x86_64 --apk
 ```
 
+For frontend live reload (one-time Rust build, then Vite HMR into the
+app on the device), use `dev` instead — the same env vars apply:
+
+```sh
+npx --prefix frontend tauri android dev --target x86_64
+```
+
+This relies on `TAURI_DEV_HOST` (exported by the Tauri CLI) being honored
+in `frontend/vite.config.ts`, so the dev server binds to a network
+interface the device can reach.
+
 The APK lands at
 `src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk`.
 Install/launch with `adb install -r <apk>` and
