@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Android 13+ requires this to post the "Saving article..."/"Saved"
          share-intent notification (see ShareActivity/ShareWorker) — a
@@ -50,6 +51,17 @@
                 <data android:mimeType="text/plain" />
             </intent-filter>
         </activity>
+
+        <!-- ShareWorker (see ShareWorker.kt) promotes itself to a foreground
+             service via WorkManager's SystemForegroundService. Android 14+
+             requires every FGS declare its type in the manifest, but that
+             component comes from the androidx.work library, not our own
+             sources — override it here to add the type WorkManager doesn't
+             set on our behalf. -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge" />
 
         <provider
           android:name="androidx.core.content.FileProvider"
