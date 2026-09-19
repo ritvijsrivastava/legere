@@ -4,26 +4,39 @@
 	import Library from '$lib/icons/Library.svelte';
 	import Star from '$lib/icons/Star.svelte';
 	import SettingsIcon from '$lib/icons/Settings.svelte';
+	import Rss from '$lib/icons/Rss.svelte';
 	import Plus from '$lib/icons/Plus.svelte';
-	import Search from '$lib/icons/Search.svelte';
-	import X from '$lib/icons/X.svelte';
 	import ChevronRight from '$lib/icons/ChevronRight.svelte';
+	import TagBrowser from '$lib/components/TagBrowser.svelte';
 	import { libraryStatsStore } from '$lib/stores/libraryStats.svelte';
+	import { captureJobsStore } from '$lib/stores/captureJobs.svelte';
 	import { uiStore } from '$lib/stores/ui.svelte';
-	import { libraryFiltersStore } from '$lib/stores/libraryFilters.svelte';
-	import { sourceDotColor } from '$lib/sourceColor';
+	import Refresh from '$lib/icons/Refresh.svelte';
+	import CategoryIcon from '$lib/components/CategoryIcon.svelte';
 	import { goto } from '$app/navigation';
 	import { isTauri } from '$lib/platform';
 	import { checkForUpdate, getLastDismissedVersion, setLastDismissedVersion } from '$lib/update';
 	import UpdateToast from '$lib/components/UpdateToast.svelte';
-	import * as api from '$lib/api';
-	import type { NamedCount } from '$lib/types';
 
 	let { children } = $props();
 
 	let isMobile = $state(typeof window !== 'undefined' ? window.innerWidth < 768 : false);
 	let isReader = $derived(page.url.pathname.startsWith('/reader/'));
 	let isSettings = $derived(page.url.pathname === '/settings');
+	// The Sources page already has its own prominent "Add source" button in
+	// its own header — the floating FAB would just be a second identical
+	// affordance on the one screen that's *entirely about* sources. Settings
+	// isn't about adding anything at all, so the FAB is excluded there too
+	// (see the `isSettings` check below).
+	let isSources = $derived(page.url.pathname === '/sources');
+	// The mobile activity dock (a thin bar docked above `.bottom-bar`, see
+	// its own styles below) — hidden on the reader like the rest of the
+	// chrome, but *not* gated on `isSources` the way the FAB is: this isn't
+	// a second "add" affordance, it's a status readout, so it stays useful
+	// on the one page that's actually about sources too.
+	let showActivityDock = $derived(
+		isMobile && !isReader && captureJobsStore.jobs.length > 0
+	);
 
 	$effect(() => {
 		function onResize() {
@@ -64,9 +77,12 @@
 		backgroundCheckForUpdate();
 	});
 
+	// Both the desktop sidebar and the mobile bottom bar carry the same
+	// four top-level destinations — Library, Favorites, Sources, Settings.
 	const navItems = [
 		{ href: '/', label: 'Library', Icon: Library, count: () => libraryStatsStore.totalCount },
 		{ href: '/favorites', label: 'Favorites', Icon: Star, count: () => libraryStatsStore.favoritedCount },
+		{ href: '/sources', label: 'Sources', Icon: Rss, count: null as (() => number) | null },
 		{ href: '/settings', label: 'Settings', Icon: SettingsIcon, count: null as (() => number) | null }
 	];
 
@@ -87,57 +103,30 @@
 	let categories = $derived(libraryStatsStore.categories);
 	let tags = $derived(libraryStatsStore.tags);
 
-	// Tags section: collapsible (state survives navigation — this
-	// component never remounts between routes), with its own name search
-	// and a facet-narrowed list. Selecting a tag pins it above the list
-	// (removable via its ✕) and re-scopes the rest of the list to only
-	// tags that actually co-occur with the current selection—computed
-	// server-side by `list_tags_filtered` using the exact same filters as
-	// the article list itself (see `ARCHITECTURE.md`).
-	let tagsOpen = $state(true);
-	let tagSearch = $state('');
-	let facetTags = $state<NamedCount[]>([]);
-
-	$effect(() => {
-		const categoryId = libraryFiltersStore.categoryId;
-		const selected = libraryFiltersStore.tags;
-		// Re-run on any tag/article mutation too (capture, edit, rename,
-		// delete), not just when the sidebar's own filters change.
-		void libraryStatsStore.changeVersion;
-
-		// No active filter: `libraryStatsStore.tags` (already fetched —
-		// it's also what gates this whole section's visibility below) is
-		// exactly what `list_tags_filtered` would return for empty
-		// filters. Reusing it directly means the default view never
-		// depends on a second round trip landing before anything shows.
-		if (!categoryId && selected.length === 0) {
-			facetTags = libraryStatsStore.tags;
-			return;
-		}
-
-		let cancelled = false;
-		api
-			.listTagsFiltered({ category_id: categoryId, tags: selected })
-			.then((result) => {
-				if (!cancelled) facetTags = result;
-			})
-			.catch(() => {
-				// Best-effort UI narrowing — leave the previous list showing
-				// rather than surface an error toast for a background refresh.
-			});
-		return () => {
-			cancelled = true;
-		};
-	});
-
-	// Already-selected tags are pinned separately above; the browsing list
-	// below excludes them and applies the name search.
-	let visibleTags = $derived(
-		facetTags.filter(
-			([tag]) =>
-				!libraryFiltersStore.tags.includes(tag) && tag.includes(tagSearch.trim().toLowerCase())
-		)
+	// The virtual "Uncategorized" entry (see `libraryStatsStore`) always
+	// stays pinned at the top of the sidebar list — it's the default
+	// destination, not just another folder — while the real, user-created
+	// categories below it are capped to the busiest 5 (by article count) so
+	// a library with dozens of categories doesn't push Tags and the rest of
+	// the sidebar out of view. The full set is always one click away via
+	// "Manage categories" (`/categories`).
+	let uncategorized = $derived(categories.find((c) => c.id === '__uncategorized__') ?? null);
+	const topCategoryCount = 5;
+	let topCategories = $derived(
+		categories
+			.filter((c) => c.id !== '__uncategorized__')
+			.slice()
+			.sort((a, b) => b.article_count - a.article_count)
+			.slice(0, topCategoryCount)
 	);
+
+	// Categories/Tags sections: both collapsible (state survives navigation
+	// — this component never remounts between routes). Search/browse/facet-
+	// narrow logic for tags lives in the shared `TagBrowser` (also used by
+	// the mobile Tags sheet); this component only owns whether each section
+	// is expanded.
+	let categoriesOpen = $state(true);
+	let tagsOpen = $state(true);
 </script>
 
 {#snippet sidebarNav()}
@@ -154,23 +143,45 @@
 	</nav>
 
 	{#if categories.length > 0}
-		<div class="divider"></div>
-		<div class="section-label">Categories</div>
-		{#each categories as category (category.id)}
-			<a
-				href="/category/{category.id}"
-				class="row-item"
-				class:active={isActiveCategory(category.id)}
-			>
-				<span class="dot" style:background={sourceDotColor(category.name)}></span>
-				<span class="row-label">{category.name}</span>
-				<span class="nav-count">{category.article_count}</span>
+		<button
+			class="section-header"
+			onclick={() => (categoriesOpen = !categoriesOpen)}
+			aria-expanded={categoriesOpen}
+		>
+			<span class="section-label">Categories</span>
+			<span class="chevron" class:open={categoriesOpen}><ChevronRight size={13} /></span>
+		</button>
+		{#if categoriesOpen}
+			{#if uncategorized}
+				<a
+					href="/category/{uncategorized.id}"
+					class="row-item"
+					class:active={isActiveCategory(uncategorized.id)}
+				>
+					<CategoryIcon icon={uncategorized.icon} size={13} />
+					<span class="row-label">{uncategorized.name}</span>
+					<span class="nav-count">{uncategorized.article_count}</span>
+				</a>
+			{/if}
+			{#each topCategories as category (category.id)}
+				<a
+					href="/category/{category.id}"
+					class="row-item"
+					class:active={isActiveCategory(category.id)}
+				>
+					<CategoryIcon icon={category.icon} size={13} />
+					<span class="row-label">{category.name}</span>
+					<span class="nav-count">{category.article_count}</span>
+				</a>
+			{/each}
+			<a href="/categories" class="manage-link">
+				<span>Manage categories</span>
+				<span class="nav-count">{categories.length - (uncategorized ? 1 : 0)}</span>
 			</a>
-		{/each}
+		{/if}
 	{/if}
 
 	{#if tags.length > 0}
-		<div class="divider"></div>
 		<button
 			class="section-header"
 			onclick={() => (tagsOpen = !tagsOpen)}
@@ -180,49 +191,7 @@
 			<span class="chevron" class:open={tagsOpen}><ChevronRight size={13} /></span>
 		</button>
 		{#if tagsOpen}
-			<div class="tag-search">
-				<Search size={13} />
-				<input
-					type="text"
-					placeholder="Search tags..."
-					bind:value={tagSearch}
-					spellcheck="false"
-					autocomplete="off"
-					autocorrect="off"
-					autocapitalize="off"
-				/>
-			</div>
-			{#if libraryFiltersStore.tags.length > 0}
-				<div class="tag-list tag-list-selected">
-					{#each libraryFiltersStore.tags as tag (tag)}
-						<div class="tag-row tag-row-selected">
-							<span class="row-label">#{tag}</span>
-							<button
-								class="tag-remove"
-								aria-label={`Remove ${tag} filter`}
-								onclick={() => libraryFiltersStore.toggleTag(tag)}
-							>
-								<X size={11} />
-							</button>
-						</div>
-					{/each}
-				</div>
-			{/if}
-			<div class="tag-list">
-				{#each visibleTags.slice(0, 7) as [tag, count] (tag)}
-					<button class="tag-row" onclick={() => libraryFiltersStore.toggleTag(tag)}>
-						<span class="row-label">#{tag}</span>
-						<span class="nav-count">{count}</span>
-					</button>
-				{/each}
-				{#if visibleTags.length === 0}
-					<div class="tag-empty">No tags match</div>
-				{/if}
-			</div>
-			<a href="/tags" class="manage-tags-link">
-				<span>Manage Tags</span>
-				<span class="nav-count">{tags.length}</span>
-			</a>
+			<TagBrowser />
 		{/if}
 	{/if}
 {/snippet}
@@ -240,6 +209,22 @@
 				<Plus size={15} />
 				Add source
 			</button>
+			{#if captureJobsStore.jobs.length > 0}
+				<button
+					class="activity-btn"
+					class:activity-btn-failed={captureJobsStore.failedCount > 0}
+					onclick={() => uiStore.openCaptureJobs()}
+				>
+					{#if captureJobsStore.runningCount > 0}
+						<Refresh size={13} spinning />
+					{/if}
+					<span class="row-label">
+						{captureJobsStore.failedCount > 0
+							? `${captureJobsStore.failedCount} failed to add`
+							: 'Adding…'}
+					</span>
+				</button>
+			{/if}
 			{@render sidebarNav()}
 
 			<div class="sidebar-spacer"></div>
@@ -253,28 +238,39 @@
 				/>
 			{/if}
 		</div>
-	{:else if !isReader}
-		<div class="topbar">
-			<span class="brand">
-				<span class="brand-mark"><Logo size={16} /></span>
-				Legere
-			</span>
-			<div class="topbar-actions">
-				<button
-					onclick={() => uiStore.openAddSource()}
-					class="btn btn-icon btn-secondary"
-					aria-label="Add source"
-				>
-					<Plus size={16} />
-				</button>
-			</div>
-		</div>
 	{/if}
 
 	<div class="content" class:mobile={isMobile} class:mobile-reader={isMobile && isReader}>
 		{@render children()}
 	</div>
 
+	{#if isMobile && !isReader && !isSources && !isSettings}
+		<button
+			class="fab"
+			class:fab-raised={showActivityDock}
+			onclick={() => uiStore.openAddSource()}
+			aria-label="Add source"
+		>
+			<Plus size={22} />
+		</button>
+	{/if}
+	{#if showActivityDock}
+		<button
+			class="activity-dock"
+			class:activity-dock-failed={captureJobsStore.failedCount > 0}
+			onclick={() => uiStore.openCaptureJobs()}
+		>
+			{#if captureJobsStore.runningCount > 0}
+				<Refresh size={12} spinning />
+			{/if}
+			<span class="row-label">
+				{captureJobsStore.failedCount > 0
+					? `${captureJobsStore.failedCount} failed to add`
+					: `Adding ${captureJobsStore.jobs.length}\u2026`}
+			</span>
+			<ChevronRight size={12} />
+		</button>
+	{/if}
 	{#if isMobile && !isReader}
 		<div class="bottom-bar">
 			{#each navItems as item (item.href)}
@@ -316,6 +312,16 @@
 		height: 100%;
 		border-right: 1px solid var(--color-divider-strong);
 		overflow-y: auto;
+		/* No visible scrollbar: the reserved track nudged every row left the
+		   moment the section list (usually a big Tags browser) overflowed.
+		   Wheel and keyboard scrolling still work — the handle is just hidden,
+		   since this column rarely overflows and never needs the affordance. */
+		scrollbar-width: none;
+	}
+	.sidebar::-webkit-scrollbar {
+		display: none;
+		width: 0;
+		height: 0;
 	}
 	.brand-row {
 		display: flex;
@@ -391,26 +397,15 @@
 		color: var(--color-muted);
 	}
 
-	.dot {
-		width: 7px;
-		height: 7px;
-		border-radius: 50%;
-		flex: none;
-	}
-
-	.divider {
-		height: 1px;
-		background: var(--color-divider);
-		margin: 18px 6px;
-	}
 	.section-label {
 		font-size: 10.5px;
 		letter-spacing: 0.06em;
 		text-transform: uppercase;
 		color: var(--color-muted);
-		margin: 2px 0 8px 10px;
 	}
-
+	/* Section rhythm without rules — the old hairline dividers between the
+	   nav list, Categories, and Tags are gone; spacing alone separates the
+	   sections now (more above a header than below it). */
 	.section-header {
 		display: flex;
 		align-items: center;
@@ -420,10 +415,7 @@
 		border: none;
 		cursor: pointer;
 		padding: 0 4px 0 10px;
-		margin: 2px 0 8px 0;
-	}
-	.section-header .section-label {
-		margin: 0;
+		margin: 16px 0 8px 0;
 	}
 	.chevron {
 		display: flex;
@@ -433,86 +425,13 @@
 	.chevron.open {
 		transform: rotate(90deg);
 	}
-	.tag-search {
-		display: flex;
-		align-items: center;
-		gap: 7px;
-		background: var(--color-surface);
-		border-radius: 10px;
-		padding: 7px 10px;
-		margin: 0 6px 10px;
-		color: var(--color-muted);
-	}
-	.tag-search input {
-		border: none;
-		background: transparent;
-		outline: none;
-		font: inherit;
-		font-size: 12.5px;
-		width: 100%;
-		color: var(--color-text);
-	}
-	.tag-list {
-		display: flex;
-		flex-direction: column;
-		gap: 1px;
-	}
-	.tag-list-selected {
-		max-height: none;
-		overflow: visible;
-		margin-bottom: 4px;
-	}
-	.tag-row {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		width: 100%;
-		background: transparent;
-		border: none;
-		border-radius: 8px;
-		padding: 6px 10px;
-		cursor: pointer;
-		font-family: var(--font-body);
-		font-size: 12.5px;
-		color: var(--color-text);
-		text-align: left;
-	}
-	.tag-row:hover {
-		background: var(--color-surface);
-	}
-	.tag-row-selected {
-		background: color-mix(in srgb, var(--color-accent) 14%, var(--color-surface));
-		color: var(--color-accent);
-		cursor: default;
-		font-weight: 600;
-	}
-	.tag-row .row-label {
-		flex: 1;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-	.tag-remove {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		background: none;
-		border: none;
-		color: inherit;
-		cursor: pointer;
-		padding: 3px;
-		border-radius: 6px;
-		flex: none;
-	}
-	.tag-remove:hover {
-		background: color-mix(in srgb, var(--color-accent) 20%, transparent);
-	}
-	.tag-empty {
-		padding: 8px 10px;
-		font-size: 12px;
-		color: var(--color-muted);
-	}
-	.manage-tags-link {
+	/* Tags section rows now render via the shared `TagBrowser` component;
+	   only the collapsible section header (above) still styles here. */
+
+	/* Mirrors `TagBrowser`'s own `.manage-tags-link` — same idiom for the
+	   Categories section's "see the rest" link, once the list above it is
+	   capped to the busiest 5. */
+	.manage-link {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
@@ -525,7 +444,7 @@
 		color: var(--color-text);
 		text-decoration: none;
 	}
-	.manage-tags-link:hover {
+	.manage-link:hover {
 		background: var(--color-surface);
 		color: var(--color-accent);
 	}
@@ -558,25 +477,30 @@
 	.add-source-btn:active {
 		transform: scale(0.97);
 	}
-
-	.topbar {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		padding: calc(12px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) 12px
-			calc(16px + env(safe-area-inset-left));
-		position: sticky;
-		top: 0;
-		background: var(--color-bg);
-		z-index: 5;
-	}
-	.topbar .brand {
-		font-size: 16px;
-	}
-	.topbar-actions {
+	/* Only rendered while `captureJobsStore` has something to show (see the
+	   markup above) — a background "add a source" job in progress, or one
+	   that failed and is waiting on a retry/dismiss via `CaptureJobsPanel`. */
+	.activity-btn {
 		display: flex;
 		align-items: center;
 		gap: 8px;
+		width: 100%;
+		background: var(--color-surface);
+		color: var(--color-muted);
+		border: none;
+		border-radius: 10px;
+		font-family: var(--font-body);
+		font-size: 12.5px;
+		padding: 9px 10px;
+		cursor: pointer;
+		margin-bottom: 10px;
+		text-align: left;
+	}
+	.activity-btn-failed {
+		color: var(--color-danger);
+	}
+	.activity-btn :global(svg) {
+		flex: none;
 	}
 
 	.content {
@@ -585,11 +509,46 @@
 		height: 100%;
 		overflow-y: auto;
 	}
-	.content.mobile {
-		padding-bottom: calc(70px + env(safe-area-inset-bottom));
+	/* No `.content.mobile` bottom padding here — `.bottom-bar` below is a
+	   real flex sibling (not an overlay), so it already reserves its own
+	   space in `.app-root`'s column layout; adding padding here on top of
+	   that double-counted it, leaving a band of bare `--color-bg` between
+	   the actual scrollable content and the bar (see the pull-to-refresh/
+	   FAB comments in `ArticleCollection` for the bottom clearance that
+	   *is* needed, which belongs to each page's own scroll container). */
+
+	/* Floating add-source shortcut — replaces the removed mobile top bar's
+	   `+` button now that there's no top bar to hold it. Anchored to the
+	   viewport (not `.content`) so it stays put regardless of which
+	   descendant actually scrolls; sits just above `.bottom-bar`, whose own
+	   height (nav item ~62px + its own safe-area padding) this offset
+	   mirrors so the two never overlap. Every scrollable page adds matching
+	   bottom clearance so the FAB never covers the last row. `.fab-raised`
+	   (applied while `.activity-dock` below is showing) adds exactly that
+	   dock's own fixed height, so the FAB clears it the same way. */
+	.fab {
+		position: fixed;
+		right: calc(20px + env(safe-area-inset-right));
+		bottom: calc(78px + env(safe-area-inset-bottom));
+		width: 56px;
+		height: 56px;
+		border-radius: 50%;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: var(--color-accent);
+		color: var(--color-accent-fg);
+		border: none;
+		box-shadow: var(--shadow-lg);
+		cursor: pointer;
+		z-index: 10;
+		transition: transform var(--duration-fast) var(--ease-snap), bottom var(--duration-base) var(--ease-snap);
 	}
-	.content.mobile-reader {
-		padding-bottom: 0;
+	.fab:active {
+		transform: scale(0.94);
+	}
+	.fab-raised {
+		bottom: calc(78px + 30px + env(safe-area-inset-bottom));
 	}
 
 	.bottom-bar {
@@ -621,5 +580,49 @@
 	}
 	.bottom-nav-item.active {
 		color: var(--color-accent);
+	}
+
+	/* A second, thin bar docked directly above `.bottom-bar` — a real flex
+	   sibling (like `.bottom-bar` itself), not an overlay, so it never
+	   floats over content or collides with the FAB (which raises itself by
+	   exactly this bar's height via `.fab-raised` above). Deliberately kept
+	   to one compact row (fixed `height`, no wrapping) rather than growing
+	   with content — the point is a persistent, low-footprint status
+	   readout, not a second header. An earlier version tried a floating
+	   chip stacked above the FAB, then a full-width banner at the *top* of
+	   the screen; both read as disconnected from the rest of the chrome. A
+	   slim dock above the tab bar (the same place a music-player mini-bar
+	   sits above a tab bar in other apps) is the familiar spot for "a
+	   background operation is in progress, tap for details". */
+	.activity-dock {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		flex: none;
+		width: 100%;
+		height: 30px;
+		background: var(--color-surface-raised);
+		color: var(--color-muted);
+		border: none;
+		border-top: 1px solid var(--color-divider);
+		padding: 0 calc(14px + env(safe-area-inset-right)) 0 calc(14px + env(safe-area-inset-left));
+		font-family: var(--font-body);
+		font-size: 11.5px;
+		font-weight: 500;
+		text-align: left;
+		cursor: pointer;
+	}
+	.activity-dock .row-label {
+		flex: 1;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.activity-dock :global(svg) {
+		flex: none;
+	}
+	.activity-dock-failed {
+		color: var(--color-danger);
+		background: color-mix(in srgb, var(--color-danger) 10%, var(--color-surface-raised));
 	}
 </style>

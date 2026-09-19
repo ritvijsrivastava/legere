@@ -2,6 +2,7 @@
 	import * as api from '$lib/api';
 	import Search from '$lib/icons/Search.svelte';
 	import Trash from '$lib/icons/Trash.svelte';
+	import Pencil from '$lib/icons/Pencil.svelte';
 	import type { NamedCount } from '$lib/types';
 
 	let tags = $state<NamedCount[]>([]);
@@ -93,7 +94,7 @@
 <div class="tags-page">
 	<div class="header-row">
 		<div>
-			<h1>Manage Tags</h1>
+			<h1>Tags</h1>
 			<span class="sub">{tags.length} tag{tags.length === 1 ? '' : 's'}</span>
 		</div>
 		<div class="search-box">
@@ -151,7 +152,13 @@
 						<button class="name" onclick={() => startRename(tag)}>#{tag}</button>
 						<span class="count">{count} article{count === 1 ? '' : 's'}</span>
 						<span class="row-actions">
-							<button class="btn btn-secondary" onclick={() => startRename(tag)}>Rename</button>
+							<button
+								class="btn btn-icon btn-secondary"
+								aria-label={`Rename tag ${tag}`}
+								onclick={() => startRename(tag)}
+							>
+								<Pencil size={15} />
+							</button>
 							<button
 								class="btn btn-icon btn-secondary"
 								aria-label={`Delete tag ${tag}`}
@@ -264,7 +271,10 @@
 
 	@media (max-width: 768px) {
 		.tags-page {
-			padding: 20px 16px 32px;
+			/* Bottom padding cleared to 104px (not the usual 32px) so the last
+			   row isn't hidden behind the floating add-source FAB (see
+			   `Shell.svelte`), which overlays every mobile page. */
+			padding: calc(20px + env(safe-area-inset-top)) 16px 104px;
 		}
 		.search-box {
 			width: 100%;

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import * as api from '$lib/api';
 	import Plus from '$lib/icons/Plus.svelte';
+	import { libraryStatsStore } from '$lib/stores/libraryStats.svelte';
 
 	// Controlled like `ReaderControls`: this component owns only the
 	// add/remove UI and the round-trip to `set_article_tags`, the parent
@@ -23,6 +24,20 @@
 	let draft = $state('');
 	let saving = $state(false);
 	let inputEl = $state<HTMLInputElement | null>(null);
+	let activeSuggestion = $state(-1);
+
+	// Every tag that exists across the library, minus ones this article
+	// already carries — sourced from `libraryStatsStore` (already fetched
+	// app-wide, see the sidebar), not a fresh `list_tags` round-trip per
+	// keystroke.
+	let suggestions = $derived.by(() => {
+		const value = draft.trim().toLowerCase();
+		const candidates = libraryStatsStore.tags
+			.map(([tag]) => tag)
+			.filter((tag) => !tags.includes(tag));
+		if (!value) return candidates.slice(0, 8);
+		return candidates.filter((tag) => tag.includes(value)).slice(0, 8);
+	});
 
 	async function save(next: string[]) {
 		saving = true;
@@ -41,18 +56,20 @@
 	function startAdding() {
 		adding = true;
 		draft = '';
+		activeSuggestion = -1;
 		// `inputEl` doesn't exist until the `{#if adding}` block below
 		// renders it — wait a tick.
 		requestAnimationFrame(() => inputEl?.focus());
 	}
 
-	function commitDraft() {
+	function commitDraft(explicitValue?: string) {
 		// Lowercased/trimmed here too so the chip that appears the instant
 		// you hit Enter already looks like what the server will echo back
 		// (it's the actual source of truth either way) rather than
 		// flashing your literal input first.
-		const value = draft.trim().toLowerCase();
+		const value = (explicitValue ?? draft).trim().toLowerCase();
 		draft = '';
+		activeSuggestion = -1;
 		if (!value || tags.includes(value)) {
 			adding = false;
 			return;
@@ -61,13 +78,33 @@
 		adding = false;
 	}
 
+	function applySuggestion(tag: string) {
+		if (saving) return;
+		commitDraft(tag);
+	}
+
 	function onDraftKeydown(event: KeyboardEvent) {
 		if (event.key === 'Enter') {
 			event.preventDefault();
-			commitDraft();
+			if (activeSuggestion >= 0 && suggestions[activeSuggestion]) {
+				commitDraft(suggestions[activeSuggestion]);
+			} else {
+				commitDraft();
+			}
 		} else if (event.key === 'Escape') {
 			draft = '';
+			activeSuggestion = -1;
 			adding = false;
+		} else if (event.key === 'ArrowDown') {
+			if (suggestions.length === 0) return;
+			event.preventDefault();
+			activeSuggestion = (activeSuggestion + 1) % suggestions.length;
+		} else if (event.key === 'ArrowUp') {
+			if (suggestions.length === 0) return;
+			event.preventDefault();
+			activeSuggestion = activeSuggestion <= 0 ? suggestions.length - 1 : activeSuggestion - 1;
+		} else {
+			activeSuggestion = -1;
 		}
 	}
 </script>
@@ -89,16 +126,41 @@
 	{/each}
 
 	{#if adding}
-		<input
-			bind:this={inputEl}
-			class="tag-input"
-			type="text"
-			placeholder="tag name"
-			bind:value={draft}
-			onkeydown={onDraftKeydown}
-			onblur={commitDraft}
-			disabled={saving}
-		/>
+		<div class="tag-input-wrap">
+			<input
+				bind:this={inputEl}
+				class="tag-input"
+				type="text"
+				placeholder="tag name"
+				bind:value={draft}
+				onkeydown={onDraftKeydown}
+				onblur={() => commitDraft()}
+				disabled={saving}
+				role="combobox"
+				aria-expanded={suggestions.length > 0}
+				aria-autocomplete="list"
+				aria-controls="tag-suggestions"
+			/>
+			{#if suggestions.length > 0}
+				<ul class="tag-suggestions" id="tag-suggestions" role="listbox">
+					{#each suggestions as suggestion, i (suggestion)}
+						<li role="presentation">
+							<button
+								type="button"
+								role="option"
+								aria-selected={i === activeSuggestion}
+								class="tag-suggestion"
+								class:active={i === activeSuggestion}
+								onmousedown={(event) => event.preventDefault()}
+								onclick={() => applySuggestion(suggestion)}
+							>
+								#{suggestion}
+							</button>
+						</li>
+					{/each}
+				</ul>
+			{/if}
+		</div>
 	{:else}
 		<button type="button" class="tag-add" onclick={startAdding} disabled={saving}>
 			<Plus size={12} />
@@ -163,6 +225,10 @@
 		color: var(--reader-fg, var(--color-text));
 		border-color: var(--reader-fg, var(--color-text));
 	}
+	.tag-input-wrap {
+		position: relative;
+		display: inline-flex;
+	}
 	.tag-input {
 		width: 120px;
 		font-size: 11px;
@@ -174,5 +240,41 @@
 	}
 	.tag-input:focus-visible {
 		outline: none;
+	}
+	.tag-suggestions {
+		position: absolute;
+		top: calc(100% + 4px);
+		left: 0;
+		z-index: 20;
+		min-width: 160px;
+		max-width: 240px;
+		max-height: 220px;
+		overflow-y: auto;
+		margin: 0;
+		padding: 4px;
+		list-style: none;
+		border-radius: 10px;
+		border: 1px solid var(--color-divider);
+		background: var(--color-surface);
+		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+	}
+	.tag-suggestion {
+		display: block;
+		width: 100%;
+		text-align: left;
+		font-size: 12px;
+		padding: 6px 9px;
+		border: none;
+		border-radius: 6px;
+		background: transparent;
+		color: var(--color-text);
+		cursor: pointer;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.tag-suggestion:hover,
+	.tag-suggestion.active {
+		background: color-mix(in srgb, var(--color-accent) 16%, transparent);
 	}
 </style>
