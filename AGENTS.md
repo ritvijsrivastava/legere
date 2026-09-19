@@ -43,5 +43,6 @@ content here.
   trailing list of smaller/unrelated fixes bundled in the same commit.
 - No `Co-authored-by`, no AI/tool attribution footers, no issue-tracker
   boilerplate — just the summary and (optional) body.
-- If you can avoid a body, then avoid it.
-- When a body is required, then make sure that it does not exceed 140 chars.
+- Prefer no body at all — a clear summary line is usually enough. If a
+  body is genuinely needed, it must not exceed 140 characters total
+  (the whole body, not per line) under any circumstance.
