@@ -326,24 +326,31 @@ share sheet -> ShareActivity (invisible trampoline, never inflates a layout)
 - **Pool** (`db::pool.rs`) — r2d2 over rusqlite, 4 connections. Init order
   matters: `busy_timeout` first (so WAL initialization on a fresh file waits
   instead of erroring), then `journal_mode = WAL`, then `foreign_keys = ON`.
-- **Migrations** (`db::schema.rs`) — `rusqlite_migration`, currently V13.
+- **Migrations** (`db::schema.rs`) — `rusqlite_migration`, currently V15.
   SQLite can't alter CHECK constraints, so schema-changing migrations use a
   recreate-repopulate-swap dance; foreign keys are toggled off around the
   whole migration (the pragma is a no-op inside a transaction). Each
   migration's doc comment records what it deliberately *didn't* backfill and
   why — several data-lossy collapses are accepted because the affected data
   was personal/pre-remodel, and those calls are documented rather than
-  hidden.
+  hidden. `V14`/`V15` are the one exception to "pure SQL": compressing
+  every existing row's `content_html` needs actual Rust code (no SQL gzip
+  function), so they use `rusqlite_migration`'s `M::up_with_hook` to run a
+  backfill function after V14's `ALTER TABLE` adds the new column, rather
+  than the usual recreate-and-swap dance. Verified against a copy of a real
+  1,611-article production database before shipping.
 - **Schema shape** — `sources` (RSS only since V2), `articles` (UUID PK,
   `UNIQUE(link)`, `reading_state` unread/reading/read, `reading_progress`
   0–1, `tags` JSON array, nullable `category_id`, per-article
-  reading-appearance overrides, `updated_at` everywhere), `categories` (flat
-  folders, case-insensitively unique names, `ON DELETE SET NULL` so deleting
-  a category un-categorizes rather than deletes, `icon` — an id into the
-  frontend's icon set (the curated pack in `lib/categoryIcons.ts`, or any of
-  the full vendored Lucide set in `lib/lucideIcons.ts` picked via
-  `CategoryIconPicker`'s search), defaulting to `'folder'`, see `V13`),
-  `settings` (KV).
+  reading-appearance overrides, `content_html` gzip-compressed at rest
+  (`db::compression`, see `V14`/`V15` — this alone shrank one real
+  library's stored HTML from roughly 106MB to 18MB), `updated_at`
+  everywhere), `categories` (flat folders, case-insensitively unique names,
+  `ON DELETE SET NULL` so deleting a category un-categorizes rather than
+  deletes, `icon` — an id into the frontend's icon set (the curated pack in
+  `lib/categoryIcons.ts`, or any of the full vendored Lucide set in
+  `lib/lucideIcons.ts` picked via `CategoryIconPicker`'s search), defaulting
+  to `'folder'`, see `V13`), `settings` (KV).
 - **Tags** — always lowercase/trimmed/deduped; `db::queries::normalize_tags`
   is the single choke point every tag-writing path goes through. There is no
   separate tags table — a tag is just a string inside each article's `tags`

@@ -191,9 +191,9 @@ mod tests {
                     id, source_type, title, link, excerpt,
                     content_html, fetched_at, hero_image_path, updated_at
                 ) VALUES ('a1', 'direct', 't', 'https://x/1', 'e',
-                          '<p>x</p>', '2026-01-01T00:00:00Z',
+                          ?1, '2026-01-01T00:00:00Z',
                           'media/keep.jpg', '2026-01-01T00:00:00Z')",
-                [],
+                rusqlite::params![crate::db::compression::compress_html("<p>x</p>")],
             )
             .unwrap();
         }

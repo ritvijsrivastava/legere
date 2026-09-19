@@ -5,6 +5,7 @@ use rusqlite::{Connection, OptionalExtension, Row, params};
 use uuid::Uuid;
 
 use crate::capture::LocalCaptureOutput;
+use crate::db::compression::{compress_html, decompress_html};
 use crate::models::{
     ArticleDetail, ArticleSummary, Category, ReadingOverrides, Settings, Source,
     SourceArticlePreview,
@@ -120,7 +121,7 @@ pub fn insert_captured_article(
             output.title,
             output.link,
             output.excerpt,
-            output.content_html,
+            compress_html(&output.content_html),
             output.hero_image_path,
             output.published_at,
             now,
@@ -188,7 +189,7 @@ pub fn insert_imported_article_with_category(
             output.title,
             output.link,
             output.excerpt,
-            output.content_html,
+            compress_html(&output.content_html),
             output.hero_image_path,
             output.published_at,
             saved_at,
@@ -292,7 +293,7 @@ pub fn update_captured_article(
             output.title,
             output.link,
             output.excerpt,
-            output.content_html,
+            compress_html(&output.content_html),
             output.hero_image_path,
             output.published_at,
             output.read_time_min,
@@ -767,7 +768,7 @@ pub fn get_article(conn: &Connection, id: &str) -> rusqlite::Result<Option<Artic
                 reading_state: row.get("reading_state")?,
                 favorited: row.get::<_, i64>("favorited")? != 0,
                 link: row.get("link")?,
-                content_html: row.get("content_html")?,
+                content_html: decompress_html(&row.get::<_, Vec<u8>>("content_html")?),
                 extraction_confident: row.get::<_, i64>("extraction_confident")? != 0,
                 reading_progress: row.get("reading_progress")?,
                 tags: parse_tags(row.get("tags")?),

@@ -2328,6 +2328,7 @@ dependencies = [
  "csv",
  "dom_smoothie",
  "feed-rs",
+ "flate2",
  "futures-util",
  "html-escape",
  "image",

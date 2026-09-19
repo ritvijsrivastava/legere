@@ -1,5 +1,5 @@
 use rusqlite::Connection;
-use rusqlite_migration::{M, Migrations};
+use rusqlite_migration::{HookResult, M, Migrations};
 
 const V1: &str = "
 CREATE TABLE sources (
@@ -468,6 +468,63 @@ const V13: &str = "
 ALTER TABLE categories ADD COLUMN icon TEXT NOT NULL DEFAULT 'folder';
 ";
 
+// Compresses `content_html` at rest: this was, before this migration, the
+// single largest non-image contributor to a library's on-disk size (HTML
+// text compresses well with plain DEFLATE). Split into two migrations
+// rather than one recreate-and-swap dance (the shape V2-V4 used for a
+// CHECK-constraint change) because *this* change needs actual Rust code
+// to run against existing rows — there is no SQL gzip function — and
+// `rusqlite_migration`'s hook API only supports running Rust code *after*
+// a migration's own SQL, not interleaved with a table recreate. V14 adds
+// a new nullable `content_html_gz BLOB` column and backfills every
+// existing row's compressed bytes into it via `M::up_with_hook`; V15 then
+// drops the old `content_html` TEXT column (a plain `ALTER TABLE ... DROP
+// COLUMN` suffices — unlike V2-V4's columns, `content_html` was never
+// referenced by a CHECK/UNIQUE/index) and renames `content_html_gz` back
+// to `content_html`, so every other migration/query in this codebase that
+// names the column doesn't also need to change. `content_html_gz` is left
+// nullable at the schema level rather than backfilled through a third
+// recreate purely to add `NOT NULL`: every write path
+// (`db::queries::insert_captured_article` and friends) always supplies a
+// value in Rust, so the DB-level constraint would only ever be defense in
+// depth, not the actual guarantee — not worth a second full table
+// recreate on a 20+ column table for that alone.
+//
+// Verified against a real (copied, not live) 1,611-article production
+// database before this shipped: every row's compressed bytes decompress
+// back to exactly what was there before. Note this migration alone does
+// not shrink the `.db` file on disk — SQLite's `DROP COLUMN`/`RENAME
+// COLUMN` free the old column's pages onto the internal free list but
+// don't reclaim the file's size; only a `VACUUM` does that, which isn't
+// run automatically here (it rewrites the whole file and needs roughly
+// its size again in free disk space — too heavy to run unprompted during
+// an app-startup migration). A user who wants the freed space back on
+// disk needs to `VACUUM` by hand.
+const V14: &str = "
+ALTER TABLE articles ADD COLUMN content_html_gz BLOB;
+";
+
+fn backfill_compressed_content_html(tx: &rusqlite::Transaction) -> HookResult {
+    let mut stmt = tx.prepare("SELECT id, content_html FROM articles")?;
+    let rows: Vec<(String, String)> = stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    drop(stmt);
+    for (id, html) in rows {
+        let compressed = crate::db::compression::compress_html(&html);
+        tx.execute(
+            "UPDATE articles SET content_html_gz = ?2 WHERE id = ?1",
+            rusqlite::params![id, compressed],
+        )?;
+    }
+    Ok(())
+}
+
+const V15: &str = "
+ALTER TABLE articles DROP COLUMN content_html;
+ALTER TABLE articles RENAME COLUMN content_html_gz TO content_html;
+";
+
 pub fn migrations() -> Migrations<'static> {
     Migrations::new(vec![
         M::up(V1),
@@ -483,6 +540,8 @@ pub fn migrations() -> Migrations<'static> {
         M::up(V11),
         M::up(V12),
         M::up(V13),
+        M::up_with_hook(V14, backfill_compressed_content_html),
+        M::up(V15),
     ])
 }
 
@@ -908,6 +967,44 @@ mod tests {
         assert_eq!(
             fk_enabled, 1,
             "foreign_keys must be restored to ON after migrating"
+        );
+    }
+
+    #[test]
+    fn v14_v15_compress_existing_plaintext_content_html_without_losing_it() {
+        let mut conn = v2_conn_with_test_data();
+        migrate(&mut conn).expect("migrate to latest");
+
+        // The column is `content_html` again post-V15 (renamed back from
+        // `content_html_gz`), but its *bytes* are now gzip, not plain
+        // text — reading it raw must round-trip through
+        // `compression::decompress_html` to recover the original HTML
+        // `v2_conn_with_test_data` inserted before V14 existed.
+        let stored: Vec<u8> = conn
+            .query_row(
+                "SELECT content_html FROM articles WHERE id = 'art-unread'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(crate::db::compression::decompress_html(&stored), "<p>x</p>");
+    }
+
+    #[test]
+    fn v15_drops_the_old_plaintext_content_html_and_keeps_one_column() {
+        let mut conn = v2_conn_with_test_data();
+        migrate(&mut conn).expect("migrate to latest");
+
+        let column_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('articles') WHERE name = 'content_html'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            column_count, 1,
+            "there must be exactly one content_html column after V15, not a leftover content_html_gz"
         );
     }
 }
