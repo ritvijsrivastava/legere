@@ -7,6 +7,7 @@ use uuid::Uuid;
 use crate::capture::LocalCaptureOutput;
 use crate::models::{
     ArticleDetail, ArticleSummary, Category, ReadingOverrides, Settings, Source,
+    SourceArticlePreview,
 };
 
 /// `tags` is stored as a JSON array string; a row with anything other
@@ -1082,6 +1083,29 @@ pub fn list_sources(conn: &Connection) -> rusqlite::Result<Vec<Source>> {
     rows.collect()
 }
 
+/// The `limit` most recently fetched articles from one source, newest
+/// first — backs the Sources page's per-source recent-articles strip.
+pub fn list_recent_source_articles(
+    conn: &Connection,
+    source_id: &str,
+    limit: i64,
+) -> rusqlite::Result<Vec<SourceArticlePreview>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, title, fetched_at FROM articles
+         WHERE source_id = ?1
+         ORDER BY fetched_at DESC
+         LIMIT ?2",
+    )?;
+    let rows = stmt.query_map(params![source_id, limit], |row| {
+        Ok(SourceArticlePreview {
+            id: row.get("id")?,
+            title: row.get("title")?,
+            fetched_at: row.get("fetched_at")?,
+        })
+    })?;
+    rows.collect()
+}
+
 pub fn get_source(conn: &Connection, id: &str) -> rusqlite::Result<Option<Source>> {
     conn.query_row(
         "SELECT id, name, type, feed_url, status, last_error, article_count, last_synced_at, created_at
@@ -1360,6 +1384,34 @@ mod tests {
                 .article_count,
             0
         );
+    }
+
+    #[test]
+    fn list_recent_source_articles_orders_newest_first_and_respects_limit() {
+        let conn = migrated_conn();
+        let source = insert_rss_source(&conn, "Feed", "https://example.com/feed.xml").unwrap();
+        for i in 0..4 {
+            let output = sample_capture_output(&format!("https://example.com/{i}"));
+            insert_captured_article(
+                &conn,
+                &format!("art-{i}"),
+                Some(&source.id),
+                "rss",
+                &output,
+                &[],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE articles SET fetched_at = ?1 WHERE id = ?2",
+                params![format!("2024-01-0{}T00:00:00Z", i + 1), format!("art-{i}")],
+            )
+            .unwrap();
+        }
+
+        let recent = list_recent_source_articles(&conn, &source.id, 2).unwrap();
+        assert_eq!(recent.len(), 2);
+        assert_eq!(recent[0].id, "art-3");
+        assert_eq!(recent[1].id, "art-2");
     }
 
     #[test]

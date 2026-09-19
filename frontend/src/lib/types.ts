@@ -76,6 +76,34 @@ export interface Source {
 	created_at: string;
 }
 
+/** A lightweight per-source article preview for the Sources page's
+ *  recent-articles strip. */
+export interface SourceArticlePreview {
+	id: string;
+	title: string;
+	fetched_at: string;
+}
+
+/** A background "add a source" job (`capture_jobs::CaptureJobs` on the
+ *  backend) — the "Add a source" dialog queues one and closes
+ *  immediately rather than blocking on the fetch/extract/localize
+ *  pipeline; `list_capture_jobs` never returns a succeeded one (see the
+ *  Rust module's doc comment), only `running` or `failed`. */
+export interface CaptureJob {
+	id: string;
+	url: string;
+	status: CaptureJobStatus;
+}
+
+export type CaptureJobStatus = { state: 'running' } | { state: 'failed'; message: string };
+
+/** Payload of the one-off `capture:succeeded` event — the only feedback
+ *  a background capture gets now that the dialog doesn't wait around for
+ *  it (see `CaptureJob`). */
+export interface CaptureSucceeded {
+	kind: 'rss' | 'direct';
+	title: string;
+}
 
 export interface Settings {
 	default_font_size: FontSize;

@@ -197,6 +197,13 @@ export function cancelCaptureJob(id: string): Promise<void> {
 	return invoke<void>('cancel_capture_job', { id });
 }
 
+/** Up to `limit` most-recent articles from one source — backs the
+ *  Sources page's recent-articles strip. */
+export function listSourceRecentArticles(
+	sourceId: string,
+	limit: number
+): Promise<SourceArticlePreview[]> {
+	return invoke<SourceArticlePreview[]>('list_source_recent_articles', { sourceId, limit });
 }
 
 export function toggleSourcePause(id: string): Promise<Source> {

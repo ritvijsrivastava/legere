@@ -163,6 +163,16 @@ pub struct Source {
     pub created_at: String,
 }
 
+/// A lightweight per-source article preview for the Sources page's
+/// recent-articles strip — deliberately just enough to link to and
+/// display, not a full `ArticleSummary`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SourceArticlePreview {
+    pub id: String,
+    pub title: String,
+    pub fetched_at: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
     pub default_font_size: String,

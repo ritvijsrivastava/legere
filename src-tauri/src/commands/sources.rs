@@ -7,6 +7,8 @@ use crate::db::queries;
 use crate::error::AppError;
 use crate::events::{self, CaptureSucceeded, SyncError, SyncFinished};
 use crate::export_paths::write_export_csv;
+use crate::models::{ExportResult, Source, SourceArticlePreview, SyncResult};
+use crate::sources::{rss, sources_csv};
 use crate::state::AppState;
 use crate::sync::sync_all_sources;
 use crate::urlx::normalize_source_url;
@@ -17,6 +19,26 @@ pub async fn list_sources(state: State<'_, AppState>) -> Result<Vec<Source>, App
     tokio::task::spawn_blocking(move || {
         let conn = pool.get()?;
         Ok(queries::list_sources(&conn)?)
+    })
+    .await?
+}
+
+/// Up to `limit` most-recent articles from one source, for the Sources
+/// page's recent-articles strip.
+#[tauri::command]
+pub async fn list_source_recent_articles(
+    state: State<'_, AppState>,
+    source_id: String,
+    limit: i64,
+) -> Result<Vec<SourceArticlePreview>, AppError> {
+    let pool = state.pool.clone();
+    tokio::task::spawn_blocking(move || {
+        let conn = pool.get()?;
+        Ok(queries::list_recent_source_articles(
+            &conn,
+            &source_id,
+            limit.clamp(1, 10),
+        )?)
     })
     .await?
 }
