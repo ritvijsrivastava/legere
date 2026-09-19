@@ -70,6 +70,12 @@ and is out of scope unless revisited later.)
 
 - Ingestion: RSS/Atom sources and direct article URLs; feed title
   backfill, per-source status (active/paused/error) with retry.
+- Sources: its own top-level nav destination (desktop sidebar and
+  mobile bottom bar), not a Settings row. Add (RSS or direct link),
+  search, sync all, and per-source sync/pause/resume/remove (removing a
+  source keeps the articles already captured from it), plus CSV
+  import/export. Desktop shows every action inline; narrow viewports
+  fold import/export and per-source actions behind ⋮ overflow menus.
 - Reading: readable-view toggle of font size (16–22px), text
   measure/width (narrow/default/wide), line-height (compact/default/
   airy), and theme (light/dark — the same single app-wide theme, not a
@@ -90,30 +96,43 @@ and is out of scope unless revisited later.)
   keep the plain by-title search only, since they're already scoped to
   one slice of the library.
 - Categories: flat, user-managed folders, managed from the sidebar/library
-  (not Settings). Uncategorized is always first, then the rest
-  alphabetically. Clicking one opens its own page (title + article list +
-  a settings button for rename/delete, delete asks a plain confirm and
-  moves its articles back to Uncategorized). Any article can be moved to a
-  category from its card/row or the reader's overflow menu, via a dialog
-  that lists existing categories as one-click suggestions and can
-  create-and-move into a new one in the same step. A fresh direct-link
-  capture starts Uncategorized with no prompt.
-- Tags: the sidebar's Tags section (desktop only, like Categories) is
-  collapsible, has its own name search, and narrows itself — selecting a
-  tag pins it above the list (removable) and the rest of the list shrinks
-  to only tags that actually co-occur with the current selection, rather
-  than staying the whole library's tag set. A "Manage Tags" link opens
-  `/tags`, a dedicated page listing every tag with its article count and
-  inline rename/delete (delete only untags affected articles, never
-  deletes them; renaming onto an existing tag merges the two).
+  (not Settings). The desktop sidebar's Categories section is collapsible
+  and shows the virtual Uncategorized entry plus the five busiest real
+  categories (by article count), with a "Manage categories" link into
+  `/categories`, which lists every category with create/rename/delete/
+  re-icon. Uncategorized is always first; clicking any of them opens its
+  own page (title + article list + a settings button for rename/delete,
+  delete asks a plain confirm and moves its articles back to
+  Uncategorized). Any article can be moved to a category from its
+  card/row or the reader's overflow menu, via a dialog that lists
+  existing categories as one-click suggestions and can create-and-move
+  into a new one in the same step. A fresh direct-link capture starts
+  Uncategorized with no prompt.
+- Tags: the sidebar's Tags section (desktop) is collapsible, has its own
+  name search, and narrows itself — selecting a tag pins it above the
+  list (removable) and the rest of the list shrinks to only tags that
+  actually co-occur with the current selection, rather than staying the
+  whole library's tag set. Mobile has no sidebar, so the same
+  search/browse/select logic is shared into a bottom sheet (opened from a
+  "Tags" chip alongside the mobile category-chip row on Library/
+  Favorites/category pages); active tag filters also show as removable
+  chips on that row once the sheet is closed. A "Manage tags" link (in
+  the sidebar section and in the mobile sheet) opens `/tags`, a dedicated
+  page listing every tag with its article count and inline rename/delete
+  (delete only untags affected articles, never deletes them; renaming
+  onto an existing tag merges the two) — that page has no bottom-nav
+  entry of its own on mobile; the sheet's link is the only way in there
+  from a phone.
 - **Highlights is a stub today** — the nav item and route exist, the
   reader shows "Tap a marked passage to highlight it and add a note,"
   but no highlighting/annotation feature is implemented yet. Treat it as
   a real near-term surface, not decoration to hide, but don't invent
   interaction details for it beyond what's asked.
 - Settings: reading defaults, library default view, autosync on/off,
-  source management (not folder/category management — that lives in the
-  sidebar/library, see above), in-app update check/install, about.
+  in-app update check/install, about. Source management is not here —
+  Sources is its own top-level nav destination (desktop sidebar and
+  mobile bottom bar), and folder/category management lives in the
+  sidebar/library, see above.
 - Constraint: fully offline-capable by design — no remote fonts/icons,
   vendored fonts only (`@fontsource*`), a real (non-null) CSP, SSRF-
   guarded fetches. Any new visual asset (fonts, icons, the app icon)

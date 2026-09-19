@@ -16,7 +16,14 @@ no server, no sync — every device keeps its own independent local library.
 
 - **Feeds and direct links** — RSS/Atom sources with a 15-minute autosync
   loop, or one-shot direct-link capture; the "Add a source" dialog sniffs
-  which one a pasted URL is automatically.
+  which one a pasted URL is automatically and captures it in the
+  background, so the dialog closes immediately instead of blocking on the
+  fetch/extract pipeline. A failed capture shows up in the activity panel
+  with its error and a retry.
+- **Share into Legere (Android)** — share a link from any other app; Legere
+  never opens, the capture runs in the background via an expedited
+  `WorkManager` job, and a notification reports "Saving..." then
+  saved/failed. See ARCHITECTURE.md's "Share intent (Android)" section.
 - **True offline reading** — readability extraction (`dom_smoothie`, a Rust
   port of Mozilla's Readability) plus localization of the readable view's own
   images into `content/<id>/`, served into the webview through a custom
@@ -27,9 +34,12 @@ no server, no sync — every device keeps its own independent local library.
   each folder auto-maps to a same-named category, already-saved links are
   skipped, and imports run in a cancellable background worker pool.
 - **Library** — card/list views, favorites, unread/reading/read state,
-  reading-progress restore, user-managed flat categories, tags (from RSS
-  categories, Raindrop, or manual edits), and a search box that matches
-  article titles, category names, and tag names.
+  reading-progress restore, user-managed flat categories (create from the
+  `/categories` management page — reachable on mobile too — and
+  rename/delete/pick-an-icon from either that page or `/category/[id]`'s
+  settings gear), tags (from RSS categories, Raindrop, or manual edits),
+  and a search box that matches article titles, category names, and tag
+  names.
 - **Reading experience** — serif reading typography with per-article
   overrides of font size, text measure, line height, and theme on top of
   global defaults.
@@ -96,7 +106,7 @@ Install/launch with `adb install -r <apk>` and
 
 Legere's `frontend/` is a sibling of `src-tauri/`, not its parent, which
 breaks a few of Tauri's default Android-project assumptions. The generated
-`gen/android` tree (committed to this repo) has three manual fixes on top of
+`gen/android` tree (committed to this repo) has four manual fixes on top of
 what `tauri android init` produces:
 
 1. **Root `package.json`** — a minimal delegating package so Gradle's
@@ -111,8 +121,16 @@ what `tauri android init` produces:
    Android `.aar` dependency at runtime (not just the Rust crate), located
    dynamically via `cargo metadata` since its path varies by Cargo registry
    cache layout.
+4. **The share-intent files** — `ShareActivity.kt`, `ShareWorker.kt`,
+   `NativeCapture.kt` (hand-written, alongside `MainActivity.kt`, not
+   template output), the `ShareActivity` entry + notification/foreground-
+   service permissions in `AndroidManifest.xml`, `Theme.legere.NoDisplay`
+   in `res/values/themes.xml`, the `share_*` strings in
+   `res/values/strings.xml`, and the `androidx.work:work-runtime-ktx`
+   dependency in `app/build.gradle.kts`. See ARCHITECTURE.md's "Share
+   intent (Android)" section.
 
-If `gen/android` is ever regenerated from scratch, reapply these three before
+If `gen/android` is ever regenerated from scratch, reapply these four before
 building. (A release build additionally needs the `signingConfigs.release`
 block described in [docs/RELEASING.md](docs/RELEASING.md).)
 

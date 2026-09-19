@@ -153,12 +153,44 @@ overwrite a user rename), capture up to 30 new entries per sync
 sources are retried every autosync cycle (no backoff) so they recover on
 their own; paused sources are skipped.
 
-**Add-a-source sniffing** (`commands::sources::add_source_auto`) — the user
-pastes one URL with no up-front choice; the backend fetches it once and
-tries to parse it as a feed. Parse success ⇒ recurring RSS source; anything
-else (including parse failure) ⇒ one-shot direct-link capture. A new
+**Add-a-source sniffing** (`commands::sources::add_source_background`,
+`run_add_source_auto`) — the user pastes one URL with no up-front choice;
+the backend fetches it once and tries to parse it as a feed. Parse success
+⇒ recurring RSS source (with its first sync run inline); anything else
+(including parse failure) ⇒ one-shot direct-link capture. A new
 direct-link article starts Uncategorized, moved later via its card or the
 reader.
+
+The whole sniff-then-capture sequence runs in a detached background task,
+not inline in the command: a slow site's fetch, and an image-heavy
+direct-link capture's own localize step, both used to block the "Add a
+source" dialog until they finished. `add_source_background` returns as
+soon as the job is queued; the frontend closes the dialog immediately and
+tracks the rest via `capture_jobs.rs` — an in-memory, session-lifetime-only
+`AppState::capture_jobs` list keyed by job id: `Running` while the task is
+in flight, `Failed { message }` if it errored, and simply *removed* the
+instant it succeeds (a succeeded capture's article/source is already real
+data, reported through the usual `articles:changed`/`source:changed`
+events — this list has nothing further to say about it, and there is
+deliberately no `Done` state). Each `Running` job keeps the
+`tauri::async_runtime::JoinHandle` for its own background task alongside
+it (not serialized to the frontend), so `cancel_capture_job` can abort it
+outright rather than needing a cooperative cancel flag threaded through
+`capture::capture_local` — safe at any point in the pipeline, since
+nothing is written to disk or the database until a capture's very last
+step (`capture::archive`). `list_capture_jobs`/`retry_capture_job`/
+`dismiss_capture_job`/`cancel_capture_job` back the frontend's activity UI
+(`CaptureJobsPanel.svelte` for the full list — every running job
+individually cancellable, every failed one retryable or dismissible —
+opened from a small trigger that only renders while the list is
+non-empty: a row under the desktop sidebar's "Add source" button, or, on
+mobile, `activity-dock` — a second, thin bar docked directly above
+`.bottom-bar` in `Shell.svelte`, a real flex sibling like the tab bar
+itself rather than an overlay, so it can never float over content or
+collide with the FAB (earlier floating-chip and top-banner placements both
+did). Not persisted to SQLite: losing this transient bookkeeping across an
+app restart is an accepted tradeoff, matching `AppState::import_cancel`'s
+own session-only guard.
 
 **Raindrop import** (`sources::raindrop_import`) — CSV rows run through the
 same capture pipeline in a fixed-size worker pool (concurrency 5–10, a
@@ -177,6 +209,74 @@ clamped user setting). Design points:
 - The import runs in the background and survives the dialog closing; the
   single-import guard is the same flag stored in `AppState`.
 
+## Share intent (Android)
+
+Sharing a URL into Legere from another app (browser, feed reader, etc.)
+never opens Legere's own window. The whole flow lives outside the Tauri
+runtime, deliberately:
+
+```
+share sheet -> ShareActivity (invisible trampoline, never inflates a layout)
+  -> posts a "Saving article..." notification, enqueues an expedited
+     WorkManager job, finishes immediately
+  -> ShareWorker (foreground-promoted for its duration) calls into Rust
+     via NativeCapture.captureSharedUrl (JNI)
+  -> share_intent.rs runs capture::capture_local through
+     sources::direct_link::capture_and_store, exactly like every other
+     ingestion path
+  -> ShareWorker updates the same notification: saved (with title) or
+     failed (with a reason)
+```
+
+- **`ShareActivity`** (`gen/android/.../ShareActivity.kt`) declares the
+  `ACTION_SEND`/`text/plain` intent filter, themed fully transparent/
+  `excludeFromRecents`/`noHistory` (`Theme.legere.NoDisplay`) so it's never
+  visible even for a frame — no WebView/JS runtime is ever started for a
+  share. `EXTRA_TEXT` is usually a whole sentence, not a bare URL, so it
+  regexes out the first `http(s)://` substring. Requests
+  `POST_NOTIFICATIONS` (Android 13+) once via a system permission dialog
+  (which renders fine over a transparent Activity); proceeds either way —
+  denial just means the save happens without a visible notification, not
+  that it's skipped.
+- **WorkManager, expedited** — `OneTimeWorkRequest.setExpedited(...)` is
+  Android's own documented mechanism for "work the user is actively
+  waiting on and expects a notification for" (their own canonical example
+  is a just-shared photo upload); it gets scheduling priority a plain
+  background `Service` wouldn't, survives `ShareActivity.finish()`, and
+  gets automatic retry/backoff. Chosen over a bare `Service` specifically
+  to avoid the OS deprioritizing/killing an image-heavy capture once the
+  trampoline Activity is gone.
+- **`ShareWorker`** owns one notification for the job's lifetime —
+  ongoing/indeterminate while running (`getForegroundInfo`, which is what
+  lets WorkManager legally promote this to a foreground service), replaced
+  with a final saved/failed state in `doWork`. Tapping it opens
+  `MainActivity`.
+- **Why the Rust side can't reuse `AppState`** — a share can be the *only*
+  thing that happens in this app process: Android starts the process for
+  the `WorkManager` job alone, `MainActivity.onCreate` (and therefore
+  `app.manage(AppState)`) never runs. `share_intent.rs`'s JNI entrypoint
+  is fully standalone instead: it opens its own DB pool, runs migrations
+  (a share can be the very first thing the app ever does on a device,
+  before it's been opened once), builds its own SSRF-guarded client, and
+  calls the exact same `capture::capture_local` pipeline via a new
+  `direct_link::capture_and_store` (the `AppState`-free half of what
+  `direct_link::capture_direct_link` already did). Running concurrently
+  with a live app instance is safe without any extra coordination — both
+  are just separate connections to the same `legere.db`, which is exactly
+  what WAL mode + `busy_timeout` (`db::pool::build_pool`) already has to
+  handle.
+- **TLS init** — same JNI handoff `mobile_tls::init_tls` does for
+  `MainActivity.initTls` (see Platform notes below), called again from
+  `share_intent.rs` itself rather than assumed to have already happened,
+  for the same cold-process reason above.
+- **Known gap, accepted** — if the app happens to already be open in the
+  background when a share completes, its library view won't live-update
+  (there's no `AppState`/event emitter in this codepath to fire
+  `articles:changed` on). It shows up next time that view refetches, same
+  as after a cold start. Not worth bridging for the added complexity.
+- **Desktop has no equivalent** — there's no OS-level share-sheet concept
+  on Linux; this is Android-only.
+
 ## Sync and lifecycle
 
 - **Autosync** (`sync.rs`) — a foreground interval task (15 minutes) spawned
@@ -185,10 +285,11 @@ clamped user setting). Design points:
   passed since the last foreground sync (`RunEvent::Resumed` handler).
 - **Events** (`events.rs` → `frontend/src/lib/events.ts`) — the backend
   emits `sync:started/finished`, `articles:changed`, `source:changed`,
-  `category:changed`, and `import:*`. The frontend registers listeners once
-  in the root layout and responds with coarse-grained store refetches, not
-  payload-carried deltas — the dataset is small and refetch is what fixed
-  the original "library never refreshes after autosync" bug.
+  `category:changed`, `import:*`, and `capture:changed`/`capture:succeeded`
+  (background add-a-source jobs, see above). The frontend registers
+  listeners once in the root layout and responds with coarse-grained store
+  refetches, not payload-carried deltas — the dataset is small and refetch
+  is what fixed the original "library never refreshes after autosync" bug.
 - **State** (`state.rs`) — `AppState` holds the DB pool, the shared
   SSRF-guarded HTTP client, the data dir, autosync/cancellation handles,
   and (per-platform, cfg-gated) pending-update slots.
@@ -198,7 +299,7 @@ clamped user setting). Design points:
 - **Pool** (`db::pool.rs`) — r2d2 over rusqlite, 4 connections. Init order
   matters: `busy_timeout` first (so WAL initialization on a fresh file waits
   instead of erroring), then `journal_mode = WAL`, then `foreign_keys = ON`.
-- **Migrations** (`db::schema.rs`) — `rusqlite_migration`, currently V12.
+- **Migrations** (`db::schema.rs`) — `rusqlite_migration`, currently V13.
   SQLite can't alter CHECK constraints, so schema-changing migrations use a
   recreate-repopulate-swap dance; foreign keys are toggled off around the
   whole migration (the pragma is a no-op inside a transaction). Each
@@ -211,7 +312,11 @@ clamped user setting). Design points:
   0–1, `tags` JSON array, nullable `category_id`, per-article
   reading-appearance overrides, `updated_at` everywhere), `categories` (flat
   folders, case-insensitively unique names, `ON DELETE SET NULL` so deleting
-  a category un-categorizes rather than deletes), `settings` (KV).
+  a category un-categorizes rather than deletes, `icon` — an id into the
+  frontend's icon set (the curated pack in `lib/categoryIcons.ts`, or any of
+  the full vendored Lucide set in `lib/lucideIcons.ts` picked via
+  `CategoryIconPicker`'s search), defaulting to `'folder'`, see `V13`),
+  `settings` (KV).
 - **Tags** — always lowercase/trimmed/deduped; `db::queries::normalize_tags`
   is the single choke point every tag-writing path goes through. There is no
   separate tags table — a tag is just a string inside each article's `tags`
@@ -268,7 +373,9 @@ Stored article HTML is untrusted input rendered with `{@html}`, so:
 4. **Protocol handler traversal guard** — DB-validated article id plus
    canonicalized path containment, with tests covering forged ids and `..`.
 5. **Offline asset rule** — no CDN fonts/icons; everything ships vendored
-   (`@fontsource*` packages, inline SVG icons).
+   (`@fontsource*` packages, inline SVG icons — including the full 1848-icon
+   Lucide set backing `CategoryIconPicker`'s search, vendored as local
+   `.svelte` files and lazily code-split per icon rather than fetched).
 
 ## Updates
 
@@ -295,15 +402,42 @@ go out unauthenticated.
 
 - **Svelte 5 runes** (`$props`, `$state`, `$effect`, `$derived`) throughout;
   stores are `.svelte.ts` modules.
-- **Routes** — `/` (library), `/favorites`, `/category/[id]`, `/tags`
-  (rename/delete every tag in the library, unlike the sidebar's own
-  filtered/narrowed Tags section — see Storage and schema above),
-  `/reader/[id]`, `/sources`, `/settings`. Global dialogs (add source,
+- **Routes** — `/` (library), `/favorites`, `/category/[id]` (its settings
+  gear opens `CategorySettingsDialog` to rename/delete/re-icon that one
+  category), `/categories` (every category in one list, create/rename/
+  delete/re-icon each — mobile's equivalent of `/category/[id]`'s gear, since
+  there's no per-category page reachable from the mobile category sheet's
+  filter-chip taps; linked from `MobileCategorySheet`'s "Manage categories"
+  row and from the desktop sidebar's own "Manage categories" row), `/tags` (rename/delete
+  every tag in the library, unlike the sidebar's own filtered/narrowed Tags
+  section — see Storage and schema above), `/reader/[id]`, `/sources`,
+  `/settings`. Global dialogs (add source, the add-a-source activity panel,
   Raindrop import, delete-all, move-to-category) are mounted once in the
-  root layout and driven by `uiStore`.
+  root layout and driven by `uiStore`. `Shell.svelte` has two top-level
+  navigation lists carrying the same four destinations — Library/
+  Favorites/Sources/Settings — the desktop sidebar's and the mobile
+  bottom bar's (mobile has no sidebar, so the bottom bar is its only
+  top-level chrome). Source management is a top-level destination on
+  both platforms, so Settings carries no "Manage sources" row at all.
+  The desktop sidebar's Categories section is collapsible (like Tags)
+  and caps itself to the virtual Uncategorized entry plus the five
+  busiest real categories (by article count); a "Manage categories" row
+  at its foot links to `/categories`, which lists and manages every
+  category. The `/sources` page shows every action inline on desktop —
+  header buttons for Add/Sync all/Import CSV/Export CSV and per-source
+  Pause/Sync/Remove buttons on each card — and only narrow viewports
+  fall back to the ⋮ overflow menus, via breakpoint-gated CSS classes.
 - **Data flow** — commands via `api.ts` (typed `invoke` wrappers; the one
   place the `{kind, message}` error shape from `error.rs` is parsed), events
   via `events.ts` into rune-store refetches.
+- **Tags UI is shared, not duplicated** — `TagBrowser.svelte` owns the
+  search/facet-narrow/select logic (backed by `list_tags_filtered`, see
+  Storage and schema above) and is embedded in two different chrome
+  wrappers: the desktop sidebar's collapsible Tags section (`Shell.svelte`)
+  and a mobile bottom sheet (`MobileTagSheet.svelte`, triggered from a
+  "Tags" chip next to the mobile category-chip row in
+  `ArticleCollection.svelte` — there's no sidebar on mobile to host it
+  inline). Both read/write the same global `libraryFiltersStore`.
 - **Adapter** — `@sveltejs/adapter-static`; the Tauri webview loads the
   built SPA from disk.
 - **Theming** — a single app-wide `light`/`dark` theme (an article may
@@ -332,8 +466,11 @@ application code, and the workaround stays as cheap hardening.
   WebView `<input>` is backed by an `EditText` that otherwise runs on-device
   entity detection per edit. (Hardening; not the fix for the input-freeze
   bug, which was garbled titles — see capture/extract above.)
-- `gen/android` is committed (see README for the three manual patches and
-  why `frontend/` being a sibling of `src-tauri/` requires them).
+- `gen/android` is committed (see README for the manual patches and why
+  `frontend/` being a sibling of `src-tauri/` requires them). Besides
+  `MainActivity.kt`, `ShareActivity.kt`/`ShareWorker.kt`/`NativeCapture.kt`
+  (see "Share intent (Android)" above) are also hand-maintained files
+  outside `generated/`, not template output.
 
 ## Testing approach
 

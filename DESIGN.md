@@ -117,7 +117,7 @@ components:
 
 Legere reads like a personal index of things worth keeping, not a SaaS dashboard for managing them. The reference points are index cards, specimen labels, and library call-slips: warm paper, a single confident ink accent, quiet hairline structure, and type that gets out of the way except in exactly one place — the moment an article opens and its headline sets in a serif built for reading. Everything in the chrome (nav, buttons, meta, controls) speaks in a plain, workhorse sans; everything in the reading surface speaks in a warm literary serif. The two never trade places.
 
-The system is deliberately narrow-palette: neutrals plus one accent, carried at low-to-moderate coverage (dots, active states, links, the odd filled button) rather than large color fields. Corners are consistently soft but not bubbly; shadows are structural, not decorative, and mostly ride on a hairline ring rather than a heavy drop shadow. Motion is a single snap (one easing curve, two durations) used everywhere small things move — a button press, a card lift, a dialog's entrance — so the whole app feels like one material rather than a pile of separately-tuned transitions.
+The system is deliberately narrow-palette: neutrals plus one accent, carried at low-to-moderate coverage (active states, links, the odd filled button) rather than large color fields. Corners are consistently soft but not bubbly; shadows are structural, not decorative, and mostly ride on a hairline ring rather than a heavy drop shadow. Motion is a single snap (one easing curve, two durations) used everywhere small things move — a button press, a card lift, a dialog's entrance — so the whole app feels like one material rather than a pile of separately-tuned transitions.
 
 Confirmed anti-references: the previous default Tauri/Android template icon and a generic dark-navy/lavender "AI SaaS" palette are explicitly rejected — not evidence to preserve, evidence of what this system replaced. A cream-paper-plus-serif "cozy bookish" cliché was also deliberately avoided; the paper tone here is closer to bone/warm-neutral than cream, and the serif is reserved for reading, not chrome.
 
@@ -133,7 +133,7 @@ Confirmed anti-references: the previous default Tauri/Android template icon and 
 Calm and warm at rest, with a single deep, confident green doing all of the system's "this is active / this is mine / this matters" signaling.
 
 ### Primary
-- **Ledger Pine** (`#2d6b50` light / `#7fc39d` dark): the one accent. Filled buttons, active nav/segment state, links inside prose, favorite/unread markers, focus rings, progress fills. Used for identity too — it's the fill color of the bookmark-ribbon mark.
+- **Ledger Pine** (`#2d6b50` light / `#7fc39d` dark): the one accent. Filled buttons, active nav/segment state, links inside prose, favorite markers, focus rings, progress fills. Used for identity too — it's the fill color of the bookmark-ribbon mark. There is deliberately no separate "unread" mark — see the Library section below.
 
 ### Neutral
 - **Warm Paper** (`#faf8f3` light / `#1a1814` dark): the page background.
@@ -170,11 +170,17 @@ Calm and warm at rest, with a single deep, confident green doing all of the syst
 
 A responsive shell: a fixed 256px sidebar (desktop) or a top bar + bottom tab bar (mobile, <768px breakpoint), with the content area scrolling independently. Page content uses a consistent `36px`/`56px` (desktop) or `20px 16px`/`32px` (mobile) padding rhythm.
 
-The library grid holds cards to a **fixed comfortable width** (`repeat(auto-fill, minmax(216px, 264px))`) rather than letting `1fr` tracks stretch — more columns appear as the window widens; existing columns never balloon. This is a deliberate correction from an earlier version that used `minmax(300px, 1fr)` with a forced 1:1 card aspect ratio, which produced oversized cards in any window narrower than ~3 columns' worth.
+The library grid holds cards to a **fixed comfortable width** (`repeat(auto-fill, minmax(216px, 264px))` desktop, `minmax(152px, 208px)` on a phone-width grid) rather than letting `1fr` tracks stretch — more columns appear as the window widens; existing columns never balloon. This is a deliberate correction from an earlier version that used `minmax(300px, 1fr)` with a forced 1:1 card aspect ratio, which produced oversized cards in any window narrower than ~3 columns' worth. The mobile tier exists so a phone gets two columns instead of one — `ArticleCollection`'s virtualizer picks the tier from its own measured grid width (not viewport width), so it degrades gracefully on anything in between.
 
 The reader column is capped by a user-selectable measure (narrow 600px / default 680px / wide 760px), centered, independent of window width.
 
+Scrollbars are **thin** (6px, see `tokens.css`) — a classic space-reserving scrollbar is part of the scroll container's content box, so anything wider visibly nudges the content beside it (e.g. the sidebar's rows shifting left) the moment a section grows tall enough to need one. Keep new scrollable areas on this width; don't re-widen or overlay-compensate per component. The desktop sidebar is the one exception: it hides its scrollbar entirely (`scrollbar-width: none` in `Shell.svelte`) — it only overflows when a large section is expanded, and even a thin reserved track shifted its rows left; wheel and keyboard scrolling still work, the handle is just never shown.
+
 Mobile touch targets floor at 44px (`.btn-icon` widens from 36px to 44px under 768px); this floor is load-bearing, not decorative, and should be preserved in any new mobile control.
+
+The mobile collection header (Library/Favorites/category pages) is three rows, not a shrunk desktop toolbar: title + refresh/view-toggle icons share the top row, a full-width search field gets its own row, and category/tag chips scroll in a third. `ArticleCollection`'s `.header-controls` wrapper goes `display: contents` under the mobile breakpoint so its children can become direct CSS Grid participants of `.header-row` without duplicating any markup.
+
+A **bottom sheet** (`MobileTagSheet.svelte`, sharing its list/search logic with the sidebar's Tags section via `TagBrowser.svelte`) is this system's mobile stand-in for a sidebar section that has no room to exist inline — full-width, slides up from the bottom, 20px top corners only, a drag-handle bar, otherwise the same surface/shadow/motion vocabulary as a dialog (`--shadow-lg`, `--ease-snap`).
 
 ## Elevation & Depth
 
@@ -220,12 +226,20 @@ Consistently soft, never sharp and never maximal. Radius scales with the size an
 - **Focus:** border shifts to Ledger Pine; no glow/ring, the border color change is the whole affordance.
 
 ### Navigation
-- Sidebar (desktop) / bottom tab bar (mobile): plain-sans labels, active item takes a Card-Stock-tinted pill background and Ledger Pine text/weight. Bottom bar items are full 44px+ touch targets with icon-over-label. The sidebar's Categories section lists user-managed flat folders, never provenance labels such as Direct link or Raindrop import. Uncategorized is always first (shown whenever any category is, even at 0 articles), the rest alphabetical; each links to its own `/category/[id]` page rather than filtering in place.
+- Sidebar (desktop) / bottom tab bar (mobile): plain-sans labels, active item takes a Card-Stock-tinted pill background and Ledger Pine text/weight. Bottom bar items are full 44px+ touch targets with icon-over-label. The sidebar's Categories section is a collapsible section header (the same uppercase label + rotating-chevron idiom as Tags) listing user-managed flat folders, never provenance labels such as Direct link or Raindrop import. Uncategorized is always first (shown whenever any category is, even at 0 articles); real categories are capped to the busiest 5 by article count so a large library can't push the rest of the sidebar off-screen, with a "Manage categories" row (count on the right, mirroring "Manage tags") linking to `/categories`. Each category links to its own `/category/[id]` page rather than filtering in place.
+- The desktop sidebar's top-level items and the mobile bottom bar's tabs are the same four — Library / Favorites / Sources / Settings — as equal top-level destinations ("Add source" and the activity row live above the sidebar's list as separate controls; they're shortcuts, not nav slots).
+- A page dedicated to managing a thing shows that thing's actions outright when there's room: `/sources` renders its header actions (Add source, Sync all, Import CSV, Export CSV) and each card's actions (Pause/Make active, Sync now, Remove) as plain buttons on desktop, and only narrow viewports collapse the secondary ones behind ⋮ overflow menus. Don't reach for a ⋮ menu on a wide screen just because mobile needs one.
+- **Category identity:** a category shows a small muted-ink glyph, chosen from a fixed pack (`lib/categoryIcons.ts`) via the icon picker on `/categories` or `/category/[id]`'s settings dialog — never a color. Every category defaults to a plain folder glyph until a different one is picked; there's no per-category color coding anywhere in the app.
 
 ### Dialogs
 - **Style:** 20px radius, Bright Stock background (a step brighter than the page for real overlay separation), `--shadow-lg`.
 - **Scrim:** ink-tinted translucent backdrop (`color-mix(in srgb, var(--color-text) 45%, transparent)`) with a light blur — never pure black.
 - **Motion:** scrim fades in, dialog pops in with a slight translateY + scale settle, both on `--duration-base`/`--ease-snap`.
+
+### Bottom Sheet (mobile)
+- **Use:** the mobile stand-in for a desktop sidebar section that has nowhere to live inline — currently just the Tags browser/search (`MobileTagSheet.svelte`).
+- **Style:** full viewport width, anchored to the bottom, 20px radius on the top two corners only, a small centered drag-handle bar, Bright Stock background, `--shadow-lg`, same ink-tinted scrim as a dialog.
+- **Motion:** scrim fades in, sheet slides up + fades in, both on `--duration-base`/`--ease-snap` — the same signature as a dialog's entrance, just from the bottom edge instead of a center pop.
 
 ### Bookmark Mark (signature component)
 The brand mark is a single filled bookmark-ribbon shape (not a lettermark) — a rounded-top rectangle with a V-notch cut at the bottom. It renders in `currentColor` inline next to the "Legere" wordmark (sidebar/topbar) and as a paper-ribbon-on-Ledger-Pine app icon/favicon. It never gets a second color, a gradient, or a drop shadow of its own.
