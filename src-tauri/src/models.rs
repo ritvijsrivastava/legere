@@ -192,9 +192,16 @@ pub struct SyncResult {
     pub new_article_count: u32,
 }
 
+/// Result of writing an export CSV to disk (articles or sources — see
 /// `commands::export`/`commands::sources`) — everything Settings/Sources
 /// needs to show "exported to `<filename>`" and offer to reveal or
 /// re-share it, without a second round trip.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExportResult {
+    pub path: String,
+    pub filename: String,
+    pub row_count: u32,
+    pub exported_at: String,
 }
 
 /// Metadata about an available update, sent to the frontend.

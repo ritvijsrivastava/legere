@@ -89,6 +89,25 @@ pub fn emit_import_finished(app: &AppHandle, payload: &ImportFinished) {
     let _ = app.emit("import:finished", payload);
 }
 
+/// Same three lifecycle events as `import:*` above, emitted instead by
+/// Settings' "Import articles" (`exports::articles::run_import`, Legere's
+/// own CSV shape) so the two importers' progress can never be confused on
+/// the frontend even though they share the exact same payload shapes
+/// (`ImportProgress`/`ImportFinished`/`ImportFailure`) — both are "parse
+/// rows, capture each through the same pipeline, report progress" at
+/// heart, just fed from different CSV column sets.
+pub fn emit_article_import_started(app: &AppHandle, total: u32) {
+    let _ = app.emit("article_import:started", total);
+}
+
+pub fn emit_article_import_progress(app: &AppHandle, payload: &ImportProgress) {
+    let _ = app.emit("article_import:progress", payload);
+}
+
+pub fn emit_article_import_finished(app: &AppHandle, payload: &ImportFinished) {
+    let _ = app.emit("article_import:finished", payload);
+}
+
 /// A background "add a source" job (`capture_jobs::CaptureJobs`) was
 /// enqueued, retried, dismissed, succeeded, or failed — a cue for the
 /// frontend's activity panel to refetch `list_capture_jobs`. Coarse-

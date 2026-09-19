@@ -5,6 +5,7 @@ mod content_server;
 mod db;
 mod error;
 mod events;
+mod export_paths;
 mod gc;
 mod mobile_tls;
 mod models;
@@ -228,8 +229,15 @@ pub fn run() {
             commands::import::import_raindrop_csv,
             commands::import::preview_raindrop_csv,
             commands::import::cancel_raindrop_import,
+            commands::export::export_articles_csv,
+            commands::export::preview_articles_csv,
+            commands::export::import_articles_csv,
+            commands::export::cancel_articles_import,
+            commands::sources::export_sources_csv,
+            commands::sources::import_sources_csv,
             commands::system::get_data_dir,
             commands::system::write_text_file,
+            commands::system::read_text_file,
             get_last_dismissed_version,
             set_last_dismissed_version,
             get_release_notes,

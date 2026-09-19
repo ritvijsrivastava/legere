@@ -1,11 +1,12 @@
+use std::collections::HashSet;
 
 use tauri::{AppHandle, Manager, State};
 
 use crate::capture_jobs::CaptureJob;
 use crate::db::queries;
 use crate::error::AppError;
-use crate::sources::rss;
 use crate::events::{self, CaptureSucceeded, SyncError, SyncFinished};
+use crate::export_paths::write_export_csv;
 use crate::state::AppState;
 use crate::sync::sync_all_sources;
 use crate::urlx::normalize_source_url;
@@ -244,6 +245,124 @@ pub async fn remove_source(
     .await?;
     events::emit_source_changed(&app);
     result
+}
+
+/// Writes every current source to a CSV file under `{data_dir}/exports/`
+/// — see `sources_csv` for the column shape. Synchronous, like
+/// `export_articles_csv`: a plain DB read + file write, no network
+/// involved.
+#[tauri::command]
+pub async fn export_sources_csv(state: State<'_, AppState>) -> Result<ExportResult, AppError> {
+    let pool = state.pool.clone();
+    let sources = tokio::task::spawn_blocking(move || {
+        let conn = pool.get()?;
+        Ok::<_, AppError>(queries::list_sources(&conn)?)
+    })
+    .await??;
+
+    let row_count = sources.len();
+    let csv = sources_csv::build_csv(&sources)?;
+    write_export_csv(&state.data_dir, "sources", csv, row_count).await
+}
+
+/// Registers a recurring RSS source and runs its first sync in the
+/// background, exactly like `spawn_capture_job`/`add_source_background`
+/// for a feed the sniffing step already recognized as one — except
+/// `import_sources_csv` already knows every row is a feed URL (it came
+/// from a previous `export_sources_csv`, or a hand-written CSV in the
+/// same shape), so this skips straight to `insert_rss_source_and_sync`
+/// instead of re-sniffing via `run_add_source_auto`.
+fn spawn_source_import_job(app: AppHandle, id: String, feed_url: String) {
+    let handle = {
+        let app = app.clone();
+        let id = id.clone();
+        let feed_url = feed_url.clone();
+        tauri::async_runtime::spawn(async move {
+            let state = app.state::<AppState>();
+            match insert_rss_source_and_sync(&app, &state, feed_url.clone()).await {
+                Ok(source) => {
+                    state.capture_jobs.succeed(&id);
+                    events::emit_capture_succeeded(
+                        &app,
+                        &CaptureSucceeded {
+                            kind: "rss".to_string(),
+                            title: source.name,
+                        },
+                    );
+                }
+                Err(err) => {
+                    tracing::warn!(feed_url = %feed_url, %err, "background source import failed");
+                    state.capture_jobs.fail(&id, err.to_string());
+                }
+            }
+            events::emit_capture_changed(&app);
+        })
+    };
+    app.state::<AppState>()
+        .capture_jobs
+        .attach_handle(&id, handle);
+}
+
+/// Summary returned once every new row in the CSV has been *queued* for
+/// background capture (not once every source has finished syncing — that
+/// still runs through the same activity-dock/`capture:*`-event machinery
+/// as `add_source_background`, deliberately reused rather than
+/// duplicated with a second progress UI).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SourcesImportSummary {
+    /// Distinct new feed URLs queued for background capture.
+    pub queued: u32,
+    /// Rows skipped outright because that feed URL is already a source
+    /// (including duplicates within the CSV itself).
+    pub skipped_duplicate: u32,
+}
+
+/// Reads `path` (a CSV in this app's own sources-export shape — see
+/// `sources_csv`) and queues every feed URL not already present as a
+/// background add, deduped against both the current source list and
+/// other rows in the same file. Returns as soon as every new row is
+/// queued; track the rest via `list_capture_jobs`/`capture:*` events,
+/// exactly like `add_source_background`.
+#[tauri::command]
+pub async fn import_sources_csv(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<SourcesImportSummary, AppError> {
+    let csv_bytes = tokio::fs::read(&path).await?;
+    sources_csv::validate_csv(&csv_bytes)?;
+    let feed_urls = sources_csv::parse_feed_urls(&csv_bytes)?;
+
+    let pool = state.pool.clone();
+    let mut seen: HashSet<String> = tokio::task::spawn_blocking(move || {
+        let conn = pool.get()?;
+        Ok::<_, AppError>(
+            queries::list_sources(&conn)?
+                .into_iter()
+                .filter_map(|s| s.feed_url)
+                .collect(),
+        )
+    })
+    .await??;
+
+    let mut queued = 0u32;
+    let mut skipped_duplicate = 0u32;
+    for raw_feed_url in feed_urls {
+        let feed_url = normalize_source_url(&raw_feed_url);
+        if !seen.insert(feed_url.clone()) {
+            skipped_duplicate += 1;
+            continue;
+        }
+        let job = state.capture_jobs.enqueue(feed_url.clone());
+        events::emit_capture_changed(&app);
+        spawn_source_import_job(app.clone(), job.id.clone(), feed_url);
+        queued += 1;
+    }
+
+    Ok(SourcesImportSummary {
+        queued,
+        skipped_duplicate,
+    })
 }
 
 /// Syncs one source by id, marking it synced (or errored) afterward. Shared

@@ -313,6 +313,43 @@ pub fn list_articles(conn: &Connection) -> rusqlite::Result<Vec<ArticleSummary>>
     rows.collect()
 }
 
+/// One row of `list_articles_for_export`'s result — exactly the columns
+/// Settings' "Export articles" writes to CSV (see `exports::articles`),
+/// nothing more (no id/content_html/etc.).
+pub struct ArticleExportRecord {
+    pub title: String,
+    pub link: String,
+    pub category_name: Option<String>,
+    pub tags: Vec<String>,
+    pub fetched_at: String,
+    pub favorited: bool,
+}
+
+/// Whole-library read for Settings' "Export articles" — like
+/// [`list_articles`], not paginated, since an export always wants every
+/// row. Ordered the same way (`fetched_at DESC`) purely for a stable,
+/// readable file; import doesn't care about row order.
+pub fn list_articles_for_export(conn: &Connection) -> rusqlite::Result<Vec<ArticleExportRecord>> {
+    let mut stmt = conn.prepare(
+        "SELECT articles.title, articles.link, articles.tags, articles.favorited,
+                articles.fetched_at, categories.name AS category_name
+         FROM articles
+         LEFT JOIN categories ON categories.id = articles.category_id
+         ORDER BY articles.fetched_at DESC",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(ArticleExportRecord {
+            title: row.get("title")?,
+            link: row.get("link")?,
+            tags: parse_tags(row.get("tags")?),
+            favorited: row.get("favorited")?,
+            fetched_at: row.get("fetched_at")?,
+            category_name: row.get("category_name")?,
+        })
+    })?;
+    rows.collect()
+}
+
 /// Escapes `%`/`_` (SQLite `LIKE` wildcards) and the escape character
 /// itself in free-text search input, so a user searching for e.g. `50%
 /// done` doesn't have `%` behave as a wildcard. Paired with `ESCAPE '\'`

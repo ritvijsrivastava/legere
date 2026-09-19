@@ -21,3 +21,13 @@ pub async fn write_text_file(path: String, contents: String) -> Result<(), AppEr
     tokio::fs::write(&path, contents).await?;
     Ok(())
 }
+
+/// Reads a whole text file back — the other half of `write_text_file`,
+/// used by Settings/Sources' "Save a copy..." action to hand an already-
+/// written export (see `export_paths::write_export_csv`) to a location
+/// the user picks via the save dialog, without re-running the export
+/// itself a second time.
+#[tauri::command]
+pub async fn read_text_file(path: String) -> Result<String, AppError> {
+    Ok(tokio::fs::read_to_string(&path).await?)
+}

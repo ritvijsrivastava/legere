@@ -3,8 +3,9 @@ import { libraryStatsStore } from './stores/libraryStats.svelte';
 import { sourcesStore } from './stores/sources.svelte';
 import { uiStore } from './stores/ui.svelte';
 import { importStore } from './stores/import.svelte';
+import { articleImportStore } from './stores/articleImport.svelte';
 import { captureJobsStore } from './stores/captureJobs.svelte';
-import type { CaptureSucceeded } from './types';
+import type { CaptureSucceeded, ImportFinished, ImportProgress } from './types';
 
 interface SyncFinishedPayload {
 	new_article_count: number;
@@ -59,6 +60,23 @@ export function registerBackendEvents() {
 
 	listen<ImportFinished>('import:finished', (event) => {
 		importStore.finish(event.payload);
+		if (event.payload.failed.length > 0) {
+			uiStore.showToast(
+				`Import finished with ${event.payload.failed.length} failed link${event.payload.failed.length === 1 ? '' : 's'}`
+			);
+		}
+	});
+
+	listen<number>('article_import:started', (event) => {
+		articleImportStore.started(event.payload);
+	});
+
+	listen<ImportProgress>('article_import:progress', (event) => {
+		articleImportStore.progress(event.payload);
+	});
+
+	listen<ImportFinished>('article_import:finished', (event) => {
+		articleImportStore.finish(event.payload);
 		if (event.payload.failed.length > 0) {
 			uiStore.showToast(
 				`Import finished with ${event.payload.failed.length} failed link${event.payload.failed.length === 1 ? '' : 's'}`

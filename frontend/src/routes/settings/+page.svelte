@@ -1,13 +1,19 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { settingsStore } from '$lib/stores/settings.svelte';
-	import { sourcesStore } from '$lib/stores/sources.svelte';
 	import { uiStore } from '$lib/stores/ui.svelte';
 	import { importStore } from '$lib/stores/import.svelte';
+	import { articleImportStore } from '$lib/stores/articleImport.svelte';
 	import ChevronRight from '$lib/icons/ChevronRight.svelte';
-	import type { AppTheme, LibraryView, ReaderMeasure } from '$lib/types';
+	import Download from '$lib/icons/Download.svelte';
+	import Upload from '$lib/icons/Upload.svelte';
+	import Globe from '$lib/icons/Globe.svelte';
+	import FileText from '$lib/icons/FileText.svelte';
+	import ExportResultCard from '$lib/components/ExportResultCard.svelte';
+	import type { AppTheme, ExportResult, LibraryView, ReaderMeasure } from '$lib/types';
 	import { isTauri } from '$lib/platform';
 	import { errorMessage } from '$lib/api';
+	import * as api from '$lib/api';
 	import {
 		currentVersion,
 		checkForUpdate,
@@ -20,13 +26,30 @@
 		type InstallProgress
 	} from '$lib/update';
 
-	$effect(() => {
-		sourcesStore.refresh();
-	});
-
 	const importPct = $derived(
 		importStore.total > 0 ? Math.round((importStore.processed / importStore.total) * 100) : 0
 	);
+	const articleImportPct = $derived(
+		articleImportStore.total > 0
+			? Math.round((articleImportStore.processed / articleImportStore.total) * 100)
+			: 0
+	);
+
+	let articlesExportResult = $state<ExportResult | null>(null);
+	let exportingArticles = $state(false);
+	let articlesExportError = $state('');
+
+	async function exportArticles() {
+		exportingArticles = true;
+		articlesExportError = '';
+		try {
+			articlesExportResult = await api.exportArticlesCsv();
+		} catch (e) {
+			articlesExportError = errorMessage(e);
+		} finally {
+			exportingArticles = false;
+		}
+	}
 
 	// The web build has no installer to update, and the underlying Tauri
 	// plugin calls throw outside a Tauri context, so gate all of this off.
@@ -161,10 +184,12 @@
 		const next = Math.max(16, Math.min(22, settingsStore.current.reader_font_size + delta));
 		settingsStore.update({ reader_font_size: next });
 	}
-	function setImportConcurrency(delta: number) {
-		const next = Math.max(5, Math.min(10, settingsStore.current.import_concurrency + delta));
+	function setImportConcurrency(value: number) {
+		const next = Math.max(5, Math.min(10, Math.round(value)));
 		settingsStore.update({ import_concurrency: next });
 	}
+
+	let advancedOpen = $state(false);
 
 	const appThemeOptions: { value: AppTheme; label: string }[] = [
 		{ value: 'light', label: 'Light' },
@@ -180,16 +205,13 @@
 <div class="settings-page">
 	<h1>Settings</h1>
 
-	<!-- Reading & library -->
+	<!-- Display & reading -->
 	<section class="settings-card">
-		<h3>Appearance</h3>
-		<p class="text-muted section-desc">
-			Applies everywhere, immediately. Override any of it for one article from its Aa menu
-			while reading — that doesn't change this default.
-		</p>
-		<div class="row">
+		<h2 class="group-title">Display &amp; Reading</h2>
+
+		<div class="row row-grouped">
 			<span class="row-label">Theme</span>
-			<div class="seg">
+			<div class="seg seg-compact">
 				{#each appThemeOptions as opt (opt.value)}
 					<label class="seg-opt">
 						<input
@@ -203,7 +225,35 @@
 				{/each}
 			</div>
 		</div>
+
+		<div class="row row-grouped">
+			<span class="row-label">Library layout</span>
+			<div class="seg seg-compact">
+				<label class="seg-opt">
+					<input
+						type="radio"
+						name="lv2"
+						checked={settingsStore.current.default_library_view === 'cards'}
+						onchange={() => setLibraryView('cards')}
+					/>
+					<span>Cards</span>
+				</label>
+				<label class="seg-opt">
+					<input
+						type="radio"
+						name="lv2"
+						checked={settingsStore.current.default_library_view === 'list'}
+						onchange={() => setLibraryView('list')}
+					/>
+					<span>List</span>
+				</label>
+			</div>
+		</div>
+
 		<div class="card-divider"></div>
+
+		<h3 class="row-title">Reader appearance</h3>
+		<p class="text-muted section-desc">Override per article from its Aa menu while reading.</p>
 		<div class="row">
 			<span class="row-label">Text width</span>
 			<div class="seg">
@@ -244,80 +294,116 @@
 		</div>
 	</section>
 
-	<section class="settings-card">
-		<h3>Library</h3>
-		<p class="text-muted section-desc">Default view for the library.</p>
-		<div class="seg">
-			<label class="seg-opt">
-				<input
-					type="radio"
-					name="lv2"
-					checked={settingsStore.current.default_library_view === 'cards'}
-					onchange={() => setLibraryView('cards')}
-				/>
-				<span>Cards</span>
-			</label>
-			<label class="seg-opt">
-				<input
-					type="radio"
-					name="lv2"
-					checked={settingsStore.current.default_library_view === 'list'}
-					onchange={() => setLibraryView('list')}
-				/>
-				<span>List</span>
-			</label>
-		</div>
-	</section>
-
-	<!-- Content: sources, import, sync -->
+	<!-- Content: import, export, sync. Source management lives on its own
+	     top-level "Sources" nav destination now (see `Shell.svelte`), so it
+	     no longer needs a settings row of its own. -->
 	<section class="settings-card zone-start">
-		<h3>Sources</h3>
-		<a href="/sources" class="sources-link">
-			<span>Manage sources</span>
-			<span class="sources-count text-muted">{sourcesStore.items.length}</span>
-			<ChevronRight size={14} />
-		</a>
-	</section>
+		<h2 class="group-title">Sync &amp; Data</h2>
 
-	<section class="settings-card">
-		<h3>Import</h3>
+		<div class="row">
+			<div class="row-copy">
+				<span class="row-label">Auto-fetch articles</span>
+				<p class="row-sublabel text-muted">Fetches from all sources while Legere is open.</p>
+			</div>
+			<div class="seg seg-compact">
+				<label class="seg-opt">
+					<input
+						type="radio"
+						name="sync"
+						checked={settingsStore.current.autosync}
+						onchange={() => setAutosync(true)}
+					/>
+					<span>On</span>
+				</label>
+				<label class="seg-opt">
+					<input
+						type="radio"
+						name="sync"
+						checked={!settingsStore.current.autosync}
+						onchange={() => setAutosync(false)}
+					/>
+					<span>Off</span>
+				</label>
+			</div>
+		</div>
+
 		{#if !tauri}
+			<div class="card-divider"></div>
 			<p class="text-muted section-desc">
-				Not available in the web build — install the desktop or Android app to import bookmarks.
+				Backup, restore, and import aren't available in the web build — install the desktop or
+				Android app to back up or import your library.
 			</p>
 		{:else}
-			<p class="text-muted section-desc">
-				Import bookmarks from a Raindrop.io CSV export. Links, tags, and folders are reviewed before capture;
-				notes and highlights are not imported.
-			</p>
-			<div class="row">
-				<span class="row-label">Concurrent captures</span>
-				<div class="stepper">
-					<button
-						class="btn btn-icon btn-secondary"
-						onclick={() => setImportConcurrency(-1)}
-						disabled={settingsStore.current.import_concurrency <= 5}
-						aria-label="Fewer concurrent captures"
-					>
-						–
-					</button>
-					<span class="stepper-value tabular-nums">{settingsStore.current.import_concurrency}</span>
-					<button
-						class="btn btn-icon btn-secondary"
-						onclick={() => setImportConcurrency(1)}
-						disabled={settingsStore.current.import_concurrency >= 10}
-						aria-label="More concurrent captures"
-					>
-						+
-					</button>
+			<div class="card-divider"></div>
+
+			<button class="data-row" onclick={exportArticles} disabled={exportingArticles}>
+				<span class="data-row-icon"><Download size={16} /></span>
+				<span class="data-row-copy">
+					<span class="data-row-title">Export library</span>
+					<span class="data-row-sub text-muted">
+						{exportingArticles ? 'Exporting…' : 'Save every article, tag, and category to CSV'}
+					</span>
+				</span>
+				<ChevronRight size={14} />
+			</button>
+			{#if articlesExportError}
+				<p class="error-text row-error">{articlesExportError}</p>
+			{/if}
+			{#if articlesExportResult}
+				<div class="row-result">
+					<ExportResultCard result={articlesExportResult} defaultSaveName={articlesExportResult.filename} />
 				</div>
-			</div>
-			<p class="text-muted section-desc concurrency-desc">
-				How many links to capture at once during an import (5–10). Higher finishes a large export
-				faster; lower is gentler on the sites you're importing from. Takes effect on the next import.
-			</p>
-			<button class="btn btn-secondary" onclick={() => uiStore.openImportDialog()}>
-				{importStore.running ? `Importing… ${importPct}%` : 'Import from Raindrop'}
+			{/if}
+
+			<button class="data-row" onclick={() => uiStore.openImportArticlesDialog()}>
+				<span class="data-row-icon"><Upload size={16} /></span>
+				<span class="data-row-copy">
+					<span class="data-row-title">Restore from CSV</span>
+					<span class="data-row-sub text-muted">
+						{articleImportStore.running ? `Importing… ${articleImportPct}%` : 'Import an existing Legere backup'}
+					</span>
+				</span>
+				<ChevronRight size={14} />
+			</button>
+			{#if articleImportStore.running}
+				<div class="import-progress">
+					<div class="import-progress-track">
+						<div class="import-progress-fill" style:transform={`scaleX(${articleImportPct / 100})`}></div>
+					</div>
+					<p class="text-muted import-progress-label">
+						{articleImportStore.imported} imported · {articleImportStore.skippedDuplicate} already saved
+						· {articleImportStore.failedCount} failed
+					</p>
+				</div>
+			{:else if articleImportStore.finished}
+				<div class="import-progress">
+					<p class="text-muted import-progress-label">
+						Last import{articleImportStore.cancelled ? ' (cancelled)' : ''}: {articleImportStore.imported}
+						imported · {articleImportStore.skippedDuplicate} already saved · {articleImportStore.failedCount}
+						failed
+					</p>
+					<div class="import-summary-actions">
+						{#if articleImportStore.failedCount > 0}
+							<button class="btn btn-ghost import-summary-btn" onclick={() => uiStore.openImportArticlesDialog()}>
+								View failed links
+							</button>
+						{/if}
+						<button class="btn btn-ghost import-summary-btn" onclick={() => articleImportStore.dismiss()}>
+							Dismiss
+						</button>
+					</div>
+				</div>
+			{/if}
+
+			<button class="data-row" onclick={() => uiStore.openImportDialog()}>
+				<span class="data-row-icon"><Globe size={16} /></span>
+				<span class="data-row-copy">
+					<span class="data-row-title">Import from Raindrop.io</span>
+					<span class="data-row-sub text-muted">
+						{importStore.running ? `Importing… ${importPct}%` : 'Links, folders, and tags'}
+					</span>
+				</span>
+				<ChevronRight size={14} />
 			</button>
 			{#if importStore.running}
 				<div class="import-progress">
@@ -333,9 +419,6 @@
 					</p>
 				</div>
 			{:else if importStore.finished}
-				<!-- Stays visible — not tied to the dialog — until a new import starts
-				     or the user explicitly dismisses it below. Lost on app restart,
-				     same as the rest of this in-memory store; that's expected, not a bug. -->
 				<div class="import-progress">
 					<p class="text-muted import-progress-label">
 						Last import{importStore.cancelled ? ' (cancelled)' : ''}: {importStore.imported} imported ·
@@ -353,39 +436,39 @@
 					</div>
 				</div>
 			{/if}
-		{/if}
-	</section>
 
-	<section class="settings-card">
-		<h3>Sync</h3>
-		<p class="text-muted section-desc">
-			Automatically fetch new articles from all sources while Legere is open.
-		</p>
-		<div class="seg">
-			<label class="seg-opt">
-				<input
-					type="radio"
-					name="sync"
-					checked={settingsStore.current.autosync}
-					onchange={() => setAutosync(true)}
-				/>
-				<span>On</span>
-			</label>
-			<label class="seg-opt">
-				<input
-					type="radio"
-					name="sync"
-					checked={!settingsStore.current.autosync}
-					onchange={() => setAutosync(false)}
-				/>
-				<span>Off</span>
-			</label>
-		</div>
+			<div class="card-divider"></div>
+
+			<details class="advanced" bind:open={advancedOpen}>
+				<summary class="advanced-summary">
+					<span>Advanced data controls</span>
+					<span class="advanced-chevron"><ChevronRight size={13} /></span>
+				</summary>
+				<div class="advanced-body">
+					<div class="row">
+						<span class="row-label">Concurrent captures ({settingsStore.current.import_concurrency})</span>
+					</div>
+					<input
+						class="slider"
+						type="range"
+						min="5"
+						max="10"
+						step="1"
+						value={settingsStore.current.import_concurrency}
+						oninput={(e) => setImportConcurrency(Number(e.currentTarget.value))}
+						aria-label="Concurrent captures"
+					/>
+					<p class="text-muted section-desc concurrency-desc">
+						Higher is faster; lower is gentler on source sites.
+					</p>
+				</div>
+			</details>
+		{/if}
 	</section>
 
 	<!-- App -->
 	<section class="settings-card zone-start">
-		<h3>Updates</h3>
+		<h2 class="group-title">About &amp; Updates</h2>
 		{#if !tauri}
 			<p class="text-muted section-desc">
 				Not available in the web build — install the desktop or Android app to get in-app updates.
@@ -393,7 +476,7 @@
 		{:else}
 			<div class="row">
 				<span class="row-label">Version</span>
-				<span class="text-muted">{version || '—'}</span>
+				<span class="version-value text-muted">{version || '—'}</span>
 			</div>
 
 			<div class="row">
@@ -472,8 +555,13 @@
 			{/if}
 
 			<div class="card-divider"></div>
-			<div class="row">
-				<span class="row-label">What's new</span>
+
+			<div class="data-row whats-new">
+				<span class="data-row-icon"><FileText size={16} /></span>
+				<span class="data-row-copy">
+					<span class="data-row-title">What's new</span>
+					<span class="data-row-sub text-muted">Notes for {version ? `v${version}` : 'this version'}</span>
+				</span>
 			</div>
 			{#if changelogState === 'loading'}
 				<p class="text-muted">Loading…</p>
@@ -500,8 +588,7 @@
 	<section class="settings-card danger-card">
 		<h3 class="danger-heading">Danger zone</h3>
 		<p class="text-muted section-desc">
-			Permanently delete every saved article and its files. Sources are kept, but everything
-			captured from them is gone — this cannot be undone.
+			Sources are kept, but every captured article is gone for good.
 		</p>
 		<button class="btn btn-danger" onclick={() => uiStore.openDeleteAllArticlesDialog()}>
 			Delete all articles
@@ -530,7 +617,7 @@
 	}
 	.settings-card {
 		margin-top: 18px;
-		padding: 24px 26px 26px;
+		padding: 18px 22px 20px;
 		border-radius: var(--radius-lg);
 		background: var(--color-surface);
 		box-shadow: var(--shadow-sm);
@@ -545,16 +632,28 @@
 		margin-top: 56px;
 		box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-danger) 32%, transparent);
 	}
+	.group-title {
+		font-family: var(--font-heading);
+		font-weight: var(--font-heading-weight);
+		font-size: 13px;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: var(--color-muted);
+		margin: 0 0 12px;
+	}
+	.row-title {
+		font-size: 14px;
+		margin: 0 0 6px;
+	}
 	.settings-card h3 {
 		margin: 0 0 4px;
 	}
-	.settings-card > .row:first-of-type,
-	.settings-card > .seg:first-of-type {
+	.settings-card > .row:first-of-type {
 		margin-top: 2px;
 	}
 	.card-divider {
 		height: 1px;
-		margin: 12px 0;
+		margin: 10px 0;
 		background: var(--color-divider);
 	}
 	.danger-heading {
@@ -562,14 +661,14 @@
 	}
 	.section-desc {
 		font-size: 13px;
-		margin: 0 0 14px;
+		margin: 0 0 10px;
 	}
 	.concurrency-desc {
-		margin-top: -4px;
+		margin: 10px 0 0;
 		line-height: 1.5;
 	}
 	.import-progress {
-		margin-top: 12px;
+		margin-top: 10px;
 	}
 	.import-progress-track {
 		height: 6px;
@@ -602,10 +701,28 @@
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		padding: 9px 0;
+		gap: 14px;
+		padding: 6px 0;
+	}
+	.row-grouped {
+		padding: 7px 0;
+	}
+	.row-copy {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		min-width: 0;
+	}
+	.row-sublabel {
+		font-size: 12px;
+		margin: 0;
+		line-height: 1.4;
 	}
 	.row-label {
 		font-size: 14px;
+	}
+	.version-value {
+		font-size: 13px;
 	}
 	.stepper {
 		display: flex;
@@ -617,25 +734,133 @@
 		text-align: center;
 		font-size: 12px;
 	}
-	.sources-link {
+	.seg-compact {
+		flex: none;
+	}
+	/* Icon + title/subtitle list rows — Export/Restore/Raindrop import,
+	   What's New. Same idiom, some are buttons (navigate/act on click),
+	   the changelog row is a plain static heading reusing the same shape. */
+	.data-row {
 		display: flex;
 		align-items: center;
-		gap: 8px;
-		padding: 10px 12px;
-		margin: 2px -12px -2px;
+		gap: 12px;
+		width: 100%;
+		padding: 11px 10px;
+		margin: 2px -10px;
+		border: none;
 		border-radius: var(--radius-md);
-		text-decoration: none;
+		background: none;
+		text-align: left;
+		font-family: inherit;
 		color: var(--color-text);
-		font-size: 14px;
+		cursor: pointer;
 		transition: background var(--duration-base) var(--ease-snap);
 	}
-	.sources-link:hover {
+	button.data-row:hover:not(:disabled) {
 		background: color-mix(in srgb, var(--color-text) 6%, transparent);
 	}
-	.sources-count {
-		margin-left: auto;
+	button.data-row:disabled {
+		cursor: default;
+		opacity: 0.7;
+	}
+	.data-row.whats-new {
+		cursor: default;
+	}
+	.data-row-icon {
+		flex: none;
+		width: 34px;
+		height: 34px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		border-radius: 999px;
+		background: var(--color-surface-raised);
+		box-shadow: var(--shadow-sm);
+		color: var(--color-muted);
+	}
+	.data-row-copy {
+		flex: 1 1 auto;
+		display: flex;
+		flex-direction: column;
+		gap: 1px;
+		min-width: 0;
+	}
+	.data-row-title {
+		font-family: var(--font-heading);
+		font-weight: var(--font-heading-weight);
+		font-size: 14px;
+	}
+	.data-row-sub {
 		font-size: 12px;
 	}
+	.data-row :global(svg:last-child) {
+		flex: none;
+		color: var(--color-muted);
+	}
+	.row-error {
+		margin: 2px 0 8px;
+	}
+	.row-result {
+		margin: -2px 0 8px;
+		padding: 12px 14px 4px;
+		border-radius: var(--radius-md);
+		background: var(--color-surface-raised);
+	}
+
+	.advanced {
+		margin-top: 2px;
+	}
+	.advanced-summary {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		list-style: none;
+		cursor: pointer;
+		font-size: 14px;
+		padding: 4px 0;
+	}
+	.advanced-summary::-webkit-details-marker {
+		display: none;
+	}
+	.advanced-chevron {
+		display: inline-flex;
+		color: var(--color-muted);
+		transition: transform var(--duration-base) var(--ease-snap);
+	}
+	.advanced[open] .advanced-chevron {
+		transform: rotate(90deg);
+	}
+	.advanced-body {
+		padding-top: 10px;
+	}
+	.slider {
+		width: 100%;
+		height: 4px;
+		margin: 4px 0 0;
+		appearance: none;
+		background: var(--color-divider);
+		border-radius: 2px;
+		accent-color: var(--color-accent);
+	}
+	.slider::-webkit-slider-thumb {
+		appearance: none;
+		width: 16px;
+		height: 16px;
+		border-radius: 50%;
+		background: var(--color-accent);
+		box-shadow: 0 0 0 3px var(--color-surface);
+		cursor: pointer;
+	}
+	.slider::-moz-range-thumb {
+		width: 16px;
+		height: 16px;
+		border: none;
+		border-radius: 50%;
+		background: var(--color-accent);
+		box-shadow: 0 0 0 3px var(--color-surface);
+		cursor: pointer;
+	}
+
 	.settings-footer {
 		margin-top: 32px;
 		padding-top: 20px;
@@ -743,7 +968,10 @@
 
 	@media (max-width: 768px) {
 		.settings-page {
-			padding: 20px 16px 32px;
+			/* Bottom padding cleared to 104px (not the usual 32px) so the last
+			   card isn't hidden behind the floating add-source FAB (see
+			   `Shell.svelte`), which overlays every mobile page. */
+			padding: calc(20px + env(safe-area-inset-top)) 16px 104px;
 		}
 		.settings-card {
 			padding: 18px 16px 20px;

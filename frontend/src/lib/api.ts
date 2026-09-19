@@ -234,6 +234,43 @@ export function cancelRaindropImport(): Promise<boolean> {
 	return invoke<boolean>('cancel_raindrop_import');
 }
 
+/** Writes every article currently in the library to a CSV file under the
+ *  app's own `exports/` folder (Legere's own shape, independent of the
+ *  Raindrop importer above) and returns its path/filename. Synchronous —
+ *  a plain DB read + file write, no network involved. */
+export function exportArticlesCsv(): Promise<ExportResult> {
+	return invoke<ExportResult>('export_articles_csv');
+}
+
+export function previewArticlesCsv(path: string): Promise<ArticleImportPreview> {
+	return invoke<ArticleImportPreview>('preview_articles_csv', { path });
+}
+
+/** Starts a background import of Legere's own article CSV shape —
+ *  progress tracked via `article_import:*` events (see
+ *  `stores/articleImport.svelte.ts`), not this call's return value. */
+export function importArticlesCsv(path: string): Promise<void> {
+	return invoke<void>('import_articles_csv', { path });
+}
+
+export function cancelArticlesImport(): Promise<boolean> {
+	return invoke<boolean>('cancel_articles_import');
+}
+
+/** Writes every current source to a CSV file under the app's own
+ *  `exports/` folder. Synchronous, like `exportArticlesCsv`. */
+export function exportSourcesCsv(): Promise<ExportResult> {
+	return invoke<ExportResult>('export_sources_csv');
+}
+
+/** Reads `path` (a CSV in `exportSourcesCsv`'s own shape) and queues
+ *  every feed URL not already present for background capture — tracked
+ *  via the existing capture-jobs activity dock (`listCaptureJobs`), not a
+ *  dedicated progress UI. */
+export function importSourcesCsv(path: string): Promise<SourcesImportSummary> {
+	return invoke<SourcesImportSummary>('import_sources_csv', { path });
+}
+
 export function getSettings(): Promise<Settings> {
 	return invoke<Settings>('get_settings');
 }
