@@ -72,5 +72,6 @@ pub async fn capture_and_store(
         link: output.link,
         // Freshly captured, never yet assigned a folder.
         category_name: None,
+        category_icon: None,
     })
 }

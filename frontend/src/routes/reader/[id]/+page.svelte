@@ -460,4 +460,28 @@
 	.reader-body {
 		font-size: 19px;
 	}
+
+	/* The rest of the app follows a 20px 16px / 32px mobile padding rhythm
+	   (see DESIGN.md) — the reader never picked it up and sat at the full
+	   desktop 36px/56px margins even on a ~360–430px phone, which is the
+	   one surface where every pixel of measure matters most. */
+	@media (max-width: 768px) {
+		.header-row {
+			padding: calc(16px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) 14px
+				calc(16px + env(safe-area-inset-left));
+			margin: 0 0 16px;
+		}
+		.reader-page {
+			padding: 0 calc(16px + env(safe-area-inset-right)) 40px calc(16px + env(safe-area-inset-left));
+		}
+		.hero {
+			margin-bottom: 20px;
+		}
+		.reader-tags {
+			margin: 0 0 20px;
+		}
+		.reader-title {
+			margin: 0 0 18px;
+		}
+	}
 </style>

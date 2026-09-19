@@ -184,12 +184,20 @@
 	.aa-popover {
 		position: absolute;
 		top: calc(100% + 8px);
-		right: 0;
+		/* Anchored from the *left* of the trigger, not the right — this
+		   button is the first item in a left-anchored button cluster (right
+		   after the reader's back button), not the last item of a
+		   right-anchored one. A `right: 0` anchor here pushed the whole
+		   260px-wide popover off the left edge of a phone screen, clipping
+		   every row's label and leaving only the bare controls visible. The
+		   `min()` width is a second safety net on screens narrower than
+		   260px + this padding could otherwise still overflow. */
+		left: 0;
 		z-index: 5;
 		display: flex;
 		flex-direction: column;
 		gap: var(--space-3);
-		width: 260px;
+		width: min(260px, calc(100vw - 32px));
 		padding: var(--space-4);
 		border-radius: var(--radius-lg);
 		background: var(--color-surface);
