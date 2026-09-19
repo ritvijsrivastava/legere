@@ -200,6 +200,7 @@ pub fn run() {
             commands::categories::get_categories,
             commands::categories::create_category,
             commands::categories::rename_category,
+            commands::categories::set_category_icon,
             commands::categories::delete_category,
             commands::categories::set_article_category,
             commands::articles::get_article,

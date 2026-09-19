@@ -448,6 +448,26 @@ const V12: &str = "
 UPDATE articles SET published_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE published_at IS NULL;
 ";
 
+// Lets a category carry a chosen glyph from the frontend's fixed category
+// icon pack (`lib/categoryIcons.ts`) instead of the sidebar/card hashing
+// its name into a colored dot (`sourceColor.ts`, now removed) — the dot
+// gave every category *a* color but no visual identity a user actually
+// picked, and read as a "new item" indicator once paired with the
+// (also-removed) unread dot next to a title. `'folder'` is the pack's
+// generic entry and what every pre-existing category backfills to, same
+// as a freshly created one that doesn't specify an icon.
+//
+// Stored as a free-text id rather than a CHECK-constrained enum: the icon
+// pack is a frontend-owned, purely cosmetic list, and pinning it to a
+// backend CHECK would mean a migration every time the pack grows. An id
+// that doesn't match any known pack entry (e.g. one from a newer version
+// opening an older database, though the pack has never shrunk) just falls
+// back to the generic folder glyph client-side rather than failing to
+// render.
+const V13: &str = "
+ALTER TABLE categories ADD COLUMN icon TEXT NOT NULL DEFAULT 'folder';
+";
+
 pub fn migrations() -> Migrations<'static> {
     Migrations::new(vec![
         M::up(V1),
@@ -462,6 +482,7 @@ pub fn migrations() -> Migrations<'static> {
         M::up(V10),
         M::up(V11),
         M::up(V12),
+        M::up(V13),
     ])
 }
 

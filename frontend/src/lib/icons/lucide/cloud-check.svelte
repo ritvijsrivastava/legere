@@ -1,0 +1,8 @@
+<script lang="ts">
+	let { size = 14 }: { size?: number } = $props();
+</script>
+
+<svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+	<path d="m17 15-5.5 5.5L9 18"></path>
+	<path d="M5.516 16.07A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 3.501 7.327"></path>
+</svg>

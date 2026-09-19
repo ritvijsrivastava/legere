@@ -30,6 +30,11 @@ pub struct ArticleSummary {
     /// `None` when uncategorized. Resolved server-side so the label can't
     /// drift from a stale/unloaded client-side category list.
     pub category_name: Option<String>,
+    /// The category's chosen icon-pack id (see `Category::icon`), `None`
+    /// when uncategorized. Travels alongside `category_name` so the
+    /// library card/row can render the real icon without a second
+    /// lookup into the category list.
+    pub category_icon: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,6 +60,9 @@ pub struct ArticleDetail {
     /// shown in the reader's byline in place of the old, purposeless
     /// `source_name` provenance label.
     pub category_name: Option<String>,
+    /// The category's chosen icon-pack id, `None` when uncategorized —
+    /// see `ArticleSummary::category_icon`.
+    pub category_icon: Option<String>,
     /// This article's reading-appearance overrides, each `None` where it
     /// instead follows the global `Settings` value — see `ReadingOverrides`.
     pub overrides: ReadingOverrides,
@@ -134,6 +142,12 @@ pub struct Category {
     pub id: String,
     pub name: String,
     pub article_count: i64,
+    /// An id into the frontend's fixed category icon pack
+    /// (`lib/categoryIcons.ts`), e.g. `"folder"` or `"book"` — chosen from
+    /// `CategorySettingsDialog`/`/categories`, never freeform. Defaults to
+    /// `"folder"` for every pre-existing and freshly created category (see
+    /// `db::schema`'s `V13` migration).
+    pub icon: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

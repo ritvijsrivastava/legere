@@ -5,7 +5,9 @@ use rusqlite::{Connection, OptionalExtension, Row, params};
 use uuid::Uuid;
 
 use crate::capture::LocalCaptureOutput;
-use crate::models::{ArticleDetail, ArticleSummary, Category, ReadingOverrides, Settings, Source};
+use crate::models::{
+    ArticleDetail, ArticleSummary, Category, ReadingOverrides, Settings, Source,
+};
 
 /// `tags` is stored as a JSON array string; a row with anything other
 /// than a valid JSON array (shouldn't happen — only this module writes
@@ -52,6 +54,7 @@ fn article_summary_from_row(row: &Row) -> rusqlite::Result<ArticleSummary> {
         tags: parse_tags(row.get("tags")?),
         link: row.get("link")?,
         category_name: row.get("category_name")?,
+        category_icon: row.get("category_icon")?,
     })
 }
 
@@ -59,7 +62,7 @@ const ARTICLE_SUMMARY_COLUMNS: &str =
     "articles.id, articles.title, articles.source_type, articles.excerpt,
                 articles.hero_image_path, articles.published_at, articles.read_time_min,
                 articles.reading_state, articles.favorited, articles.reading_progress, articles.tags,
-                articles.link, categories.name AS category_name";
+                articles.link, categories.name AS category_name, categories.icon AS category_icon";
 
 /// Every [`ARTICLE_SUMMARY_COLUMNS`] query joins through this so
 /// `category_name` resolves without a second round trip per article.
@@ -555,6 +558,7 @@ fn category_from_row(row: &Row) -> rusqlite::Result<Category> {
         id: row.get("id")?,
         name: row.get("name")?,
         article_count: row.get("article_count")?,
+        icon: row.get("icon")?,
     })
 }
 
@@ -574,7 +578,7 @@ pub fn count_uncategorized(conn: &Connection) -> rusqlite::Result<i64> {
 
 pub fn fetch_categories(conn: &Connection) -> rusqlite::Result<Vec<Category>> {
     let mut stmt = conn.prepare(
-        "SELECT c.id AS id, c.name AS name, COUNT(a.id) AS article_count
+        "SELECT c.id AS id, c.name AS name, c.icon AS icon, COUNT(a.id) AS article_count
          FROM categories c
          LEFT JOIN articles a ON a.category_id = c.id
          GROUP BY c.id
@@ -586,7 +590,7 @@ pub fn fetch_categories(conn: &Connection) -> rusqlite::Result<Vec<Category>> {
 
 pub fn get_category(conn: &Connection, id: &str) -> rusqlite::Result<Option<Category>> {
     conn.query_row(
-        "SELECT c.id AS id, c.name AS name, COUNT(a.id) AS article_count
+        "SELECT c.id AS id, c.name AS name, c.icon AS icon, COUNT(a.id) AS article_count
          FROM categories c
          LEFT JOIN articles a ON a.category_id = c.id
          WHERE c.id = ?1
@@ -615,6 +619,7 @@ pub fn create_category(conn: &Connection, name: &str) -> rusqlite::Result<Catego
         id,
         name: name.to_string(),
         article_count: 0,
+        icon: "folder".to_string(),
     })
 }
 
@@ -638,6 +643,27 @@ pub fn rename_category(
     get_category(conn, id)
 }
 
+/// Sets a category's chosen icon-pack id (see `Category::icon`'s doc
+/// comment) — a plain id string, not validated against the frontend's
+/// pack: an unrecognized id just falls back to the generic folder glyph
+/// client-side rather than failing this write. Returns `None` if `id`
+/// doesn't match any row, same "missing id" convention as
+/// [`rename_category`].
+pub fn set_category_icon(
+    conn: &Connection,
+    id: &str,
+    icon: &str,
+) -> rusqlite::Result<Option<Category>> {
+    let changed = conn.execute(
+        "UPDATE categories SET icon = ?2, updated_at = ?3 WHERE id = ?1",
+        params![id, icon, Utc::now().to_rfc3339()],
+    )?;
+    if changed == 0 {
+        return Ok(None);
+    }
+    get_category(conn, id)
+}
+
 /// Deletes a category outright. Its articles are **not** deleted —
 /// `articles.category_id`'s `ON DELETE SET NULL` (see `db::schema`'s
 /// `V9`) un-categorizes them instead, same as the "move to an empty
@@ -654,7 +680,7 @@ pub fn delete_category(conn: &Connection, id: &str) -> rusqlite::Result<bool> {
 /// same-named category instead of erroring on the unique index.
 pub fn find_category_by_name(conn: &Connection, name: &str) -> rusqlite::Result<Option<Category>> {
     conn.query_row(
-        "SELECT c.id AS id, c.name AS name, COUNT(a.id) AS article_count
+        "SELECT c.id AS id, c.name AS name, c.icon AS icon, COUNT(a.id) AS article_count
          FROM categories c
          LEFT JOIN articles a ON a.category_id = c.id
          WHERE c.name = ?1 COLLATE NOCASE
@@ -724,7 +750,7 @@ pub fn get_article(conn: &Connection, id: &str) -> rusqlite::Result<Option<Artic
                     articles.extraction_confident, articles.reading_progress, articles.tags,
                     articles.font_size_override, articles.measure_override,
                     articles.leading_override, articles.theme_override,
-                    categories.name AS category_name
+                    categories.name AS category_name, categories.icon AS category_icon
              FROM {ARTICLE_SUMMARY_FROM} WHERE articles.id = ?1"
         ),
         params![id],
@@ -745,6 +771,7 @@ pub fn get_article(conn: &Connection, id: &str) -> rusqlite::Result<Option<Artic
                 reading_progress: row.get("reading_progress")?,
                 tags: parse_tags(row.get("tags")?),
                 category_name: row.get("category_name")?,
+                category_icon: row.get("category_icon")?,
                 overrides: ReadingOverrides {
                     font_size: row.get("font_size_override")?,
                     measure: row.get("measure_override")?,
@@ -1448,6 +1475,38 @@ mod tests {
             .expect("row existed");
         assert_eq!(renamed.name, "Cooking");
         assert_eq!(renamed.id, category.id);
+    }
+
+    #[test]
+    fn create_category_defaults_to_the_generic_folder_icon() {
+        let conn = migrated_conn();
+        let category = create_category(&conn, "Recipes").unwrap();
+        assert_eq!(category.icon, "folder");
+        assert_eq!(fetch_categories(&conn).unwrap()[0].icon, "folder");
+    }
+
+    #[test]
+    fn set_category_icon_updates_it_in_place() {
+        let conn = migrated_conn();
+        let category = create_category(&conn, "Recipes").unwrap();
+
+        let updated = set_category_icon(&conn, &category.id, "book")
+            .unwrap()
+            .expect("row existed");
+        assert_eq!(updated.icon, "book");
+        assert_eq!(
+            get_category(&conn, &category.id).unwrap().unwrap().icon,
+            "book"
+        );
+    }
+
+    #[test]
+    fn set_category_icon_returns_none_for_a_missing_id() {
+        let conn = migrated_conn();
+        assert_eq!(
+            set_category_icon(&conn, "does-not-exist", "book").unwrap(),
+            None
+        );
     }
 
     #[test]

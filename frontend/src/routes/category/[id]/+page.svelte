@@ -66,7 +66,7 @@
 	{#if !isUncategorized}
 		<CategorySettingsDialog
 			open={settingsOpen}
-			category={{ id: category.id, name: category.name, article_count: category.article_count }}
+			{category}
 			onclose={() => (settingsOpen = false)}
 			onDeleted={handleDeleted}
 		/>

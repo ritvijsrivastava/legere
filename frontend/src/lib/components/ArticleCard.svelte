@@ -3,7 +3,7 @@
 	import { formatDate, formatHost, formatReadTime } from '$lib/format';
 	import * as api from '$lib/api';
 	import { libraryStatsStore } from '$lib/stores/libraryStats.svelte';
-	import { sourceDotColor } from '$lib/sourceColor';
+	import CategoryIcon from './CategoryIcon.svelte';
 	import HeroImage from './HeroImage.svelte';
 	import Star from '$lib/icons/Star.svelte';
 	import Trash from '$lib/icons/Trash.svelte';
@@ -74,7 +74,7 @@
 		</div>
 		<div class="body">
 			<div class="top-row">
-				<span class="dot" style:background={sourceDotColor(article.category_name ?? 'Uncategorized')}></span>
+				<CategoryIcon icon={article.category_icon} size={12} />
 				<span class="source-label">{article.category_name ?? 'Uncategorized'}</span>
 				<span class="spacer"></span>
 				<button
@@ -88,9 +88,6 @@
 			</div>
 			<div class="title-row">
 				<h3 class="card-title">{article.title}</h3>
-				{#if article.reading_state === 'unread'}
-					<span class="unread-dot"></span>
-				{/if}
 			</div>
 			<p class="card-body">{article.excerpt}</p>
 			<div class="card-meta">
@@ -136,9 +133,15 @@
 		box-shadow: var(--shadow-card);
 		transition: transform var(--duration-base) var(--ease-snap), box-shadow var(--duration-base) var(--ease-snap);
 	}
-	.article-card:hover {
-		transform: translateY(-3px);
-		box-shadow: var(--shadow-card-hover);
+	/* Touch can't truly "hover" — on a touchscreen this can only fire on
+	   tap and then stick until something else is tapped, reading as a
+	   glitch (card stays lifted/shadowed after the finger's gone) rather
+	   than a hover affordance. Gated to real pointer-hover devices. */
+	@media (hover: hover) and (pointer: fine) {
+		.article-card:hover {
+			transform: translateY(-3px);
+			box-shadow: var(--shadow-card-hover);
+		}
 	}
 	.article-card:active {
 		transform: translateY(-1px);
@@ -164,11 +167,27 @@
 		color: #fff;
 		cursor: pointer;
 	}
-	.card-action-btn:hover {
-		background: color-mix(in srgb, black 70%, transparent);
+	/* `:hover`/`:focus-within` (see `.card-wrapper` above) can't be
+	   produced by a touchscreen, and at this card's mobile size (half a
+	   152–208px-wide two-up grid cell) a pair of always-visible icon
+	   buttons would be too small a target to hit reliably anyway — so
+	   mobile cards drop Move/Delete entirely rather than force either a
+	   hidden-until-hover control or an undersized touch target. Both
+	   actions are still one tap away inside the reader (see the matching
+	   comment in `ArticleListRow`, which drops them from the mobile list
+	   row for the same reason). */
+	@media (max-width: 768px) {
+		.card-actions {
+			display: none;
+		}
 	}
-	.card-action-btn.danger:hover {
-		color: var(--color-danger);
+	@media (hover: hover) and (pointer: fine) {
+		.card-action-btn:hover {
+			background: color-mix(in srgb, black 70%, transparent);
+		}
+		.card-action-btn.danger:hover {
+			color: var(--color-danger);
+		}
 	}
 	.hero {
 		position: relative;
@@ -200,16 +219,25 @@
 		flex: 1 1 auto;
 		min-height: 0;
 	}
+	/* The mobile 2-up grid runs cards at ~150–210px instead of desktop's
+	   216–264px — a touch tighter so type/padding stay proportional
+	   rather than looking like a shrunk desktop card. */
+	@media (max-width: 768px) {
+		.body {
+			gap: 6px;
+			padding: 10px;
+		}
+		.title-row .card-title {
+			font-size: 14px;
+		}
+		.card-body {
+			font-size: 12px;
+		}
+	}
 	.top-row {
 		display: flex;
 		align-items: center;
 		gap: 6px;
-	}
-	.dot {
-		width: 7px;
-		height: 7px;
-		border-radius: 50%;
-		flex: none;
 	}
 	.source-label {
 		font-size: 11px;
@@ -237,19 +265,18 @@
 	.title-row {
 		display: flex;
 		align-items: center;
-		gap: 8px;
 	}
 	.title-row .card-title {
 		flex: 1;
 		margin: 0;
 		font-size: 15.5px;
 		line-height: 1.3;
-		/* Reserve space for 2 lines regardless of actual line count —
-		   otherwise a 1-line title makes the whole card shorter than its
-		   neighbors, and CSS Grid's row-stretch only pads the invisible
-		   wrapper, not this box, leaving visibly mismatched card heights
-		   in the same row (see `card-wrapper` sizing above `.article-card`). */
-		min-height: calc(1.3em * 2);
+		/* No reserved 2-line min-height here (a 1-line title used to leave a
+		   dead gap above the excerpt) — `.card-body` below is the flexible
+		   one (`flex: 1`), so when CSS Grid's row-stretch makes a short card
+		   match its row's tallest neighbor, the slack lands there instead,
+		   which reads as generous excerpt spacing rather than a gap wedged
+		   between headline and body text. */
 		display: -webkit-box;
 		-webkit-line-clamp: 2;
 		line-clamp: 2;
@@ -261,19 +288,31 @@
 		opacity: 0.75;
 		font-size: 12.5px;
 		line-height: 1.5;
-		/* Same fixed-height reasoning as `.card-title` above. */
-		min-height: calc(1.5em * 2);
+		/* Same fixed-height reasoning as `.card-title` above — 3 lines here
+		   (vs. the title's 2) since the excerpt is the one place on the card
+		   with room to actually say something. `max-height` matches
+		   `min-height` — without it, a card stretched taller than its
+		   neighbor (CSS Grid row-stretch, see `card-wrapper`) lets this
+		   `flex: 1` box grow past its natural 3-line height, and
+		   `-webkit-line-clamp` on an over-grown flex item stops clamping to
+		   a line *count* and just reveals however much text fits the extra
+		   height instead. Capping it keeps the clamp exact regardless of
+		   row-stretch; the leftover space lands below `.card-meta` instead
+		   (pinned there via its own `margin-top: auto`, below). */
+		min-height: calc(1.5em * 3);
+		max-height: calc(1.5em * 3);
 		display: -webkit-box;
-		-webkit-line-clamp: 2;
-		line-clamp: 2;
+		-webkit-line-clamp: 3;
+		line-clamp: 3;
 		-webkit-box-orient: vertical;
 		overflow: hidden;
 	}
-	.unread-dot {
-		width: 6px;
-		height: 6px;
-		border-radius: 50%;
-		background: var(--color-accent);
-		flex: none;
+	.card-meta {
+		/* Pins to the bottom of `.body`'s flex column — now that
+		   `.card-body` above has a hard `max-height`, it's the only
+		   remaining sink for a row-stretched card's extra height, so a
+		   short excerpt reads as breathing room above the footer rather
+		   than a gap wedged between the excerpt and its own text. */
+		margin-top: auto;
 	}
 </style>

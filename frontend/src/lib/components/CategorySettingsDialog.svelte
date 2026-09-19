@@ -2,6 +2,7 @@
 	import { untrack } from 'svelte';
 	import * as api from '$lib/api';
 	import type { Category } from '$lib/types';
+	import CategoryIconPicker from './CategoryIconPicker.svelte';
 
 	let {
 		open,
@@ -20,6 +21,7 @@
 	let name = $state(untrack(() => category.name));
 	let saving = $state(false);
 	let deleting = $state(false);
+	let savingIcon = $state(false);
 	let error = $state<string | null>(null);
 	let inputEl = $state<HTMLInputElement>();
 
@@ -34,6 +36,20 @@
 	function close() {
 		if (saving || deleting) return;
 		onclose();
+	}
+
+	async function changeIcon(icon: string) {
+		savingIcon = true;
+		error = null;
+		try {
+			// Emits `category:changed`, which the caller re-derives `category`
+			// from — same no-local-patch-needed shape as `save()` below.
+			await api.setCategoryIcon(category.id, icon);
+		} catch (e) {
+			error = api.errorMessage(e);
+		} finally {
+			savingIcon = false;
+		}
 	}
 
 	async function save() {
@@ -92,16 +108,23 @@
 			<div class="dialog-title" id="category-settings-title">Category settings</div>
 			<div class="field">
 				<label for="category-name">Name</label>
-				<input
-					id="category-name"
-					class="input"
-					autocomplete="off"
-					bind:this={inputEl}
-					bind:value={name}
-					onkeydown={(e) => {
-						if (e.key === 'Enter' && !saving) save();
-					}}
-				/>
+				<div class="name-row">
+					<CategoryIconPicker
+						icon={category.icon}
+						disabled={savingIcon}
+						onselect={changeIcon}
+					/>
+					<input
+						id="category-name"
+						class="input"
+						autocomplete="off"
+						bind:this={inputEl}
+						bind:value={name}
+						onkeydown={(e) => {
+							if (e.key === 'Enter' && !saving) save();
+						}}
+					/>
+				</div>
 			</div>
 			{#if error}<div class="dialog-body dialog-body-error">{error}</div>{/if}
 			<div class="dialog-actions">
@@ -133,5 +156,13 @@
 	}
 	.danger-action {
 		color: var(--color-danger);
+	}
+	.name-row {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+	.name-row .input {
+		flex: 1;
 	}
 </style>

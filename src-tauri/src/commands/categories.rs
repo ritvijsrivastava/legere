@@ -113,6 +113,29 @@ pub async fn rename_category(
     Ok(result)
 }
 
+/// Sets a category's chosen icon-pack id (see `models::Category::icon`) —
+/// the id itself is opaque to the backend, just an opaque string picked
+/// from the frontend's fixed pack (`lib/categoryIcons.ts`).
+#[tauri::command]
+pub async fn set_category_icon(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    icon: String,
+) -> Result<Category, AppError> {
+    let pool = state.pool.clone();
+    let icon_for_query = icon.trim().to_string();
+    let result = tokio::task::spawn_blocking(move || {
+        let conn = pool.get()?;
+        Ok::<_, AppError>(queries::set_category_icon(&conn, &id, &icon_for_query)?)
+    })
+    .await??
+    .ok_or_else(|| AppError::not_found("category"))?;
+
+    events::emit_category_changed(&app);
+    Ok(result)
+}
+
 /// Deletes a category. Its articles aren't deleted — they fall back to
 /// Uncategorized (`ON DELETE SET NULL`, see `db::schema`'s `V9`).
 #[tauri::command]

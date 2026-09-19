@@ -42,7 +42,16 @@ class LibraryStatsStore {
 		this.categories =
 			categories.length > 0 || uncategorizedCount > 0
 				? [
-					{ id: '__uncategorized__', name: 'Uncategorized', article_count: uncategorizedCount },
+					{
+						id: '__uncategorized__',
+						name: 'Uncategorized',
+						article_count: uncategorizedCount,
+						// The virtual entry never goes through `set_category_icon` —
+						// `'folder'` (the pack's generic entry) reads correctly as
+						// "no particular icon chosen", same as any real category that
+						// hasn't picked one yet.
+						icon: 'folder'
+					},
 					...categories
 				]
 				: categories;
