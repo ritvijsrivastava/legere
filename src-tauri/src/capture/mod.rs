@@ -2,6 +2,7 @@ pub mod archive;
 pub mod extract;
 pub mod fetch;
 pub mod hero_image;
+pub mod image_optimize;
 pub mod localize;
 pub mod rewrite;
 pub mod sanitize;

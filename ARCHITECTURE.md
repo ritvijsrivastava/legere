@@ -92,7 +92,18 @@ Every ingestion path funnels into `capture::capture_local(client, data_dir, id, 
    per photo. A second, independent safety net catches the same waste
    from the other direction: every fetched asset is content-hashed
    (SHA-256) before being written, so two *different* URLs that happen to
-   resolve to identical bytes still only get stored once.
+   resolve to identical bytes still only get stored once. Every fetched
+   asset also passes through `capture::image_optimize::optimize_content_image`
+   before being handed to the rewrite/store steps — downscaled to 1600px
+   width if wider, and re-encoded as JPEG quality 80 (or PNG if it
+   actually uses transparency; GIFs are flattened to their first frame
+   and re-encoded the same way, not kept as animated) — unless doing so
+   wouldn't actually shrink it, in which case the original bytes are kept
+   untouched. Re-encodes to JPEG rather than WebP deliberately: the
+   `image` crate's own WebP encoder is lossless-only, not reliably
+   smaller than JPEG for photographic content, and true lossy WebP would
+   need `libwebp` C bindings — a cross-compilation risk for the Android
+   NDK target not worth taking on.
 5. **Rewrite** (`capture::rewrite`) — rewrites the same attribute set to
    `legere-content:/<article_id>/<local_path>` tokens using the URL→path map
    localization built. Assets that failed to fetch are left pointing at their
@@ -105,7 +116,9 @@ Every ingestion path funnels into `capture::capture_local(client, data_dir, id, 
 6. **Store** (`capture::archive`) — assets are written to
    `content/<article_id>/<local_path>` (directory wiped first, so recapture
    never leaves stale files); the hero image is a resized JPEG in `media/`,
-   reusing already-fetched bytes when the hero also appears in the content.
+   reusing already-fetched bytes when the hero also appears in the content
+   (now already downscaled/re-encoded by step 4 above, a bonus rather than
+   the point of that step).
 
 The article's stored `link` is the canonicalized URL (fragment and redundant
 default port dropped, query order preserved byte-for-byte) with tracking

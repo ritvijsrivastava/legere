@@ -18,6 +18,7 @@ use url::Url;
 
 use crate::urlx::{LocalPath, canonicalize, local_path_for};
 
+use super::image_optimize;
 use super::rewrite::{resolve_reference, select_srcset_entry};
 use super::ssrf;
 
@@ -203,6 +204,26 @@ pub async fn localize_content(
         })
         .buffer_unordered(CONCURRENCY)
         .filter_map(|result| async move { result })
+        .collect()
+        .await;
+
+    // Re-encoding runs on the blocking thread pool, not inline in this
+    // async stream: `optimize_content_image`'s resize/re-encode is real
+    // CPU work (a Lanczos3 resize on a several-thousand-pixel-wide source
+    // image is not free), and this function otherwise only ever awaits
+    // I/O. A join failure (which `optimize_content_image` itself has no
+    // path to trigger — it never panics) falls back to the original
+    // fetched bytes rather than losing the asset entirely.
+    let fetched: Vec<(Url, Vec<u8>)> = stream::iter(fetched)
+        .map(|(url, bytes)| async move {
+            let fallback = bytes.clone();
+            let optimized =
+                tokio::task::spawn_blocking(move || image_optimize::optimize_content_image(&bytes))
+                    .await
+                    .unwrap_or(fallback);
+            (url, optimized)
+        })
+        .buffer_unordered(CONCURRENCY)
         .collect()
         .await;
 
