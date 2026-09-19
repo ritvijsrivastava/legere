@@ -226,7 +226,17 @@ mod tests {
                 .to_string()
         };
 
-        let photo_path = content_dir.join(local_path(&format!("{base_url}/photo.jpg")));
+        // `.jpg` is appended on top of the URL-derived path (which
+        // already ended in `.jpg`) rather than replacing it —
+        // `capture::image_optimize` tags every successfully decoded
+        // image with its real format, and `urlx::LocalPath::with_forced_extension`
+        // always appends rather than trying to strip an existing one (see
+        // its own doc comment for why). The fixture photo is a real,
+        // decodable JPEG, so this is deterministic.
+        let photo_path = content_dir.join(format!(
+            "{}.jpg",
+            local_path(&format!("{base_url}/photo.jpg"))
+        ));
         let photo_bytes = tokio::fs::read(&photo_path)
             .await
             .expect("photo should be present on disk — the readable content references it");

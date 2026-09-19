@@ -103,7 +103,22 @@ Every ingestion path funnels into `capture::capture_local(client, data_dir, id, 
    `image` crate's own WebP encoder is lossless-only, not reliably
    smaller than JPEG for photographic content, and true lossy WebP would
    need `libwebp` C bindings — a cross-compilation risk for the Android
-   NDK target not worth taking on.
+   NDK target not worth taking on. `optimize_content_image` also reports
+   the real format of whatever bytes end up stored, and the stored
+   filename's extension is forced to match it
+   (`urlx::LocalPath::with_forced_extension`) regardless of what the
+   source URL implied — some CDNs serve images from entirely
+   extensionless URLs (`media.cntraveler.com`'s width-variant paths are a
+   real example), which `content_server::guess_content_type` would
+   otherwise have no choice but to serve as `application/octet-stream`;
+   most webviews refuse to render an `<img>` whose response has that
+   content type even when the bytes are a perfectly valid image.
+   `with_forced_extension` always *appends* rather than replacing an
+   existing extension — this path's final segment is sometimes
+   `<name>.<disambiguation-hash>` with no real extension at all (see
+   `urlx::disambiguate_last_segment`), and a "replace the last extension"
+   implementation would misparse that hash itself as one and strip it,
+   silently reintroducing the collision it exists to prevent.
 5. **Rewrite** (`capture::rewrite`) — rewrites the same attribute set to
    `legere-content:/<article_id>/<local_path>` tokens using the URL→path map
    localization built. Assets that failed to fetch are left pointing at their

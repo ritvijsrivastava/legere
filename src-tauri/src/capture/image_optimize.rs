@@ -31,6 +31,16 @@
 //! returned unchanged: this function never fails a capture, it only ever
 //! narrows what gets stored, and never returns anything larger than what
 //! was fetched.
+//!
+//! Also reports the *real* format of whatever bytes end up being stored
+//! ([`OptimizedImage::extension`]) — some CDNs serve images from entirely
+//! extensionless URLs, which `capture::localize` would otherwise store
+//! (and `content_server::guess_content_type` would then serve) as
+//! `application/octet-stream`. Most webviews refuse to render an `<img>`
+//! whose response has that content type even when the bytes are a
+//! perfectly valid image, so the caller uses this to force the stored
+//! filename's extension to match reality (`urlx::LocalPath::with_forced_extension`)
+//! regardless of what the source URL implied.
 
 use std::io::Cursor;
 
@@ -47,26 +57,58 @@ const MAX_WIDTH: u32 = 1600;
 /// well below what most CDNs deliver by default (often 90+).
 const JPEG_QUALITY: u8 = 80;
 
+/// The result of [`optimize_content_image`].
+pub struct OptimizedImage {
+    pub bytes: Vec<u8>,
+    /// The real format of `bytes`, as a canonical file extension — `None`
+    /// only when the input couldn't be decoded at all (SVG, an
+    /// unrecognized format, or plain garbage), in which case the caller
+    /// should leave whatever extension the source URL already implied
+    /// untouched rather than guess.
+    pub extension: Option<&'static str>,
+}
+
+/// Canonical extension for `format`, matching what `image`'s own encoders
+/// produce — `content_server::guess_content_type`'s reverse mapping
+/// already recognizes all of these.
+fn extension_for(format: ImageFormat) -> &'static str {
+    format.extensions_str().first().copied().unwrap_or("bin")
+}
+
 /// Re-encodes `bytes` if doing so is a net size win; otherwise returns the
 /// original bytes untouched. Never errors: any decode/encode failure just
 /// means "nothing to optimize here", the same graceful-degradation shape
 /// the rest of the localize pipeline already uses for fetch failures.
-pub fn optimize_content_image(bytes: &[u8]) -> Vec<u8> {
+pub fn optimize_content_image(bytes: &[u8]) -> OptimizedImage {
     let Ok(img) = image::load_from_memory(bytes) else {
-        return bytes.to_vec();
+        return OptimizedImage {
+            bytes: bytes.to_vec(),
+            extension: None,
+        };
     };
+    // Cheap (reads only the header) and independent of whether decoding
+    // *fully* succeeded above — used below when re-encoding isn't a net
+    // win, so the original bytes still get tagged with their own real
+    // format instead of losing extension information entirely.
+    let original_format = image::guess_format(bytes).ok();
 
     let resized = resize_if_needed(img);
 
-    let encoded = if has_transparency(&resized) {
-        encode_png(&resized)
+    let (encoded, encoded_format) = if has_transparency(&resized) {
+        (encode_png(&resized), ImageFormat::Png)
     } else {
-        encode_jpeg(&resized)
+        (encode_jpeg(&resized), ImageFormat::Jpeg)
     };
 
     match encoded {
-        Some(optimized) if optimized.len() < bytes.len() => optimized,
-        _ => bytes.to_vec(),
+        Some(optimized) if optimized.len() < bytes.len() => OptimizedImage {
+            bytes: optimized,
+            extension: Some(extension_for(encoded_format)),
+        },
+        _ => OptimizedImage {
+            bytes: bytes.to_vec(),
+            extension: original_format.map(extension_for),
+        },
     }
 }
 
@@ -136,33 +178,35 @@ mod tests {
     #[test]
     fn shrinks_a_wide_opaque_image_and_reencodes_as_jpeg() {
         let original = opaque_photo_like_png(2400, 1600);
-        let optimized = optimize_content_image(&original);
+        let result = optimize_content_image(&original);
 
         assert!(
-            optimized.len() < original.len(),
+            result.bytes.len() < original.len(),
             "optimized ({}) should be smaller than original ({})",
-            optimized.len(),
+            result.bytes.len(),
             original.len()
         );
-        let decoded = image::load_from_memory(&optimized).unwrap();
+        let decoded = image::load_from_memory(&result.bytes).unwrap();
         assert_eq!(decoded.width(), MAX_WIDTH, "should be capped to MAX_WIDTH");
         assert_eq!(
-            image::guess_format(&optimized).unwrap(),
+            image::guess_format(&result.bytes).unwrap(),
             ImageFormat::Jpeg,
             "opaque images should be re-encoded as JPEG"
         );
+        assert_eq!(result.extension, Some("jpg"));
     }
 
     #[test]
     fn keeps_a_transparent_image_as_png_not_jpeg() {
         let original = transparent_png(100, 100);
-        let optimized = optimize_content_image(&original);
+        let result = optimize_content_image(&original);
 
         assert_eq!(
-            image::guess_format(&optimized).unwrap(),
+            image::guess_format(&result.bytes).unwrap(),
             ImageFormat::Png,
             "transparent images must never be flattened to JPEG"
         );
+        assert_eq!(result.extension, Some("png"));
     }
 
     #[test]
@@ -181,25 +225,31 @@ mod tests {
             .unwrap();
         let original = original.into_inner();
 
-        let optimized = optimize_content_image(&original);
+        let result = optimize_content_image(&original);
 
         assert_eq!(
-            image::guess_format(&optimized).unwrap(),
+            image::guess_format(&result.bytes).unwrap(),
             ImageFormat::Jpeg,
             "a decodable GIF should be flattened to a static JPEG"
         );
         assert!(
-            optimized.len() < original.len(),
+            result.bytes.len() < original.len(),
             "optimized ({}) should be smaller than the GIF original ({})",
-            optimized.len(),
+            result.bytes.len(),
             original.len()
         );
+        assert_eq!(result.extension, Some("jpg"));
     }
 
     #[test]
     fn leaves_undecodable_bytes_completely_unchanged() {
         let garbage = b"not an image, just some bytes".to_vec();
-        assert_eq!(optimize_content_image(&garbage), garbage);
+        let result = optimize_content_image(&garbage);
+        assert_eq!(result.bytes, garbage);
+        assert_eq!(
+            result.extension, None,
+            "undecodable input must not get a guessed extension"
+        );
     }
 
     #[test]
@@ -210,7 +260,23 @@ mod tests {
         // `optimize_content_image` must catch this rather than trust the
         // re-encode blindly.
         let original = opaque_photo_like_png(4, 4);
-        let optimized = optimize_content_image(&original);
-        assert!(optimized.len() <= original.len());
+        let result = optimize_content_image(&original);
+        assert!(result.bytes.len() <= original.len());
+    }
+
+    #[test]
+    fn tags_the_real_format_even_when_reencoding_is_not_a_net_win() {
+        // A tiny image where the JPEG re-encode attempt loses to the
+        // original PNG bytes on size (see the test above) must still
+        // report the *original* bytes' real format — PNG — not `None`,
+        // so a caller can still fix an extensionless stored path even
+        // when no re-encoding actually happened.
+        let original = opaque_photo_like_png(4, 4);
+        let result = optimize_content_image(&original);
+        assert_eq!(
+            result.bytes, original,
+            "this fixture must keep the original bytes"
+        );
+        assert_eq!(result.extension, Some("png"));
     }
 }

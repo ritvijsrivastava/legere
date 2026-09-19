@@ -179,6 +179,31 @@ impl LocalPath {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// Appends `.{ext}` unconditionally — used when a fetched asset's
+    /// on-disk bytes are re-encoded to a known format after fetching
+    /// (`capture::image_optimize`), so the stored filename (and therefore
+    /// the extension-based MIME guess `content_server::guess_content_type`
+    /// uses) matches what's actually on disk. Some CDNs serve images from
+    /// entirely extensionless URLs, which would otherwise be stored and
+    /// served as `application/octet-stream` — most webviews refuse to
+    /// render an `<img>` whose response has that content type, even when
+    /// the bytes are a perfectly valid image.
+    ///
+    /// Deliberately *appends* rather than replacing whatever extension (if
+    /// any) was already on the final segment, rather than trying to strip
+    /// one: this path's final segment is sometimes
+    /// `<original-name>.<disambiguation-hash>` with no real extension at
+    /// all (see `disambiguate_last_segment`) — a "replace the last
+    /// extension" implementation would misparse that hash itself as an
+    /// extension and strip it, silently reintroducing the collision it
+    /// exists to prevent. Appending is always unambiguous:
+    /// `guess_content_type` only ever looks at the text after the
+    /// *final* `.`, so a resulting `name.hash.jpg` or even `photo.jpg.jpg`
+    /// resolves correctly regardless of what came before it.
+    pub fn with_forced_extension(&self, ext: &str) -> LocalPath {
+        LocalPath(format!("{}.{ext}", self.0))
+    }
 }
 
 impl fmt::Display for LocalPath {
@@ -305,6 +330,29 @@ fn disambiguate_last_segment(segments: &mut [String], source_url: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn with_forced_extension_appends_rather_than_replaces() {
+        let path = LocalPath("https/example.com/photo".to_string());
+        assert_eq!(
+            path.with_forced_extension("jpg").as_str(),
+            "https/example.com/photo.jpg"
+        );
+    }
+
+    #[test]
+    fn with_forced_extension_is_safe_against_a_bare_disambiguation_hash() {
+        // Mirrors what `disambiguate_last_segment` produces for an
+        // originally-extensionless URL with a query string: a final
+        // segment shaped like `name.<hash>`, where the text after the
+        // dot is *not* a real extension. Appending must never try to
+        // interpret or strip that as one.
+        let path = LocalPath("https/example.com/photo.a1b2c3d4e5".to_string());
+        assert_eq!(
+            path.with_forced_extension("jpg").as_str(),
+            "https/example.com/photo.a1b2c3d4e5.jpg"
+        );
+    }
 
     #[test]
     fn normalize_adds_https_scheme_when_missing() {

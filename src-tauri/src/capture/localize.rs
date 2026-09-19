@@ -214,13 +214,16 @@ pub async fn localize_content(
     // I/O. A join failure (which `optimize_content_image` itself has no
     // path to trigger — it never panics) falls back to the original
     // fetched bytes rather than losing the asset entirely.
-    let fetched: Vec<(Url, Vec<u8>)> = stream::iter(fetched)
+    let fetched: Vec<(Url, image_optimize::OptimizedImage)> = stream::iter(fetched)
         .map(|(url, bytes)| async move {
-            let fallback = bytes.clone();
+            let fallback_bytes = bytes.clone();
             let optimized =
                 tokio::task::spawn_blocking(move || image_optimize::optimize_content_image(&bytes))
                     .await
-                    .unwrap_or(fallback);
+                    .unwrap_or(image_optimize::OptimizedImage {
+                        bytes: fallback_bytes,
+                        extension: None,
+                    });
             (url, optimized)
         })
         .buffer_unordered(CONCURRENCY)
@@ -237,12 +240,23 @@ pub async fn localize_content(
     let mut by_hash: HashMap<[u8; 32], LocalPath> = HashMap::with_capacity(fetched.len());
     let mut url_map = HashMap::with_capacity(fetched.len());
     let mut assets = Vec::with_capacity(fetched.len());
-    for (url, bytes) in fetched {
+    for (url, optimized) in fetched {
+        let image_optimize::OptimizedImage { bytes, extension } = optimized;
         let hash: [u8; 32] = Sha256::digest(&bytes).into();
         let path = match by_hash.get(&hash) {
             Some(existing) => existing.clone(),
             None => {
-                let path = local_path_for(&canonicalize(&url));
+                let base_path = local_path_for(&canonicalize(&url));
+                // Some CDNs serve images from entirely extensionless
+                // URLs; without this, such an asset would be stored (and
+                // then served by `content_server::guess_content_type`) as
+                // `application/octet-stream`, which most webviews refuse
+                // to render as an `<img>` even though the bytes are a
+                // perfectly valid image.
+                let path = match extension {
+                    Some(ext) => base_path.with_forced_extension(ext),
+                    None => base_path,
+                };
                 by_hash.insert(hash, path.clone());
                 assets.push(LocalizedAsset {
                     path: path.clone(),
@@ -298,5 +312,45 @@ mod tests {
         assert_eq!(localized.url_map.len(), 2, "both URLs still resolve");
         let paths: HashSet<_> = localized.url_map.values().collect();
         assert_eq!(paths.len(), 1, "both URLs must map to the same LocalPath");
+    }
+
+    /// Reproduces the real bug this exists for: a CDN serving a valid
+    /// image from a URL with no file extension at all (`media.cntraveler.com`
+    /// does exactly this for every width variant it serves). Without
+    /// forcing a real extension onto the stored path,
+    /// `content_server::guess_content_type` would serve this asset as
+    /// `application/octet-stream`, which most webviews refuse to render
+    /// as an `<img>`.
+    #[tokio::test]
+    async fn an_extensionless_source_url_still_gets_stored_with_a_real_extension() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let base_url = format!("http://localhost:{}", listener.local_addr().unwrap().port());
+        let jpeg_bytes = include_bytes!("../../tests/fixtures/photo.jpg").to_vec();
+        let app = Router::new().route(
+            "/photos/abc123/master/w_1600",
+            get(move || {
+                let bytes = jpeg_bytes.clone();
+                async move { bytes }
+            }),
+        );
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve");
+        });
+
+        let base = Url::parse(&base_url).unwrap();
+        let client = reqwest::Client::new();
+        let html = format!(r#"<img src="{base_url}/photos/abc123/master/w_1600">"#);
+
+        let localized = localize_content(&client, &html, &base).await.unwrap();
+
+        assert_eq!(localized.assets.len(), 1);
+        let stored_path = localized.assets[0].path.as_str();
+        assert!(
+            stored_path.ends_with(".jpg"),
+            "an extensionless but decodable source must still be stored with a real \
+             extension, got: {stored_path}"
+        );
     }
 }
