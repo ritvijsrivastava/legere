@@ -81,13 +81,24 @@ Every ingestion path funnels into `capture::capture_local(client, data_dir, id, 
    `img/source[srcset]`, `video[poster]` reference in the sanitized fragment,
    resolves it against the final URL, and fetches each asset (concurrency 6,
    20 MB per-asset cap, one retry with backoff). This is scoped to the
-   readable fragment only — page-level CSS/JS is never fetched.
+   readable fragment only — page-level CSS/JS is never fetched. A `srcset`
+   contributes only *one* candidate to the fetch set, not every breakpoint:
+   `capture::rewrite::select_srcset_entry` picks the smallest entry that
+   meets a 1600px target width (or the largest available if none do) — the
+   reader always renders at one fixed column width, so the rest of a
+   page's responsive breakpoints are pure waste, and some CDNs return
+   byte-identical bytes for every requested width regardless, which used
+   to mean fetching (and storing) the same multi-MB image up to 8 times
+   per photo.
 5. **Rewrite** (`capture::rewrite`) — rewrites the same attribute set to
    `legere-content:/<article_id>/<local_path>` tokens using the URL→path map
    localization built. Assets that failed to fetch are left pointing at their
    original remote URL — graceful degradation, not broken local links.
    Stored HTML stays platform-neutral; the frontend resolves tokens at
-   render time (see below).
+   render time (see below). A `srcset` attribute is rewritten down to just
+   the one entry `select_srcset_entry` chose to fetch, descriptor dropped
+   — there's nothing left to describe a choice between once every other
+   candidate has been dropped.
 6. **Store** (`capture::archive`) — assets are written to
    `content/<article_id>/<local_path>` (directory wiped first, so recapture
    never leaves stale files); the hero image is a resized JPEG in `media/`,

@@ -17,7 +17,7 @@ use url::Url;
 
 use crate::urlx::{LocalPath, canonicalize, local_path_for};
 
-use super::rewrite::{resolve_reference, srcset_url_parts};
+use super::rewrite::{resolve_reference, select_srcset_entry};
 use super::ssrf;
 
 /// How many assets are fetched concurrently per article — high enough that
@@ -85,10 +85,10 @@ fn discover_references(content_html: &str, base: &Url) -> Result<HashSet<Url>, L
         Ok(())
     });
     let srcset_handler = element!("img[srcset], source[srcset]", |el| {
-        if let Some(raw) = el.get_attribute("srcset") {
-            for part in srcset_url_parts(&raw) {
-                collect(part);
-            }
+        if let Some(raw) = el.get_attribute("srcset")
+            && let Some(chosen) = select_srcset_entry(&raw)
+        {
+            collect(chosen);
         }
         Ok(())
     });

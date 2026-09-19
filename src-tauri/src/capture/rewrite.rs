@@ -95,43 +95,115 @@ fn rewrite_reference(
     Some(format!("legere-content:/{article_id}/{}", local.as_str()))
 }
 
-/// Splits a `srcset` attribute value into its comma-separated entries,
-/// yielding just each entry's URL part (its width/pixel-density
-/// descriptor, if any, dropped) — shared between [`rewrite_srcset`]
-/// (rewriting) and [`super::localize`] (discovering what to fetch), so the
-/// two passes can never disagree about which URLs a `srcset` references.
-pub(crate) fn srcset_url_parts(raw: &str) -> impl Iterator<Item = &str> {
-    raw.split(',')
-        .map(|entry| entry.trim().split(char::is_whitespace).next().unwrap_or(""))
+/// The reader always renders content at one fixed column width — there is
+/// no responsive layout that benefits from a page's full set of `srcset`
+/// breakpoints. `1600` targets a crisp render on a ~800px logical reading
+/// column at 2x pixel density; picked once here rather than per-caller so
+/// [`select_srcset_entry`]'s two callers (discovery and rewriting) can
+/// never disagree about which candidate "the localized one" means.
+const SRCSET_TARGET_WIDTH: u32 = 1600;
+
+/// Assumed CSS width behind a pixel-density (`"2x"`) descriptor, which has
+/// no width of its own — `srcset` mixes `w` and `x` descriptors in the wild
+/// (never both in one list per spec, but sites are not always spec-clean),
+/// so both need a comparable "effective width" to rank against each other
+/// and against `SRCSET_TARGET_WIDTH`.
+const SRCSET_DENSITY_BASE_WIDTH: u32 = 800;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum SrcsetDescriptor {
+    Width(u32),
+    Density(f64),
+    /// No descriptor (a bare URL) or one that failed to parse — treated as
+    /// an implicit `1x`, same as the spec's own fallback.
+    None,
 }
 
-/// Rewrites every URL in a `srcset` attribute value, preserving each
-/// entry's width/pixel-density descriptor. An entry with no localized copy
-/// keeps its original URL text unchanged.
+fn parse_descriptor(raw: &str) -> SrcsetDescriptor {
+    let raw = raw.trim();
+    if let Some(w) = raw.strip_suffix('w')
+        && let Ok(value) = w.parse::<u32>()
+    {
+        return SrcsetDescriptor::Width(value);
+    }
+    if let Some(x) = raw.strip_suffix('x')
+        && let Ok(value) = x.parse::<f64>()
+    {
+        return SrcsetDescriptor::Density(value);
+    }
+    SrcsetDescriptor::None
+}
+
+fn effective_width(descriptor: SrcsetDescriptor) -> u32 {
+    match descriptor {
+        SrcsetDescriptor::Width(w) => w,
+        SrcsetDescriptor::Density(x) => (SRCSET_DENSITY_BASE_WIDTH as f64 * x).round() as u32,
+        SrcsetDescriptor::None => SRCSET_DENSITY_BASE_WIDTH,
+    }
+}
+
+/// Picks the one `srcset` candidate worth fetching: the smallest entry
+/// whose effective width still meets [`SRCSET_TARGET_WIDTH`], or — if
+/// every entry falls short — the largest one available. Shared between
+/// [`super::localize::discover_references`] (what to fetch) and
+/// [`rewrite_srcset`] (what the rewritten attribute keeps), so the two
+/// passes can never disagree about which single URL "the localized one"
+/// is.
+///
+/// Returns the entry's raw URL text (still HTML-entity-encoded, not yet
+/// resolved against a base) — `None` only for an empty/unparseable
+/// attribute.
+pub(crate) fn select_srcset_entry(raw: &str) -> Option<&str> {
+    raw.split(',')
+        .filter_map(|entry| {
+            let trimmed = entry.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            let mut parts = trimmed.splitn(2, char::is_whitespace);
+            let url_part = parts.next().unwrap_or("");
+            if url_part.is_empty() {
+                return None;
+            }
+            let descriptor = parts
+                .next()
+                .map(parse_descriptor)
+                .unwrap_or(SrcsetDescriptor::None);
+            Some((url_part, effective_width(descriptor)))
+        })
+        .min_by_key(|&(_, width)| {
+            // Rank 0 (meets the target) always sorts before rank 1
+            // (falls short); within a rank, smaller sorts first for rank 0
+            // (smallest sufficient candidate) and `u32::MAX - width` makes
+            // the *largest* candidate sort first for rank 1 (best
+            // available when nothing meets the target).
+            if width >= SRCSET_TARGET_WIDTH {
+                (0u8, width)
+            } else {
+                (1u8, u32::MAX - width)
+            }
+        })
+        .map(|(url_part, _)| url_part)
+}
+
+/// Rewrites a `srcset` attribute down to a single entry: whichever URL
+/// [`select_srcset_entry`] chose to actually fetch and localize
+/// (see [`super::localize::discover_references`]), with no descriptor —
+/// there is nothing left to describe a choice between once every other
+/// candidate has been dropped. An attribute with no localized copy for its
+/// chosen entry falls back to that entry's original URL text unchanged,
+/// same graceful-degradation path a failed asset fetch already takes.
 fn rewrite_srcset(
     raw: &str,
     base: &Url,
     article_id: &str,
     url_map: &HashMap<Url, LocalPath>,
 ) -> String {
-    raw.split(',')
-        .map(|entry| {
-            let trimmed = entry.trim();
-            let mut parts = trimmed.splitn(2, char::is_whitespace);
-            let url_part = parts.next().unwrap_or("");
-            let descriptor = parts.next().map(str::trim).unwrap_or("");
-
-            let rewritten_url = rewrite_reference(url_part, base, article_id, url_map)
-                .unwrap_or_else(|| url_part.to_string());
-
-            if descriptor.is_empty() {
-                rewritten_url
-            } else {
-                format!("{rewritten_url} {descriptor}")
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(", ")
+    match select_srcset_entry(raw) {
+        Some(url_part) => rewrite_reference(url_part, base, article_id, url_map)
+            .unwrap_or_else(|| url_part.to_string()),
+        None => raw.to_string(),
+    }
 }
 
 #[cfg(test)]
@@ -181,32 +253,46 @@ mod tests {
     }
 
     #[test]
-    fn rewrites_srcset_preserving_descriptors() {
+    fn rewrites_srcset_to_just_the_selected_candidate() {
         let mut url_map = HashMap::new();
-        url_map.insert(
-            Url::parse("https://example.com/a.png").unwrap(),
-            local("https://example.com/a.png"),
-        );
         url_map.insert(
             Url::parse("https://example.com/b.png").unwrap(),
             local("https://example.com/b.png"),
         );
 
+        // "2x" (=1600 effective) meets the 1600px target and is smaller
+        // than "3x" (=2400 effective), so it should be the one selected,
+        // fetched, and kept — "a.png" (1x = 800) never gets an entry in
+        // `url_map` here, proving it was never fetched at all.
         let out = rewrite_readable_asset_urls(
-            r#"<img srcset="a.png 1x, b.png 2x">"#,
+            r#"<img srcset="a.png 1x, b.png 2x, c.png 3x">"#,
             &base(),
             "article-1",
             &url_map,
         )
         .unwrap();
-        assert!(
-            out.contains("legere-content:/article-1/https/example.com/a.png 1x"),
-            "got: {out}"
+        assert_eq!(
+            out,
+            r#"<img srcset="legere-content:/article-1/https/example.com/b.png">"#
         );
-        assert!(
-            out.contains("legere-content:/article-1/https/example.com/b.png 2x"),
-            "got: {out}"
+    }
+
+    #[test]
+    fn select_srcset_entry_picks_smallest_that_meets_the_target_width() {
+        assert_eq!(
+            select_srcset_entry("a.jpg 320w, b.jpg 1600w, c.jpg 3200w"),
+            Some("b.jpg")
         );
+    }
+
+    #[test]
+    fn select_srcset_entry_falls_back_to_the_largest_when_none_meet_the_target() {
+        assert_eq!(select_srcset_entry("a.jpg 320w, b.jpg 640w"), Some("b.jpg"));
+    }
+
+    #[test]
+    fn select_srcset_entry_treats_a_bare_url_as_1x() {
+        assert_eq!(select_srcset_entry("a.jpg"), Some("a.jpg"));
     }
 
     #[test]
