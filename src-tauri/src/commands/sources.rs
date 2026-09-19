@@ -1,10 +1,11 @@
-use tauri::{AppHandle, State};
 
+use tauri::{AppHandle, Manager, State};
+
+use crate::capture_jobs::CaptureJob;
 use crate::db::queries;
 use crate::error::AppError;
-use crate::events::{self, SyncError, SyncFinished};
-use crate::models::{AddSourceAutoResult, Source, SyncResult};
 use crate::sources::rss;
+use crate::events::{self, CaptureSucceeded, SyncError, SyncFinished};
 use crate::state::AppState;
 use crate::sync::sync_all_sources;
 use crate::urlx::normalize_source_url;
@@ -72,16 +73,19 @@ async fn insert_rss_source_and_sync(
 /// isn't distinguished from "is a webpage, not a feed" — both fall back
 /// to the direct-link capture path, which is exactly the behavior a plain
 /// article URL needs anyway.
-#[tauri::command]
-pub async fn add_source_auto(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    value: String,
-) -> Result<AddSourceAutoResult, AppError> {
-    let value = normalize_source_url(&value);
+///
+/// Runs entirely inside `spawn_capture_job`'s background task (see
+/// `add_source_background`) rather than as a command itself — a slow
+/// site's fetch, and an image-heavy direct-link capture's own localize
+/// step, both used to block the dialog until this returned.
+async fn run_add_source_auto(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+    value: &str,
+) -> Result<CaptureSucceeded, AppError> {
     let bytes = state
         .http_client
-        .get(&value)
+        .get(value)
         .send()
         .await
         .map_err(|e| AppError::Network(e.to_string()))?
@@ -90,15 +94,124 @@ pub async fn add_source_auto(
         .map_err(|e| AppError::Network(e.to_string()))?;
 
     if feed_rs::parser::parse(&bytes[..]).is_ok() {
-        let source = insert_rss_source_and_sync(&app, &state, value).await?;
-        Ok(AddSourceAutoResult::Rss(source))
+        let source = insert_rss_source_and_sync(app, state, value.to_string()).await?;
+        Ok(CaptureSucceeded {
+            kind: "rss".to_string(),
+            title: source.name,
+        })
     } else {
-        let article = crate::sources::direct_link::capture_direct_link(&state, &value)
+        let article = crate::sources::direct_link::capture_direct_link(state, value)
             .await
             .map_err(AppError::from)?;
-        events::emit_articles_changed(&app);
-        Ok(AddSourceAutoResult::Direct(article))
+        events::emit_articles_changed(app);
+        Ok(CaptureSucceeded {
+            kind: "direct".to_string(),
+            title: article.title,
+        })
     }
+}
+
+/// Runs `run_add_source_auto(id, url)` to completion and reports the
+/// outcome to `AppState::capture_jobs`: removed from the list on success
+/// (plus a one-off `capture:succeeded` for the confirmation toast), left
+/// in `Failed` state on error so the activity dock can offer a retry.
+/// Always finishes with `capture:changed` so the dock/panel refetch
+/// either way. The spawned task's own handle is attached back onto the
+/// job immediately (not inside the task itself, which can't reach its
+/// own handle) so `cancel_capture_job` has something to abort.
+fn spawn_capture_job(app: AppHandle, id: String, url: String) {
+    let handle = {
+        let app = app.clone();
+        let id = id.clone();
+        let url = url.clone();
+        tauri::async_runtime::spawn(async move {
+            let state = app.state::<AppState>();
+            match run_add_source_auto(&app, &state, &url).await {
+                Ok(succeeded) => {
+                    state.capture_jobs.succeed(&id);
+                    events::emit_capture_succeeded(&app, &succeeded);
+                }
+                Err(err) => {
+                    tracing::warn!(url = %url, %err, "background capture failed");
+                    state.capture_jobs.fail(&id, err.to_string());
+                }
+            }
+            events::emit_capture_changed(&app);
+        })
+    };
+    app.state::<AppState>()
+        .capture_jobs
+        .attach_handle(&id, handle);
+}
+
+/// Queues `value` for background capture and returns immediately — see
+/// `run_add_source_auto`/`spawn_capture_job`. The frontend closes the
+/// "Add a source" dialog as soon as this resolves and tracks the rest via
+/// `capture:*` events and `list_capture_jobs`.
+#[tauri::command]
+pub async fn add_source_background(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    value: String,
+) -> Result<CaptureJob, AppError> {
+    let value = normalize_source_url(&value);
+    let job = state.capture_jobs.enqueue(value.clone());
+    events::emit_capture_changed(&app);
+    spawn_capture_job(app, job.id.clone(), value);
+    Ok(job)
+}
+
+/// Every in-flight or failed background capture — a finished/succeeded
+/// one is never returned, see `capture_jobs`'s module docs.
+#[tauri::command]
+pub async fn list_capture_jobs(state: State<'_, AppState>) -> Result<Vec<CaptureJob>, AppError> {
+    Ok(state.capture_jobs.list())
+}
+
+/// Re-runs a failed job's URL as a fresh background attempt. Errors if
+/// `id` isn't a known, non-running job.
+#[tauri::command]
+pub async fn retry_capture_job(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<(), AppError> {
+    let Some(url) = state.capture_jobs.retry(&id) else {
+        return Err(AppError::not_found("capture job"));
+    };
+    events::emit_capture_changed(&app);
+    spawn_capture_job(app, id, url);
+    Ok(())
+}
+
+/// Drops an acknowledged failure from the activity dock/panel without
+/// retrying it.
+#[tauri::command]
+pub async fn dismiss_capture_job(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<(), AppError> {
+    state.capture_jobs.dismiss(&id);
+    events::emit_capture_changed(&app);
+    Ok(())
+}
+
+/// Aborts a still-running capture outright. Safe at any point in the
+/// pipeline — see `capture_jobs::CaptureJobs::cancel`'s doc comment for
+/// why nothing partial is left behind. Errors if `id` isn't a known,
+/// running job.
+#[tauri::command]
+pub async fn cancel_capture_job(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<(), AppError> {
+    if !state.capture_jobs.cancel(&id) {
+        return Err(AppError::not_found("capture job"));
+    }
+    events::emit_capture_changed(&app);
+    Ok(())
 }
 
 #[tauri::command]

@@ -3,7 +3,8 @@ import { libraryStatsStore } from './stores/libraryStats.svelte';
 import { sourcesStore } from './stores/sources.svelte';
 import { uiStore } from './stores/ui.svelte';
 import { importStore } from './stores/import.svelte';
-import type { ImportFinished, ImportProgress } from './types';
+import { captureJobsStore } from './stores/captureJobs.svelte';
+import type { CaptureSucceeded } from './types';
 
 interface SyncFinishedPayload {
 	new_article_count: number;
@@ -63,5 +64,17 @@ export function registerBackendEvents() {
 				`Import finished with ${event.payload.failed.length} failed link${event.payload.failed.length === 1 ? '' : 's'}`
 			);
 		}
+	});
+
+	listen('capture:changed', () => {
+		captureJobsStore.refresh();
+	});
+
+	listen<CaptureSucceeded>('capture:succeeded', (event) => {
+		uiStore.showToast(
+			event.payload.kind === 'rss'
+				? `Following “${event.payload.title}”`
+				: `Added “${event.payload.title}”`
+		);
 	});
 }

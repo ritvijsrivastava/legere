@@ -179,6 +179,8 @@ mod tests {
             autosync_handle: TokioMutex::new(None),
             last_foreground_sync: std::sync::Mutex::new(None),
             import_cancel: TokioMutex::new(None),
+            article_import_cancel: TokioMutex::new(None),
+            capture_jobs: Default::default(),
             pending_update: Default::default(),
             pending_linux_update: Default::default(),
         }

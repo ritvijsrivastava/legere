@@ -88,3 +88,30 @@ pub fn emit_import_progress(app: &AppHandle, payload: &ImportProgress) {
 pub fn emit_import_finished(app: &AppHandle, payload: &ImportFinished) {
     let _ = app.emit("import:finished", payload);
 }
+
+/// A background "add a source" job (`capture_jobs::CaptureJobs`) was
+/// enqueued, retried, dismissed, succeeded, or failed — a cue for the
+/// frontend's activity panel to refetch `list_capture_jobs`. Coarse-
+/// grained like every other `*_changed` event here: the job list is tiny,
+/// so a full refetch is simpler than trying to keep a payload in sync
+/// with exactly what changed.
+pub fn emit_capture_changed(app: &AppHandle) {
+    let _ = app.emit("capture:changed", ());
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CaptureSucceeded {
+    /// `"rss"` or `"direct"` — lets the frontend word the confirmation
+    /// toast appropriately ("Following" vs. "Added").
+    pub kind: String,
+    pub title: String,
+}
+
+/// A background capture landed successfully. Separate from
+/// `emit_capture_changed` (which only says "go refetch the job list")
+/// because this one carries just enough to word a one-off success toast
+/// — the dialog closed the instant the job was queued, so this is the
+/// only feedback the user gets that it actually worked.
+pub fn emit_capture_succeeded(app: &AppHandle, payload: &CaptureSucceeded) {
+    let _ = app.emit("capture:succeeded", payload);
+}

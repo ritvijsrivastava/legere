@@ -6,6 +6,7 @@ use std::time::Instant;
 use tauri::async_runtime::JoinHandle;
 use tokio::sync::Mutex;
 
+use crate::capture_jobs::CaptureJobs;
 use crate::db::DbPool;
 
 pub struct AppState {
@@ -28,6 +29,15 @@ pub struct AppState {
     /// cancellation), which also doubles as the single-import-at-a-time
     /// guard (a start request while this is `Some` is rejected).
     pub import_cancel: Mutex<Option<Arc<AtomicBool>>>,
+    /// Cancellation flag for an in-progress `exports::articles::run_import`
+    /// run (Settings' "Import articles", Legere's own CSV shape) — separate
+    /// from `import_cancel` (the Raindrop-migration importer) so the two
+    /// can't be confused with each other, even though only one importer of
+    /// either kind is ever allowed to run at a time in practice.
+    pub article_import_cancel: Mutex<Option<Arc<AtomicBool>>>,
+    /// In-flight/failed "add a source" background captures — see
+    /// `capture_jobs`'s module docs for why this is in-memory only.
+    pub capture_jobs: CaptureJobs,
     /// Update found by `check_for_update`, consumed by `install_update`.
     /// tauri-plugin-updater doesn't support mobile, so this only exists on desktop.
     #[cfg(not(target_os = "android"))]

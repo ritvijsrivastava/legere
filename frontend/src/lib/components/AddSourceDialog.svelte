@@ -1,7 +1,6 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
 	import { uiStore } from '$lib/stores/ui.svelte';
-	import { sourcesStore } from '$lib/stores/sources.svelte';
+	import { captureJobsStore } from '$lib/stores/captureJobs.svelte';
 	import * as api from '$lib/api';
 
 	let newSourceValue = $state('');
@@ -23,21 +22,25 @@
 		reset();
 	}
 
-	// A freshly captured direct-link article always starts Uncategorized
-	// (new articles are inserted with no `category_id` \u2014 see
-	// `db::queries`) rather than prompting for a category up front; moving
-	// it somewhere else is one action away from its card or the reader
-	// (see `MoveToCategoryDialog`), and most captures don't need it.
+	// The actual fetch/extract/localize pipeline (which is what can take a
+	// while \u2014 an image-heavy article, or a slow site) runs in the
+	// background: this only waits long enough to queue the job, then
+	// closes immediately. A freshly captured direct-link article always
+	// starts Uncategorized (new articles are inserted with no
+	// `category_id` \u2014 see `db::queries`) rather than prompting for a
+	// category up front; moving it somewhere else is one action away from
+	// its card or the reader (see `MoveToCategoryDialog`). Progress,
+	// success, and any failure (with a retry) surface via
+	// `captureJobsStore`/`CaptureJobsPanel`, not this dialog.
 	async function submit() {
 		const value = newSourceValue.trim();
 		if (!value) return;
 		submitting = true;
 		error = null;
 		try {
-			const result = await sourcesStore.addAuto(value);
-			const articleId = result.kind === 'direct' ? result.value.id : null;
+			await api.addSourceBackground(value);
+			await captureJobsStore.refresh();
 			close();
-			if (articleId) await goto(`/reader/${articleId}`);
 		} catch (e) {
 			error = api.errorMessage(e);
 		} finally {

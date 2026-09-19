@@ -2,7 +2,10 @@ const TOAST_DURATION_MS = 4000;
 
 class UiStore {
 	addSourceOpen = $state(false);
+	captureJobsOpen = $state(false);
 	importDialogOpen = $state(false);
+	importArticlesDialogOpen = $state(false);
+	importSourcesDialogOpen = $state(false);
 	deleteAllArticlesDialogOpen = $state(false);
 	/** Set by any "move to category" trigger (article card/row, reader
 	 *  overflow menu) — the single globally-mounted `MoveToCategoryDialog`
@@ -20,11 +23,32 @@ class UiStore {
 		this.addSourceOpen = false;
 	}
 
+	openCaptureJobs() {
+		this.captureJobsOpen = true;
+	}
+	closeCaptureJobs() {
+		this.captureJobsOpen = false;
+	}
+
 	openImportDialog() {
 		this.importDialogOpen = true;
 	}
 	closeImportDialog() {
 		this.importDialogOpen = false;
+	}
+
+	openImportArticlesDialog() {
+		this.importArticlesDialogOpen = true;
+	}
+	closeImportArticlesDialog() {
+		this.importArticlesDialogOpen = false;
+	}
+
+	openImportSourcesDialog() {
+		this.importSourcesDialogOpen = true;
+	}
+	closeImportSourcesDialog() {
+		this.importSourcesDialogOpen = false;
 	}
 
 	openDeleteAllArticlesDialog() {

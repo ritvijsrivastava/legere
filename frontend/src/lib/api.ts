@@ -1,28 +1,42 @@
 import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import type {
-	AddSourceAutoResult,
 	ArticleDetail,
+	ArticleImportPreview,
 	ArticlePage,
 	ArticlePageRequest,
 	ArticleSummary,
+	CaptureJob,
 	Category,
+	ExportResult,
 	ImportPreview,
 	NamedCount,
 	ReadingOverrides,
 	Settings,
 	Source,
+	SourceArticlePreview,
+	SourcesImportSummary,
 	SourceType,
 	SyncResult,
 	TagFacetRequest
 } from './types';
 
 export { open as pickCsvFile, save as saveCsvFile } from '@tauri-apps/plugin-dialog';
+/** Opens the OS file manager with `path` selected — backs "Reveal in
+ *  folder" after an export (see `ExportResultCard.svelte`). */
+export { revealItemInDir } from '@tauri-apps/plugin-opener';
 
 /** Writes `contents` to `path`, overwriting any existing file — used to
  *  export data (e.g. failed Raindrop import rows as CSV) to a location
  *  picked via `saveCsvFile`. */
 export function writeTextFile(path: string, contents: string): Promise<void> {
 	return invoke<void>('write_text_file', { path, contents });
+}
+
+/** Reads a whole text file back — used by `ExportResultCard`'s "Save a
+ *  copy..." action to hand an already-written export to a location the
+ *  user picks, without re-running the export a second time. */
+export function readTextFile(path: string): Promise<string> {
+	return invoke<string>('read_text_file', { path });
 }
 
 export function listArticlesPage(request: ArticlePageRequest): Promise<ArticlePage> {
@@ -80,6 +94,11 @@ export function createCategory(name: string): Promise<Category> {
 
 export function renameCategory(id: string, name: string): Promise<Category> {
 	return invoke<Category>('rename_category', { id, name });
+}
+
+/** `icon` is an id from the fixed category icon pack (`categoryIcons.ts`). */
+export function setCategoryIcon(id: string, icon: string): Promise<Category> {
+	return invoke<Category>('set_category_icon', { id, icon });
 }
 
 export function deleteCategory(id: string): Promise<void> {
@@ -149,10 +168,35 @@ export function addSource(sourceType: SourceType, value: string): Promise<Source
 	return invoke<Source>('add_source', { sourceType, value });
 }
 
-/** Sniffs whether `value` is a feed or a plain article URL and adds it
- *  accordingly — the single entry point behind the "Add a source" dialog. */
-export function addSourceAuto(value: string): Promise<AddSourceAutoResult> {
-	return invoke<AddSourceAutoResult>('add_source_auto', { value });
+/** Sniffs whether `value` is a feed or a plain article URL and captures
+ *  it in the background — the single entry point behind the "Add a
+ *  source" dialog. Returns as soon as the job is queued; track its
+ *  outcome via `listCaptureJobs`/the `capture:*` events, not this
+ *  promise's resolution. */
+export function addSourceBackground(value: string): Promise<CaptureJob> {
+	return invoke<CaptureJob>('add_source_background', { value });
+}
+
+/** Every in-flight or failed background capture (never a succeeded one
+ *  — see `CaptureJob`). */
+export function listCaptureJobs(): Promise<CaptureJob[]> {
+	return invoke<CaptureJob[]>('list_capture_jobs');
+}
+
+export function retryCaptureJob(id: string): Promise<void> {
+	return invoke<void>('retry_capture_job', { id });
+}
+
+export function dismissCaptureJob(id: string): Promise<void> {
+	return invoke<void>('dismiss_capture_job', { id });
+}
+
+/** Aborts a still-running capture outright — safe at any point in the
+ *  pipeline, see the backend's `capture_jobs::CaptureJobs::cancel`. */
+export function cancelCaptureJob(id: string): Promise<void> {
+	return invoke<void>('cancel_capture_job', { id });
+}
+
 }
 
 export function toggleSourcePause(id: string): Promise<Source> {

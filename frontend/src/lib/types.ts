@@ -37,6 +37,9 @@ export interface ArticleSummary {
 	link: string;
 	/** Name of the article's folder category, `null` when uncategorized. */
 	category_name: string | null;
+	/** The category's chosen icon-pack id (see `categoryIcons.ts`), `null`
+	 *  when uncategorized. */
+	category_icon: string | null;
 }
 
 export interface ArticleDetail extends ArticleSummary {
@@ -146,6 +149,9 @@ export interface Category {
 	id: string;
 	name: string;
 	article_count: number;
+	/** An id into the fixed category icon pack (`categoryIcons.ts`), e.g.
+	 *  `"folder"` or `"book"`. */
+	icon: string;
 }
 
 export interface ImportFailure {
@@ -185,4 +191,39 @@ export interface ImportFinished {
 	/** `true` if `cancel_raindrop_import` stopped the run early — the counts
 	 *  above still reflect whatever completed before that point. */
 	cancelled: boolean;
+}
+
+/** Result of `export_articles_csv`/`export_sources_csv` — everything
+ *  needed to show "exported to `<filename>`" and offer to reveal/re-share
+ *  it, without a second round trip. */
+export interface ExportResult {
+	path: string;
+	filename: string;
+	row_count: number;
+	exported_at: string;
+}
+
+/** Category-level summary shown before Settings' "Import articles" starts
+ *  — Legere's own CSV shape (`title,url,category,tags,created,favourite`),
+ *  independent of `FolderPreview`/`ImportPreview` (Raindrop migration
+ *  only). Each category automatically becomes (or reuses) a same-named
+ *  category once the import runs. */
+export interface CategoryPreview {
+	category: string;
+	name: string;
+	row_count: number;
+	duplicate_count: number;
+}
+
+export interface ArticleImportPreview {
+	total: number;
+	categories: CategoryPreview[];
+}
+
+/** Result of `import_sources_csv` — every new feed URL is queued for
+ *  background capture (tracked via the existing capture-jobs activity
+ *  dock, not a dedicated progress UI) by the time this resolves. */
+export interface SourcesImportSummary {
+	queued: number;
+	skipped_duplicate: number;
 }

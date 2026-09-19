@@ -1,4 +1,5 @@
 mod capture;
+mod capture_jobs;
 mod commands;
 mod content_server;
 mod db;
@@ -141,6 +142,8 @@ pub fn run() {
                 autosync_handle: Mutex::new(None),
                 last_foreground_sync: std::sync::Mutex::new(None),
                 import_cancel: Mutex::new(None),
+                article_import_cancel: Mutex::new(None),
+                capture_jobs: Default::default(),
                 #[cfg(not(target_os = "android"))]
                 pending_update: Default::default(),
                 #[cfg(not(target_os = "android"))]
@@ -209,8 +212,13 @@ pub fn run() {
             commands::articles::recapture_article,
             commands::articles::add_direct_link_article,
             commands::sources::list_sources,
+            commands::sources::list_source_recent_articles,
             commands::sources::add_source,
-            commands::sources::add_source_auto,
+            commands::sources::add_source_background,
+            commands::sources::list_capture_jobs,
+            commands::sources::retry_capture_job,
+            commands::sources::dismiss_capture_job,
+            commands::sources::cancel_capture_job,
             commands::sources::toggle_source_pause,
             commands::sources::remove_source,
             commands::sources::sync_source,
