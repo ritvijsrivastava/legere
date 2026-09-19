@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use futures_util::{StreamExt, stream};
 use lol_html::{RewriteStrSettings, element};
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 use url::Url;
 
@@ -61,7 +62,10 @@ pub struct LocalizedContent {
     /// Every discovered asset URL mapped to the [`LocalPath`] it was
     /// localized to. A failed/skipped fetch has no entry — the caller's
     /// rewrite pass ([`super::rewrite::rewrite_readable_asset_urls`])
-    /// leaves that reference pointing at its original remote URL.
+    /// leaves that reference pointing at its original remote URL. Two URLs
+    /// with byte-identical content map to the *same* [`LocalPath`] (see
+    /// the content-hash dedup in [`localize_content`]) — `url_map.len()`
+    /// can therefore exceed `assets.len()`.
     pub url_map: HashMap<Url, LocalPath>,
 }
 
@@ -202,13 +206,76 @@ pub async fn localize_content(
         .collect()
         .await;
 
+    // Different URLs occasionally resolve to byte-identical content — a
+    // CDN that ignores a `srcset` width parameter and serves the same
+    // master image for every requested size is a real case this hits (one
+    // saved article stored the same photo under eight different URLs
+    // before this dedup existed). Content-hash rather than URL-dedup: two
+    // URLs with identical bytes share one on-disk file instead of each
+    // getting their own copy.
+    let mut by_hash: HashMap<[u8; 32], LocalPath> = HashMap::with_capacity(fetched.len());
     let mut url_map = HashMap::with_capacity(fetched.len());
     let mut assets = Vec::with_capacity(fetched.len());
     for (url, bytes) in fetched {
-        let path = local_path_for(&canonicalize(&url));
-        url_map.insert(url, path.clone());
-        assets.push(LocalizedAsset { path, bytes });
+        let hash: [u8; 32] = Sha256::digest(&bytes).into();
+        let path = match by_hash.get(&hash) {
+            Some(existing) => existing.clone(),
+            None => {
+                let path = local_path_for(&canonicalize(&url));
+                by_hash.insert(hash, path.clone());
+                assets.push(LocalizedAsset {
+                    path: path.clone(),
+                    bytes,
+                });
+                path
+            }
+        };
+        url_map.insert(url, path);
     }
 
     Ok(LocalizedContent { assets, url_map })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::Router;
+    use axum::routing::get;
+
+    /// Two distinct paths serving byte-identical content — the same shape
+    /// as a CDN that ignores a width parameter and returns its master
+    /// image regardless of the requested size (see `select_srcset_entry`'s
+    /// own doc comment for the real-world case this models).
+    async fn spawn_duplicate_content_server() -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let base_url = format!("http://localhost:{}", listener.local_addr().unwrap().port());
+        let app = Router::new()
+            .route("/a.jpg", get(|| async { [0x11u8, 0x22, 0x33, 0x44] }))
+            .route("/b.jpg", get(|| async { [0x11u8, 0x22, 0x33, 0x44] }));
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve");
+        });
+        base_url
+    }
+
+    #[tokio::test]
+    async fn two_urls_with_identical_bytes_share_one_stored_asset() {
+        let base_url = spawn_duplicate_content_server().await;
+        let base = Url::parse(&base_url).unwrap();
+        let client = reqwest::Client::new();
+        let html = format!(r#"<img src="{base_url}/a.jpg"><img src="{base_url}/b.jpg">"#);
+
+        let localized = localize_content(&client, &html, &base).await.unwrap();
+
+        assert_eq!(
+            localized.assets.len(),
+            1,
+            "identical bytes from two different URLs must be stored once"
+        );
+        assert_eq!(localized.url_map.len(), 2, "both URLs still resolve");
+        let paths: HashSet<_> = localized.url_map.values().collect();
+        assert_eq!(paths.len(), 1, "both URLs must map to the same LocalPath");
+    }
 }

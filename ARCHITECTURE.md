@@ -89,7 +89,10 @@ Every ingestion path funnels into `capture::capture_local(client, data_dir, id, 
    page's responsive breakpoints are pure waste, and some CDNs return
    byte-identical bytes for every requested width regardless, which used
    to mean fetching (and storing) the same multi-MB image up to 8 times
-   per photo.
+   per photo. A second, independent safety net catches the same waste
+   from the other direction: every fetched asset is content-hashed
+   (SHA-256) before being written, so two *different* URLs that happen to
+   resolve to identical bytes still only get stored once.
 5. **Rewrite** (`capture::rewrite`) — rewrites the same attribute set to
    `legere-content:/<article_id>/<local_path>` tokens using the URL→path map
    localization built. Assets that failed to fetch are left pointing at their
