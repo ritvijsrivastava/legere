@@ -3,4 +3,18 @@
     <style name="Theme.legere" parent="Theme.MaterialComponents.DayNight.NoActionBar">
         <!-- Customize your theme here. -->
     </style>
+
+    <!-- ShareActivity's theme: fully invisible so the trampoline never
+         flashes a frame before finish() — see ShareActivity.kt. A system
+         permission dialog (POST_NOTIFICATIONS) can still render on top of
+         this if requested; that's a separate window, not this theme. -->
+    <style name="Theme.legere.NoDisplay" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowIsFloating">true</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:backgroundDimEnabled">false</item>
+    </style>
 </resources>

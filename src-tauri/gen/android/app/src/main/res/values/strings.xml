@@ -1,4 +1,12 @@
 <resources>
     <string name="app_name">"Legere"</string>
     <string name="main_activity_title">"Legere"</string>
+
+    <!-- Share-intent notification (ShareActivity/ShareWorker) -->
+    <string name="share_notification_channel_name">"Saving shared articles"</string>
+    <string name="share_notification_channel_description">"Progress for articles shared into Legere from other apps"</string>
+    <string name="share_saving_title">"Saving article\u2026"</string>
+    <string name="share_no_link_found">"No link found in shared content"</string>
+    <string name="share_saved_title">"Saved to Legere"</string>
+    <string name="share_failed_title">"Couldn\u2019t save article"</string>
 </resources>

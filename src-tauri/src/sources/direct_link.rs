@@ -1,6 +1,9 @@
+use std::path::Path;
+
 use thiserror::Error;
 
 use crate::capture::{self, CaptureError};
+use crate::db::DbPool;
 use crate::db::queries;
 use crate::models::ArticleSummary;
 use crate::state::AppState;
@@ -22,10 +25,26 @@ pub async fn capture_direct_link(
     state: &AppState,
     url: &str,
 ) -> Result<ArticleSummary, DirectLinkError> {
-    let id = uuid::Uuid::new_v4().to_string();
-    let output = capture::capture_local(&state.http_client, &state.data_dir, &id, url).await?;
+    capture_and_store(&state.pool, &state.http_client, &state.data_dir, url).await
+}
 
-    let conn = state.pool.get()?;
+/// Lower-level than [`capture_direct_link`]: takes the capture pipeline's
+/// three dependencies directly rather than a whole `AppState`, so it's
+/// callable from contexts that never construct one — notably Android's
+/// share-intent entrypoint (`share_intent.rs`), which runs inside a
+/// WorkManager background task that may be the *only* thing running in the
+/// process (a share can happen without the app's own Tauri runtime/`AppState`
+/// ever having been started in this process instance).
+pub async fn capture_and_store(
+    pool: &DbPool,
+    http_client: &reqwest::Client,
+    data_dir: &Path,
+    url: &str,
+) -> Result<ArticleSummary, DirectLinkError> {
+    let id = uuid::Uuid::new_v4().to_string();
+    let output = capture::capture_local(http_client, data_dir, &id, url).await?;
+
+    let conn = pool.get()?;
     let inserted = queries::insert_captured_article(&conn, &id, None, "direct", &output, &[])?;
 
     // `output.link`'s cleaned form was already saved under a different id

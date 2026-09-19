@@ -16,6 +16,20 @@
 //! the same `onCreate` chain, by the base `TauriActivity`/`WryActivity`),
 //! so this symbol is resolvable. The calling `MainActivity` instance
 //! doubles as the `Context` `init_with_env` needs.
+//!
+//! [`init_tls`] is also called directly (not through the JNI export below)
+//! from `share_intent`'s native entrypoint: a shared URL can be the very
+//! first thing this app process ever does — Android starts the process for
+//! the WorkManager task alone, `MainActivity.onCreate` never runs — so
+//! nothing else in that codepath has done this handoff yet either.
+#[cfg(target_os = "android")]
+pub(crate) fn init_tls<'local>(
+    env: &mut jni::Env<'local>,
+    context: jni::objects::JObject<'local>,
+) -> jni::errors::Result<()> {
+    rustls_platform_verifier::android::init_with_env(env, context)
+}
+
 #[cfg(target_os = "android")]
 #[unsafe(no_mangle)]
 #[allow(non_snake_case)]
@@ -23,10 +37,7 @@ pub extern "system" fn Java_com_ritvijsrivastava_legere_MainActivity_initTls<'lo
     mut env: jni::EnvUnowned<'local>,
     this: jni::objects::JObject<'local>,
 ) {
-    match env
-        .with_env(|env| rustls_platform_verifier::android::init_with_env(env, this))
-        .into_outcome()
-    {
+    match env.with_env(|env| init_tls(env, this)).into_outcome() {
         jni::Outcome::Ok(()) => {}
         jni::Outcome::Err(error) => {
             tracing::error!(%error, "failed to initialize rustls-platform-verifier's Android context")

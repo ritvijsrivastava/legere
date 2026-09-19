@@ -7,6 +7,8 @@ mod events;
 mod gc;
 mod mobile_tls;
 mod models;
+#[cfg(target_os = "android")]
+mod share_intent;
 mod sources;
 mod state;
 mod sync;
@@ -28,6 +30,21 @@ use commands::update_android::{android_check_for_update, android_download_and_in
 #[cfg(not(target_os = "android"))]
 use commands::update_linux::{linux_check_for_update, linux_install_kind, linux_install_update};
 use state::AppState;
+
+/// The share-intent JNI entrypoint (`share_intent.rs`) prefers routing a
+/// capture through this app's own already-running `AppState`/async
+/// runtime when one exists in this process — the correct data dir for
+/// free (no risk of the two ever disagreeing), and (via
+/// `events::emit_articles_changed`) an instant library refresh if the app
+/// happens to be open in the background when the share finishes, rather
+/// than only showing up after the next cold start. Set once, from
+/// `setup()` below; `None` means this process was started for the
+/// share's own `WorkManager` job alone and `MainActivity`/`setup()` never
+/// ran — by far the common case, since Android often doesn't keep the
+/// app process alive between uses.
+#[cfg(target_os = "android")]
+pub(crate) static GLOBAL_APP_HANDLE: std::sync::OnceLock<tauri::AppHandle> =
+    std::sync::OnceLock::new();
 
 const AUTOSYNC_INTERVAL: Duration = Duration::from_secs(15 * 60);
 /// There's no background autosync on Android (no WorkManager integration
@@ -132,6 +149,9 @@ pub fn run() {
                 pending_android_update: Default::default(),
             };
             app.manage(state);
+
+            #[cfg(target_os = "android")]
+            let _ = GLOBAL_APP_HANDLE.set(app.handle().clone());
 
             if autosync_enabled {
                 let handle = sync::spawn_autosync(app.handle().clone(), AUTOSYNC_INTERVAL);

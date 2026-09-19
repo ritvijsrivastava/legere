@@ -1,6 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Android 13+ requires this to post the "Saving article..."/"Saved"
+         share-intent notification (see ShareActivity/ShareWorker) — a
+         runtime prompt, requested from ShareActivity, still needs the
+         manifest declaration. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- ShareWorker (see ShareWorker.kt) runs as a WorkManager expedited job
+         promoted to a foreground service for its duration — Android 14+
+         requires the matching granular FGS-type permission alongside the
+         general one. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
@@ -21,6 +32,22 @@
                 <category android:name="android.intent.category.LAUNCHER" />
                 <!-- AndroidTV support -->
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Trampoline for "Share to Legere": invisible, never enters the
+             task list/back stack, finishes itself immediately after
+             handing the URL off to ShareWorker (see ShareActivity.kt). -->
+        <activity
+            android:name=".ShareActivity"
+            android:theme="@style/Theme.legere.NoDisplay"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
             </intent-filter>
         </activity>
 
