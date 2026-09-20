@@ -11,6 +11,9 @@ import type {
 	ImportPreview,
 	NamedCount,
 	ReadingOverrides,
+	RemoteSyncConfig,
+	RemoteSyncOutcome,
+	RemoteSyncStatus,
 	Settings,
 	Source,
 	SourceArticlePreview,
@@ -284,6 +287,33 @@ export function getSettings(): Promise<Settings> {
 
 export function updateSettings(settings: Settings): Promise<void> {
 	return invoke<void>('update_settings', { settings });
+}
+
+/** `null` if cross-device sync has never been configured on this device. */
+export function getRemoteSyncConfig(): Promise<RemoteSyncConfig | null> {
+	return invoke<RemoteSyncConfig | null>('get_remote_sync_config');
+}
+
+export function getRemoteSyncStatus(): Promise<RemoteSyncStatus> {
+	return invoke<RemoteSyncStatus>('get_remote_sync_status');
+}
+
+/** Verifies the provider honors conditional writes without persisting
+ *  anything; backs a settings-screen "Test connection" action. */
+export function testRemoteSyncConnection(config: RemoteSyncConfig): Promise<boolean> {
+	return invoke<boolean>('test_remote_sync_connection', { config });
+}
+
+/** Saves the bucket configuration. Rejects (and doesn't persist) if
+ *  `config.enabled` is `true` but the provider fails the conditional-write
+ *  check; see `test_remote_sync_connection`. */
+export function saveRemoteSyncConfig(config: RemoteSyncConfig): Promise<RemoteSyncConfig> {
+	return invoke<RemoteSyncConfig>('save_remote_sync_config', { config });
+}
+
+/** The manual "Sync now" button. `null` if sync isn't configured/enabled. */
+export function remoteSyncNow(): Promise<RemoteSyncOutcome | null> {
+	return invoke<RemoteSyncOutcome | null>('remote_sync_now');
 }
 
 let dataDirPromise: Promise<string> | null = null;

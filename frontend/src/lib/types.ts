@@ -126,6 +126,43 @@ export interface SyncResult {
 	new_article_count: number;
 }
 
+/** A user's cross-device sync bucket configuration, matching
+ *  `db::sync_config::RemoteSyncConfig` on the backend. This is a
+ *  separate, independent system from `SyncResult`/RSS `sync:*` events
+ *  above (see ARCHITECTURE.md's Sync section). `use_path_style` should
+ *  be `true` for most self-hosted/non-AWS providers (Minio, some B2
+ *  setups) and `false` for R2/AWS. */
+export interface RemoteSyncConfig {
+	enabled: boolean;
+	endpoint: string;
+	bucket_name: string;
+	region: string;
+	use_path_style: boolean;
+	access_key: string;
+	secret_key: string;
+	/** Generated once by the backend on first save; never edited from the UI. */
+	device_id: string;
+	/** Set by the backend once `test_remote_sync_connection`, or a save
+	 *  with `enabled: true`, verifies the provider supports the
+	 *  conditional writes required for safe multi-device manifest
+	 *  updates. */
+	conditional_writes_verified: boolean;
+}
+
+export interface RemoteSyncStatus {
+	last_synced_at: string | null;
+	last_error: string | null;
+}
+
+/** Result of one cross-device sync pass, returned by both the manual
+ *  "Sync now" button and the hourly background loop. */
+export interface RemoteSyncOutcome {
+	pulled: number;
+	pushed: number;
+	tombstones_applied: number;
+	manifest_version: number;
+}
+
 /** Keyset-pagination request for `list_articles_page` — mirrors the
  *  Rust `ArticlePageRequest`. `cursor_fetched_at`/`cursor_id` are both
  *  `null` for the first page; otherwise both come from the last item of
