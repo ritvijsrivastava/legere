@@ -2,6 +2,7 @@ pub mod articles;
 pub mod categories;
 pub mod export;
 pub mod import;
+pub mod remote_sync;
 pub mod settings;
 pub mod sources;
 pub mod system;

@@ -15,6 +15,10 @@ pub struct AppState {
     /// `{app_local_data_dir}/legere` — parent of `media/` and `content/`.
     pub data_dir: PathBuf,
     pub autosync_handle: Mutex<Option<JoinHandle<()>>>,
+    /// The cross-device sync hourly loop's handle, separate from
+    /// `autosync_handle` (RSS sources): the two run on independent
+    /// schedules and are toggled independently. See `commands::remote_sync`.
+    pub remote_sync_handle: Mutex<Option<JoinHandle<()>>>,
     /// Set on mobile's `RunEvent::Resumed`, throttling foreground-sync to
     /// once per interval — there's no background autosync on Android (no
     /// WorkManager integration in the MVP), so this is the only sync

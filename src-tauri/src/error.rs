@@ -66,6 +66,26 @@ impl From<crate::sources::rss::RssSyncError> for AppError {
     }
 }
 
+impl From<crate::remote_sync::client::S3Error> for AppError {
+    fn from(e: crate::remote_sync::client::S3Error) -> Self {
+        AppError::Network(e.to_string())
+    }
+}
+
+impl From<crate::remote_sync::engine::SyncError> for AppError {
+    fn from(e: crate::remote_sync::engine::SyncError) -> Self {
+        use crate::remote_sync::engine::SyncError;
+        match &e {
+            SyncError::S3(_) | SyncError::TooManyConflictRetries => {
+                AppError::Network(e.to_string())
+            }
+            SyncError::InvalidEndpoint(_) => AppError::Internal(e.to_string()),
+            SyncError::Manifest(_) => AppError::Internal(e.to_string()),
+            SyncError::Db(_) => AppError::Database(e.to_string()),
+        }
+    }
+}
+
 impl From<csv::Error> for AppError {
     fn from(e: csv::Error) -> Self {
         AppError::Internal(format!("invalid CSV file: {e}"))

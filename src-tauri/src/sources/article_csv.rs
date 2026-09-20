@@ -459,6 +459,7 @@ mod tests {
             http_client: test_support::plain_client(),
             data_dir: data_dir.to_path_buf(),
             autosync_handle: Mutex::new(None),
+            remote_sync_handle: Mutex::new(None),
             last_foreground_sync: std::sync::Mutex::new(None),
             import_cancel: Mutex::new(None),
             article_import_cancel: Mutex::new(None),

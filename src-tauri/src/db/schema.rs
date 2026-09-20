@@ -525,6 +525,89 @@ ALTER TABLE articles DROP COLUMN content_html;
 ALTER TABLE articles RENAME COLUMN content_html_gz TO content_html;
 ";
 
+// Enforces uniqueness on `sources.feed_url`, a pre-existing gap that
+// cross-device sync's `conflict_key` scheme (see ARCHITECTURE.md's Sync
+// section) needs as a real DB constraint: without it, two devices could
+// independently add the same feed and sync would have to guess whether
+// two source rows are "the same" rather than being told by the schema.
+// It was already a latent bug locally too — nothing stopped re-adding a
+// feed already present, and RSS autosync would then poll and capture
+// against it twice in parallel.
+//
+// A plain `CREATE UNIQUE INDEX` suffices (unlike V2-V4's CHECK-constraint
+// changes, this needs no table recreate), but existing databases may
+// already have duplicate `feed_url` rows, so those are collapsed first:
+// the newest row (by `created_at`, then `rowid`) per `feed_url` survives,
+// every article pointing at a losing duplicate is repointed onto the
+// survivor, and the survivor's `article_count` absorbs the sum of every
+// duplicate's count so the cached total doesn't silently shrink. The
+// repoint step is required, not just tidy: this runs with `foreign_keys`
+// OFF (see `migrate` below, and V2's comment on why), so `source_id`'s
+// `ON DELETE SET NULL` would NOT fire when the losing rows are deleted —
+// articles would be left pointing at a now-missing id instead of being
+// cleanly uncategorized. Rows with a NULL `feed_url` are left untouched
+// entirely (shouldn't exist — every insert path supplies one — and a
+// unique index already treats distinct NULLs as non-conflicting anyway).
+const V16: &str = "
+UPDATE articles
+SET source_id = (
+    SELECT s2.id FROM sources s2
+    WHERE s2.feed_url = (SELECT s1.feed_url FROM sources s1 WHERE s1.id = articles.source_id)
+    ORDER BY s2.created_at DESC, s2.rowid DESC
+    LIMIT 1
+)
+WHERE source_id IN (SELECT id FROM sources WHERE feed_url IS NOT NULL);
+
+UPDATE sources
+SET article_count = (
+    SELECT COALESCE(SUM(s2.article_count), 0)
+    FROM sources s2
+    WHERE s2.feed_url = sources.feed_url
+)
+WHERE feed_url IS NOT NULL
+  AND rowid = (SELECT MAX(rowid) FROM sources s3 WHERE s3.feed_url = sources.feed_url);
+
+DELETE FROM sources
+WHERE feed_url IS NOT NULL
+  AND rowid NOT IN (
+      SELECT MAX(rowid) FROM sources WHERE feed_url IS NOT NULL GROUP BY feed_url
+  );
+
+CREATE UNIQUE INDEX idx_sources_feed_url ON sources(feed_url);
+";
+
+// Adds the tombstone ledger cross-device sync uses to make deletion
+// permanent: an entity (article/category/source) that's been deleted
+// must never reappear just because some other, not-yet-synced device
+// still has a local copy and pushes it back up. Deletion of any of the
+// three synced entity types (`settings` is explicitly local-only, never
+// synced) writes a row here in addition to its normal hard-delete; every
+// device checks incoming rows against this table *before* materializing
+// them, and a tombstoned id is refused outright, no timestamp comparison
+// — see ARCHITECTURE.md's Sync section for the full merge algorithm.
+//
+// Deliberately a side table rather than a `deleted_at` column on
+// `articles`/`categories`/`sources` themselves: soft-deleting in place
+// would force `UNIQUE(link)` (and now `UNIQUE(feed_url)`) into partial
+// indexes and touch every existing query against those tables. Rows here
+// are small (an id, a type, a timestamp) and side-effect-free to add.
+//
+// Tombstones are not kept forever: a 60-day retention window (fixed, not
+// user-configurable) bounds how many the sync manifest has to carry —
+// bytes were never the concern (even heavy deletion volume stays a few
+// KB), but every sync diffs against every live tombstone, so the count
+// matters more than the size. `idx_sync_tombstones_deleted_at` supports
+// that periodic purge sweep.
+const V17: &str = "
+CREATE TABLE sync_tombstones (
+    entity_type TEXT NOT NULL CHECK (entity_type IN ('article','category','source')),
+    entity_id   TEXT NOT NULL,
+    deleted_at  TEXT NOT NULL,
+    PRIMARY KEY (entity_type, entity_id)
+);
+CREATE INDEX idx_sync_tombstones_deleted_at ON sync_tombstones(deleted_at);
+";
+
 pub fn migrations() -> Migrations<'static> {
     Migrations::new(vec![
         M::up(V1),
@@ -542,6 +625,8 @@ pub fn migrations() -> Migrations<'static> {
         M::up(V13),
         M::up_with_hook(V14, backfill_compressed_content_html),
         M::up(V15),
+        M::up(V16),
+        M::up(V17),
     ])
 }
 
@@ -1005,6 +1090,136 @@ mod tests {
         assert_eq!(
             column_count, 1,
             "there must be exactly one content_html column after V15, not a leftover content_html_gz"
+        );
+    }
+
+    /// Builds a V15-schema connection with two sources sharing a
+    /// `feed_url` (the pre-V16 gap) and an article pointing at the older,
+    /// losing one, so V16's dedupe/repoint/count-merge all have something
+    /// to act on.
+    fn v15_conn_with_duplicate_feed_url_sources() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("open in-memory db");
+        migrations()
+            .to_version(&mut conn, 15)
+            .expect("migrate to V15");
+
+        conn.execute_batch(
+            "INSERT INTO sources (id, name, type, feed_url, status, article_count, created_at, updated_at)
+             VALUES
+                 ('src-old', 'Old dup', 'rss', 'https://example.com/feed.xml', 'active', 3, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+                 ('src-new', 'New dup', 'rss', 'https://example.com/feed.xml', 'active', 2, '2026-01-02T00:00:00Z', '2026-01-02T00:00:00Z');
+
+             INSERT INTO articles (
+                 id, source_id, source_type, title, link, excerpt,
+                 content_html, fetched_at, updated_at
+             ) VALUES ('art-1', 'src-old', 'rss', 'Title', 'https://example.com/a',
+                       'x', '<p>x</p>', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');",
+        )
+        .expect("insert V15 test data");
+
+        conn
+    }
+
+    #[test]
+    fn v16_collapses_duplicate_feed_url_sources_onto_the_newest_row() {
+        let mut conn = v15_conn_with_duplicate_feed_url_sources();
+        migrate(&mut conn).expect("migrate to latest");
+
+        let ids: Vec<String> = conn
+            .prepare("SELECT id FROM sources WHERE feed_url = 'https://example.com/feed.xml'")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(ids, vec!["src-new".to_string()]);
+    }
+
+    #[test]
+    fn v16_repoints_articles_from_a_losing_duplicate_onto_the_survivor() {
+        let mut conn = v15_conn_with_duplicate_feed_url_sources();
+        migrate(&mut conn).expect("migrate to latest");
+
+        let source_id: String = conn
+            .query_row(
+                "SELECT source_id FROM articles WHERE id = 'art-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            source_id, "src-new",
+            "article must be repointed onto the surviving source, not left dangling"
+        );
+    }
+
+    #[test]
+    fn v16_sums_article_count_from_every_duplicate_into_the_survivor() {
+        let mut conn = v15_conn_with_duplicate_feed_url_sources();
+        migrate(&mut conn).expect("migrate to latest");
+
+        let article_count: i64 = conn
+            .query_row(
+                "SELECT article_count FROM sources WHERE id = 'src-new'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(article_count, 5, "3 (src-old) + 2 (src-new) must be preserved, not dropped");
+    }
+
+    #[test]
+    fn v16_enforces_unique_feed_url() {
+        let mut conn = v2_conn_with_test_data();
+        migrate(&mut conn).expect("migrate to latest");
+
+        conn.execute(
+            "INSERT INTO sources (id, name, type, feed_url, status, article_count, created_at, updated_at)
+             VALUES ('src-1', 'Feed', 'rss', 'https://example.com/feed.xml', 'active', 0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .expect("first insert of this feed_url should succeed");
+
+        let duplicate_insert = conn.execute(
+            "INSERT INTO sources (id, name, type, feed_url, status, article_count, created_at, updated_at)
+             VALUES ('src-dup', 'Dup', 'rss', 'https://example.com/feed.xml', 'active', 0, '2026-01-03T00:00:00Z', '2026-01-03T00:00:00Z')",
+            [],
+        );
+        assert!(
+            duplicate_insert.is_err(),
+            "UNIQUE(feed_url) should reject a second source with the same feed_url"
+        );
+    }
+
+    #[test]
+    fn v17_sync_tombstones_rejects_a_duplicate_entity_and_accepts_any_valid_type() {
+        let mut conn = v2_conn_with_test_data();
+        migrate(&mut conn).expect("migrate to latest");
+
+        for entity_type in ["article", "category", "source"] {
+            conn.execute(
+                "INSERT INTO sync_tombstones (entity_type, entity_id, deleted_at) VALUES (?1, ?2, '2026-01-01T00:00:00Z')",
+                rusqlite::params![entity_type, format!("{entity_type}-1")],
+            )
+            .unwrap_or_else(|e| panic!("valid entity_type {entity_type} should insert: {e}"));
+        }
+
+        let duplicate = conn.execute(
+            "INSERT INTO sync_tombstones (entity_type, entity_id, deleted_at) VALUES ('article', 'article-1', '2026-01-02T00:00:00Z')",
+            [],
+        );
+        assert!(
+            duplicate.is_err(),
+            "the same (entity_type, entity_id) tombstoned twice must be rejected by the primary key"
+        );
+
+        let bad_type = conn.execute(
+            "INSERT INTO sync_tombstones (entity_type, entity_id, deleted_at) VALUES ('settings', 'x', '2026-01-01T00:00:00Z')",
+            [],
+        );
+        assert!(
+            bad_type.is_err(),
+            "entity_type CHECK should reject anything outside article/category/source"
         );
     }
 }

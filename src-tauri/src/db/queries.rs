@@ -15,11 +15,11 @@ use crate::models::{
 /// than a valid JSON array (shouldn't happen — only this module writes
 /// the column) is treated as untagged rather than failing the whole
 /// query.
-fn parse_tags(raw: String) -> Vec<String> {
+pub(super) fn parse_tags(raw: String) -> Vec<String> {
     serde_json::from_str(&raw).unwrap_or_default()
 }
 
-fn tags_to_json(tags: &[String]) -> String {
+pub(super) fn tags_to_json(tags: &[String]) -> String {
     serde_json::to_string(tags).unwrap_or_else(|_| "[]".to_string())
 }
 
@@ -29,7 +29,7 @@ fn tags_to_json(tags: &[String]) -> String {
 /// (RSS capture, Raindrop import, manual edits) so "tags are always
 /// lowercase" holds regardless of what a caller passes in, rather than
 /// relying on each call site to remember to normalize itself.
-fn normalize_tags(tags: &[String]) -> Vec<String> {
+pub(super) fn normalize_tags(tags: &[String]) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut result = Vec::new();
     for tag in tags {
@@ -666,6 +666,27 @@ pub fn set_category_icon(
     get_category(conn, id)
 }
 
+/// Records that `entity_id` (an article/category/source id) was deleted,
+/// for cross-device sync's tombstone ledger (`db::schema`'s `V17`) — a
+/// deleted entity must never reappear just because another, not-yet-
+/// synced device still has a local copy. Every deletion path in this
+/// module calls this in addition to its normal hard-delete; the sync
+/// engine reads `sync_tombstones` to push these out, and refuses to
+/// (re)materialize a tombstoned id incoming from a remote manifest, no
+/// matter how it's timestamped — see ARCHITECTURE.md's Sync section.
+///
+/// Upserts rather than plain-inserts: re-deleting an id that somehow
+/// already has a tombstone (shouldn't normally happen, but harmless if it
+/// does) refreshes `deleted_at` rather than erroring on the primary key.
+fn record_tombstone(conn: &Connection, entity_type: &str, entity_id: &str) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT INTO sync_tombstones (entity_type, entity_id, deleted_at) VALUES (?1, ?2, ?3)
+         ON CONFLICT(entity_type, entity_id) DO UPDATE SET deleted_at = excluded.deleted_at",
+        params![entity_type, entity_id, Utc::now().to_rfc3339()],
+    )?;
+    Ok(())
+}
+
 /// Deletes a category outright. Its articles are **not** deleted —
 /// `articles.category_id`'s `ON DELETE SET NULL` (see `db::schema`'s
 /// `V9`) un-categorizes them instead, same as the "move to an empty
@@ -673,6 +694,9 @@ pub fn set_category_icon(
 /// `true` if a row was actually deleted.
 pub fn delete_category(conn: &Connection, id: &str) -> rusqlite::Result<bool> {
     let changed = conn.execute("DELETE FROM categories WHERE id = ?1", params![id])?;
+    if changed > 0 {
+        record_tombstone(conn, "category", id)?;
+    }
     Ok(changed > 0)
 }
 
@@ -893,6 +917,7 @@ pub fn delete_article(
     };
 
     conn.execute("DELETE FROM articles WHERE id = ?1", params![id])?;
+    record_tombstone(conn, "article", id)?;
 
     if let Some(sid) = source_id {
         conn.execute(
@@ -911,6 +936,19 @@ pub fn delete_article(
 /// `content/` and `media/` directories wholesale, since there's no per-
 /// article file list worth collecting when everything is going away.
 pub fn delete_all_articles(conn: &Connection) -> rusqlite::Result<()> {
+    // Tombstone every id *before* the bulk delete (a single INSERT..SELECT
+    // rather than one `record_tombstone` call per row) — cheap even for a
+    // large library, since a tombstone is just an id/type/timestamp. The
+    // trailing `WHERE 1=1` isn't redundant: SQLite's parser reads a bare
+    // `FROM articles` immediately followed by `ON CONFLICT` as ambiguous
+    // with join syntax (`FROM t1 ON ...`) and refuses to parse it; any
+    // clause between `FROM` and `ON CONFLICT` disambiguates it.
+    conn.execute(
+        "INSERT INTO sync_tombstones (entity_type, entity_id, deleted_at)
+         SELECT 'article', id, ?1 FROM articles WHERE 1=1
+         ON CONFLICT(entity_type, entity_id) DO UPDATE SET deleted_at = excluded.deleted_at",
+        params![Utc::now().to_rfc3339()],
+    )?;
     conn.execute("DELETE FROM articles", [])?;
     conn.execute(
         "UPDATE sources SET article_count = 0, updated_at = ?1",
@@ -1179,6 +1217,7 @@ pub fn toggle_source_pause(conn: &Connection, id: &str) -> rusqlite::Result<Sour
 
 pub fn remove_source(conn: &Connection, id: &str) -> rusqlite::Result<()> {
     conn.execute("DELETE FROM sources WHERE id = ?1", params![id])?;
+    record_tombstone(conn, "source", id)?;
     Ok(())
 }
 
@@ -2293,5 +2332,102 @@ mod tests {
             2,
             "articles are never deleted"
         );
+    }
+
+    fn tombstone_count(conn: &Connection, entity_type: &str, entity_id: &str) -> i64 {
+        conn.query_row(
+            "SELECT COUNT(*) FROM sync_tombstones WHERE entity_type = ?1 AND entity_id = ?2",
+            params![entity_type, entity_id],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn delete_article_records_a_tombstone() {
+        let conn = migrated_conn();
+        insert_captured_article(
+            &conn,
+            "art-1",
+            None,
+            "direct",
+            &sample_capture_output("https://example.com/a"),
+            &[],
+        )
+        .unwrap();
+
+        delete_article(&conn, "art-1").unwrap();
+
+        assert_eq!(tombstone_count(&conn, "article", "art-1"), 1);
+    }
+
+    #[test]
+    fn delete_article_on_a_missing_id_records_no_tombstone() {
+        let conn = migrated_conn();
+        let result = delete_article(&conn, "does-not-exist").unwrap();
+        assert!(result.is_none());
+        assert_eq!(tombstone_count(&conn, "article", "does-not-exist"), 0);
+    }
+
+    #[test]
+    fn delete_all_articles_tombstones_every_article() {
+        let conn = migrated_conn();
+        insert_captured_article(
+            &conn,
+            "art-1",
+            None,
+            "direct",
+            &sample_capture_output("https://example.com/a"),
+            &[],
+        )
+        .unwrap();
+        insert_captured_article(
+            &conn,
+            "art-2",
+            None,
+            "direct",
+            &sample_capture_output("https://example.com/b"),
+            &[],
+        )
+        .unwrap();
+
+        delete_all_articles(&conn).unwrap();
+
+        assert_eq!(tombstone_count(&conn, "article", "art-1"), 1);
+        assert_eq!(tombstone_count(&conn, "article", "art-2"), 1);
+    }
+
+    #[test]
+    fn delete_category_records_a_tombstone() {
+        let conn = migrated_conn();
+        let category = create_category(&conn, "Recipes").unwrap();
+
+        delete_category(&conn, &category.id).unwrap();
+
+        assert_eq!(tombstone_count(&conn, "category", &category.id), 1);
+    }
+
+    #[test]
+    fn remove_source_records_a_tombstone() {
+        let conn = migrated_conn();
+        let source = insert_rss_source(&conn, "Feed", "https://example.com/feed.xml").unwrap();
+
+        remove_source(&conn, &source.id).unwrap();
+
+        assert_eq!(tombstone_count(&conn, "source", &source.id), 1);
+    }
+
+    #[test]
+    fn re_deleting_an_id_refreshes_the_tombstone_instead_of_erroring() {
+        let conn = migrated_conn();
+        let category = create_category(&conn, "Recipes").unwrap();
+        delete_category(&conn, &category.id).unwrap();
+
+        // Calling record_tombstone again for the same id (as e.g. a second
+        // sync pass applying its own already-known tombstone might) must
+        // upsert, not violate the (entity_type, entity_id) primary key.
+        record_tombstone(&conn, "category", &category.id).unwrap();
+
+        assert_eq!(tombstone_count(&conn, "category", &category.id), 1);
     }
 }

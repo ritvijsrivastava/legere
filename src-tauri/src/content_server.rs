@@ -181,6 +181,7 @@ mod tests {
             http_client: reqwest::Client::new(),
             data_dir: data_dir.to_path_buf(),
             autosync_handle: TokioMutex::new(None),
+            remote_sync_handle: TokioMutex::new(None),
             last_foreground_sync: std::sync::Mutex::new(None),
             import_cancel: TokioMutex::new(None),
             article_import_cancel: TokioMutex::new(None),

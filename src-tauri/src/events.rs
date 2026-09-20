@@ -39,6 +39,29 @@ pub fn emit_source_changed(app: &AppHandle) {
     let _ = app.emit("source:changed", ());
 }
 
+/// Cross-device sync's own start/finish/error events, separate from
+/// `sync:*` above (RSS-source sync's own events) so the frontend can
+/// show the two independently: a user might have RSS autosync on but
+/// cross-device sync not yet configured, or vice versa.
+pub fn emit_remote_sync_started(app: &AppHandle) {
+    let _ = app.emit("remote-sync:started", ());
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RemoteSyncFinished {
+    pub pulled: usize,
+    pub pushed: usize,
+    pub tombstones_applied: usize,
+}
+
+pub fn emit_remote_sync_finished(app: &AppHandle, payload: &RemoteSyncFinished) {
+    let _ = app.emit("remote-sync:finished", payload);
+}
+
+pub fn emit_remote_sync_error(app: &AppHandle, message: &str) {
+    let _ = app.emit("remote-sync:error", message);
+}
+
 /// A category was created, renamed, or deleted, or an article's category
 /// assignment changed — a cue for the sidebar's category list
 /// (`commands::categories::get_categories`) to refetch.

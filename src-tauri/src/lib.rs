@@ -9,6 +9,7 @@ mod export_paths;
 mod gc;
 mod mobile_tls;
 mod models;
+mod remote_sync;
 #[cfg(target_os = "android")]
 mod share_intent;
 mod sources;
@@ -49,6 +50,8 @@ pub(crate) static GLOBAL_APP_HANDLE: std::sync::OnceLock<tauri::AppHandle> =
     std::sync::OnceLock::new();
 
 const AUTOSYNC_INTERVAL: Duration = Duration::from_secs(15 * 60);
+/// Cross-device sync's own schedule, independent of RSS autosync above.
+const REMOTE_SYNC_INTERVAL: Duration = Duration::from_secs(60 * 60);
 /// There's no background autosync on Android (no WorkManager integration
 /// in the MVP — see `state::AppState::last_foreground_sync`), so a
 /// resumed app only gets a fresh sync if it's been a while.
@@ -135,12 +138,19 @@ pub fn run() {
                 let conn = pool.get()?;
                 db::queries::get_settings(&conn)?.autosync
             };
+            let remote_sync_enabled = {
+                let conn = pool.get()?;
+                db::sync_config::get_remote_sync_config(&conn)?
+                    .map(|c| c.enabled)
+                    .unwrap_or(false)
+            };
 
             let state = AppState {
                 pool,
                 http_client: capture::fetch::build_client(),
                 data_dir,
                 autosync_handle: Mutex::new(None),
+                remote_sync_handle: Mutex::new(None),
                 last_foreground_sync: std::sync::Mutex::new(None),
                 import_cancel: Mutex::new(None),
                 article_import_cancel: Mutex::new(None),
@@ -173,6 +183,17 @@ pub fn run() {
                     *app_state.last_foreground_sync.lock().unwrap() =
                         Some(std::time::Instant::now());
                 }
+            }
+
+            if remote_sync_enabled {
+                let handle = remote_sync::orchestrate::spawn_remote_sync_autosync(
+                    app.handle().clone(),
+                    REMOTE_SYNC_INTERVAL,
+                );
+                let app_state = app.state::<AppState>();
+                tauri::async_runtime::block_on(async {
+                    *app_state.remote_sync_handle.lock().await = Some(handle);
+                });
             }
 
             // One-shot cleanup of files orphaned by crashes or removal
@@ -227,6 +248,11 @@ pub fn run() {
             commands::sources::sync_all,
             commands::settings::get_settings,
             commands::settings::update_settings,
+            commands::remote_sync::get_remote_sync_config,
+            commands::remote_sync::get_remote_sync_status,
+            commands::remote_sync::test_remote_sync_connection,
+            commands::remote_sync::save_remote_sync_config,
+            commands::remote_sync::remote_sync_now,
             commands::import::import_raindrop_csv,
             commands::import::preview_raindrop_csv,
             commands::import::cancel_raindrop_import,
