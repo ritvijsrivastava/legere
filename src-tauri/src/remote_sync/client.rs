@@ -80,6 +80,17 @@ pub struct S3Client {
     http: reqwest::Client,
 }
 
+/// One entry from `list_objects_with_prefix`. `last_modified` is the
+/// provider's raw RFC 3339 string (not parsed here), since the one
+/// caller that needs it (`remote_sync::bucket_gc`) already has its own
+/// parse-with-safe-fallback logic and there's no other consumer to share
+/// a parsed value with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObjectInfo {
+    pub key: String,
+    pub last_modified: String,
+}
+
 /// The outcome of a conditional write.
 #[derive(Debug, PartialEq, Eq)]
 pub enum PutOutcome {
@@ -200,6 +211,42 @@ impl S3Client {
             return Err(status_error(response).await);
         }
         Ok(())
+    }
+
+    /// Lists every object key under `prefix`, paginating through as many
+    /// `ListObjectsV2` pages as the bucket returns. Backs
+    /// `remote_sync::gc`'s orphaned-blob sweep, the only caller that
+    /// needs to enumerate the bucket rather than address a known key
+    /// directly.
+    pub async fn list_objects_with_prefix(&self, prefix: &str) -> Result<Vec<ObjectInfo>, S3Error> {
+        let mut objects = Vec::new();
+        let mut continuation_token: Option<String> = None;
+        loop {
+            let mut action = actions::ListObjectsV2::new(&self.bucket, Some(&self.credentials));
+            action.query_mut().insert("prefix", prefix);
+            if let Some(token) = &continuation_token {
+                action.query_mut().insert("continuation-token", token.as_str());
+            }
+            let url = action.sign(PRESIGN_TTL);
+
+            let response = self.http.get(url).send().await?;
+            if !response.status().is_success() {
+                return Err(status_error(response).await);
+            }
+            let text = response.text().await?;
+            let parsed = actions::ListObjectsV2::parse_response(&text)
+                .map_err(|e| S3Error::UnexpectedStatus { status: 200, body: e.to_string() })?;
+
+            objects.extend(parsed.contents.into_iter().map(|c| ObjectInfo {
+                key: c.key,
+                last_modified: c.last_modified,
+            }));
+            match parsed.next_continuation_token {
+                Some(token) => continuation_token = Some(token),
+                None => break,
+            }
+        }
+        Ok(objects)
     }
 
     /// Verifies the provider honors `If-None-Match: *` on `PutObject`

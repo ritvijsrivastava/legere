@@ -475,6 +475,28 @@ since `rusqlite::Connection` isn't `Sync` and a future holding `&Connection`
 across an `.await` therefore isn't `Send` — `block_on` only requires the
 *closure* to be `Send`, not the future it drives.
 
+**Concurrency, cancellation, and cleanup:** blob uploads/downloads within
+a phase run up to 8 at a time (`SYNC_CONCURRENCY`, `engine::push_concurrently`/
+`pull_concurrently`, both `tokio::task::JoinSet`-based) rather than one at
+a time — a first sync of a real library (1,600+ articles) made the cost
+of a fully sequential loop obvious immediately. Only one sync pass may
+run on a given device at a time (`AppState::remote_sync_cancel` doubles
+as both the cancellation flag and the "is one already running" guard,
+mirroring `import_cancel`'s existing shape); a scheduler tick racing a
+manual "Sync now" just no-ops rather than running two passes at once.
+Cancelling (the Settings "Cancel" button, or turning sync off while a
+pass is running) behaves exactly like a hard process kill mid-sync — no
+manifest write, whatever already uploaded stays as a harmless
+not-yet-referenced blob, next pass just resumes from a fresh diff —
+rather than needing its own separate rollback story. `remote_sync::bucket_gc`
+sweeps blobs under `legere-sync/blobs/` that no live manifest entry
+references and that are at least an hour old (a grace period, not
+immediate, since a blob another device just uploaded but hasn't yet
+registered in its own manifest write would otherwise look identically
+orphaned and get deleted out from under it) at the end of every
+successful pass; a sweep failure is logged, not treated as the sync
+itself failing.
+
 ## Storage and schema
 
 - **Pool** (`db::pool.rs`) — r2d2 over rusqlite, 4 connections. Init order

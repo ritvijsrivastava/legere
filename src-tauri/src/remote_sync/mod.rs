@@ -11,6 +11,7 @@
 //! algorithm that drives them (the per-run pull/push/tombstone loop) is
 //! not wired up yet — no Tauri command currently calls into this module.
 
+pub mod bucket_gc;
 pub mod client;
 pub mod conflict;
 pub mod engine;

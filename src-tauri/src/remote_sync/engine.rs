@@ -114,6 +114,11 @@ pub struct SyncOutcome {
     pub pushed: usize,
     pub tombstones_applied: usize,
     pub manifest_version: u64,
+    /// Orphaned bucket blobs cleaned up by `bucket_gc::sweep_orphaned_blobs`
+    /// this pass — usually 0. A sweep failure never fails the sync pass
+    /// itself (see the call site), so this can undercount without that
+    /// being surfaced as an error.
+    pub orphans_deleted: usize,
 }
 
 /// Which of the six pull/push phases a [`SyncProgress`] update is for.
@@ -240,12 +245,30 @@ async fn try_sync_once(
         .put_object_if_match(MANIFEST_KEY, bytes, precondition.as_deref())
         .await?
     {
-        PutOutcome::Written { .. } => Ok(Some(SyncOutcome {
-            pulled,
-            pushed,
-            tombstones_applied,
-            manifest_version: manifest.version,
-        })),
+        PutOutcome::Written { .. } => {
+            // A GC failure never fails the sync pass that just succeeded
+            // — cleanup is a nice-to-have, not a correctness requirement,
+            // and the next successful pass gets another chance at it.
+            // Cancellation is the one exception: propagate it exactly
+            // like every other phase does, since "the user asked this to
+            // stop" shouldn't be swallowed just because it happened
+            // during cleanup instead of the main pass.
+            let orphans_deleted = match super::bucket_gc::sweep_orphaned_blobs(client, &manifest, cancel).await {
+                Ok(count) => count,
+                Err(SyncError::Cancelled) => return Err(SyncError::Cancelled),
+                Err(err) => {
+                    tracing::warn!(%err, "orphaned blob sweep failed; sync itself still succeeded");
+                    0
+                }
+            };
+            Ok(Some(SyncOutcome {
+                pulled,
+                pushed,
+                tombstones_applied,
+                manifest_version: manifest.version,
+                orphans_deleted,
+            }))
+        }
         PutOutcome::Conflict => Ok(None),
     }
 }
@@ -316,7 +339,7 @@ async fn apply_tombstones_locally(
     Ok(applied)
 }
 
-fn blob_key(entity_type: EntityType, id: &str) -> String {
+pub(super) fn blob_key(entity_type: EntityType, id: &str) -> String {
     format!(
         "legere-sync/blobs/{}/{id}/meta.json.gz",
         entity_type.plural_str()
