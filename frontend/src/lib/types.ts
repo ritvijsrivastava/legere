@@ -163,6 +163,17 @@ export interface RemoteSyncOutcome {
 	manifest_version: number;
 }
 
+/** One `remote-sync:progress` event. `phase` is one of `pull_sources`|
+ *  `pull_categories`|`pull_articles`|`push_sources`|`push_categories`|
+ *  `push_articles` (see `remote_sync::engine::SyncPhase`). `total` is
+ *  fixed for the whole phase; `completed` counts up to it as concurrent
+ *  uploads/downloads finish, not necessarily in id order. */
+export interface RemoteSyncProgress {
+	phase: string;
+	completed: number;
+	total: number;
+}
+
 /** Keyset-pagination request for `list_articles_page` — mirrors the
  *  Rust `ArticlePageRequest`. `cursor_fetched_at`/`cursor_id` are both
  *  `null` for the first page; otherwise both come from the last item of

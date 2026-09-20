@@ -95,6 +95,19 @@
 		return new Date(iso).toLocaleString();
 	}
 
+	const SYNC_PHASE_LABELS: Record<string, string> = {
+		pull_sources: 'Pulling sources',
+		pull_categories: 'Pulling categories',
+		pull_articles: 'Pulling articles',
+		push_sources: 'Pushing sources',
+		push_categories: 'Pushing categories',
+		push_articles: 'Pushing articles'
+	};
+
+	function formatSyncPhase(phase: string): string {
+		return SYNC_PHASE_LABELS[phase] ?? phase;
+	}
+
 	async function toggleRemoteSync(enabled: boolean) {
 		if (!remoteSyncStore.config) return;
 		try {
@@ -550,6 +563,21 @@
 			</div>
 			{#if remoteSyncStore.status.last_error}
 				<p class="error-text">{remoteSyncStore.status.last_error}</p>
+			{/if}
+
+			{#if remoteSyncStore.busy && remoteSyncStore.progress}
+				<div class="import-progress">
+					<div class="import-progress-track">
+						<div
+							class="import-progress-fill"
+							style:transform={`scaleX(${remoteSyncStore.progress.total > 0 ? remoteSyncStore.progress.completed / remoteSyncStore.progress.total : 0})`}
+						></div>
+					</div>
+					<p class="text-muted import-progress-label">
+						{formatSyncPhase(remoteSyncStore.progress.phase)}: {remoteSyncStore.progress.completed} of
+						{remoteSyncStore.progress.total}
+					</p>
+				</div>
 			{/if}
 
 			<div class="card-divider"></div>

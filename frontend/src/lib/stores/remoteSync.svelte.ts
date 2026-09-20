@@ -1,5 +1,5 @@
 import * as api from '../api';
-import type { RemoteSyncConfig, RemoteSyncStatus } from '../types';
+import type { RemoteSyncConfig, RemoteSyncProgress, RemoteSyncStatus } from '../types';
 
 /** Cross-device sync's own config/status, separate from `settingsStore`
  *  (which is RSS autosync and every other local-only preference). Mirrors
@@ -18,6 +18,11 @@ class RemoteSyncStore {
 	 *  once finished, via `registerBackendEvents`'s `remote-sync:*`
 	 *  listeners. */
 	busy = $state(false);
+	/** The most recent `remote-sync:progress` event, or `null` between
+	 *  phases/before a sync starts. Set by `lib/events.ts`'s listener,
+	 *  cleared whenever a sync starts or finishes/errors so a stale phase
+	 *  never lingers on screen. */
+	progress = $state<RemoteSyncProgress | null>(null);
 
 	async refresh() {
 		this.config = await api.getRemoteSyncConfig();

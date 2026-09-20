@@ -6,7 +6,13 @@ import { importStore } from './stores/import.svelte';
 import { articleImportStore } from './stores/articleImport.svelte';
 import { captureJobsStore } from './stores/captureJobs.svelte';
 import { remoteSyncStore } from './stores/remoteSync.svelte';
-import type { CaptureSucceeded, ImportFinished, ImportProgress, RemoteSyncOutcome } from './types';
+import type {
+	CaptureSucceeded,
+	ImportFinished,
+	ImportProgress,
+	RemoteSyncOutcome,
+	RemoteSyncProgress
+} from './types';
 
 interface SyncFinishedPayload {
 	new_article_count: number;
@@ -101,15 +107,22 @@ export function registerBackendEvents() {
 	// above - see `commands::remote_sync`'s doc comment for why.
 	listen('remote-sync:started', () => {
 		remoteSyncStore.busy = true;
+		remoteSyncStore.progress = null;
+	});
+
+	listen<RemoteSyncProgress>('remote-sync:progress', (event) => {
+		remoteSyncStore.progress = event.payload;
 	});
 
 	listen<RemoteSyncOutcome>('remote-sync:finished', () => {
 		remoteSyncStore.busy = false;
+		remoteSyncStore.progress = null;
 		remoteSyncStore.refreshStatus();
 	});
 
 	listen<string>('remote-sync:error', (event) => {
 		remoteSyncStore.busy = false;
+		remoteSyncStore.progress = null;
 		remoteSyncStore.refreshStatus();
 		uiStore.showToast(`Sync failed: ${event.payload}`);
 	});
