@@ -62,6 +62,20 @@ pub fn emit_remote_sync_error(app: &AppHandle, message: &str) {
     let _ = app.emit("remote-sync:error", message);
 }
 
+/// Mirrors `remote_sync::engine::SyncPhase`/`SyncProgress`'s shape rather
+/// than serializing that type directly — keeps the event's wire schema
+/// stable independent of the internal Rust enum's own naming/shape.
+#[derive(Debug, Clone, Serialize)]
+pub struct RemoteSyncProgress {
+    pub phase: String,
+    pub completed: usize,
+    pub total: usize,
+}
+
+pub fn emit_remote_sync_progress(app: &AppHandle, progress: &RemoteSyncProgress) {
+    let _ = app.emit("remote-sync:progress", progress);
+}
+
 /// A category was created, renamed, or deleted, or an article's category
 /// assignment changed — a cue for the sidebar's category list
 /// (`commands::categories::get_categories`) to refetch.

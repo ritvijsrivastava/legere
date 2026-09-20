@@ -12,7 +12,7 @@ use tauri::{AppHandle, Manager};
 
 use crate::db::{sync_config, DbPool};
 use crate::error::AppError;
-use crate::events::{self, RemoteSyncFinished};
+use crate::events::{self, RemoteSyncFinished, RemoteSyncProgress};
 use crate::remote_sync::engine::{self, SyncOutcome};
 use crate::state::AppState;
 
@@ -38,7 +38,7 @@ pub async fn run_remote_sync_once(
 
     events::emit_remote_sync_started(app);
 
-    let outcome = run_once_inner(pool.clone(), state.data_dir.clone(), &config).await;
+    let outcome = run_once_inner(pool.clone(), state.data_dir.clone(), &config, app.clone()).await;
 
     match outcome {
         Ok(outcome) => {
@@ -82,15 +82,27 @@ async fn run_once_inner(
     pool: DbPool,
     data_dir: PathBuf,
     config: &sync_config::RemoteSyncConfig,
+    app: AppHandle,
 ) -> Result<SyncOutcome, AppError> {
     let client = engine::client_from_config(config)?;
     tokio::task::spawn_blocking(move || {
         let conn = pool.get()?;
+        let on_progress = move |progress: engine::SyncProgress| {
+            events::emit_remote_sync_progress(
+                &app,
+                &RemoteSyncProgress {
+                    phase: progress.phase.as_str().to_string(),
+                    completed: progress.completed,
+                    total: progress.total,
+                },
+            );
+        };
         tauri::async_runtime::block_on(engine::run_sync(
             &conn,
             &client,
             &data_dir,
             chrono::Utc::now(),
+            on_progress,
         ))
         .map_err(AppError::from)
     })

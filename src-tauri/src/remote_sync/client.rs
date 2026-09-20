@@ -68,6 +68,12 @@ pub struct BucketConfig {
     pub secret_key: String,
 }
 
+/// Cheap to clone (an `Arc`-backed `reqwest::Client` plus two small
+/// owned structs). Concurrent uploads/downloads clone this once per
+/// spawned task rather than sharing a reference, since `tokio::spawn`
+/// requires `'static` (see `remote_sync::engine`'s concurrent push/pull
+/// phases).
+#[derive(Clone)]
 pub struct S3Client {
     bucket: Bucket,
     credentials: Credentials,

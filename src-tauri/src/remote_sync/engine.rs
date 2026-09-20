@@ -33,6 +33,14 @@ use super::manifest::{EntityType, Manifest, ManifestEntry, TOMBSTONE_RETENTION, 
 
 const MANIFEST_KEY: &str = "legere-sync/manifest.json.gz";
 const MAX_CONFLICT_RETRIES: u32 = 5;
+/// How many blob uploads/downloads run concurrently per phase (push
+/// articles, pull categories, ...). Higher than
+/// `Settings::import_concurrency`'s 5-10 cap on capture concurrency
+/// deliberately: that limit exists to be polite to *other people's*
+/// sites being captured from, while sync only ever talks to the user's
+/// own bucket, so there's no politeness budget to spend carefully. Not
+/// user-configurable (yet) to keep the setup surface small.
+const SYNC_CONCURRENCY: usize = 8;
 
 #[derive(Debug)]
 pub enum SyncError {
@@ -50,6 +58,11 @@ pub enum SyncError {
     /// one failure mode that's a setup mistake rather than a runtime
     /// network/bucket problem.
     InvalidEndpoint(String),
+    /// A concurrent push/pull task panicked or was cancelled. Carries
+    /// the joined task's own `Display` output, since `tokio::task::JoinError`
+    /// itself doesn't implement `Clone`/`Serialize` and this crate's error
+    /// types are kept simple string-carrying variants throughout.
+    TaskJoin(String),
 }
 
 impl std::fmt::Display for SyncError {
@@ -62,6 +75,7 @@ impl std::fmt::Display for SyncError {
                 write!(f, "sync manifest kept changing underneath us; try again")
             }
             Self::InvalidEndpoint(endpoint) => write!(f, "invalid bucket endpoint URL: {endpoint}"),
+            Self::TaskJoin(msg) => write!(f, "a concurrent sync task failed: {msg}"),
         }
     }
 }
@@ -91,6 +105,45 @@ pub struct SyncOutcome {
     pub manifest_version: u64,
 }
 
+/// Which of the six pull/push phases a [`SyncProgress`] update is for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncPhase {
+    PullSources,
+    PullCategories,
+    PullArticles,
+    PushSources,
+    PushCategories,
+    PushArticles,
+}
+
+impl SyncPhase {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::PullSources => "pull_sources",
+            Self::PullCategories => "pull_categories",
+            Self::PullArticles => "pull_articles",
+            Self::PushSources => "push_sources",
+            Self::PushCategories => "push_categories",
+            Self::PushArticles => "push_articles",
+        }
+    }
+}
+
+/// One incremental progress update from a concurrent push/pull phase.
+/// `total` is fixed for the whole phase (computed once, up front, from
+/// how many rows actually need pushing/pulling), `completed` increases
+/// by one every time a concurrent task finishes, regardless of the order
+/// concurrent tasks happen to complete in. Reported via a plain callback
+/// (`&mut dyn FnMut`, not a channel) since emitting a Tauri event is
+/// itself synchronous — see `remote_sync::orchestrate`.
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+pub struct SyncProgress {
+    pub phase: SyncPhase,
+    pub completed: usize,
+    pub total: usize,
+}
+
 /// Runs one full sync pass against `conn`, retrying up to
 /// `MAX_CONFLICT_RETRIES` times if another device's manifest write races
 /// this one. `data_dir` is only used to delete a tombstoned article's
@@ -101,9 +154,10 @@ pub async fn run_sync(
     client: &S3Client,
     data_dir: &Path,
     now: DateTime<Utc>,
+    mut on_progress: impl FnMut(SyncProgress),
 ) -> Result<SyncOutcome, SyncError> {
     for _ in 0..MAX_CONFLICT_RETRIES {
-        if let Some(outcome) = try_sync_once(conn, client, data_dir, now).await? {
+        if let Some(outcome) = try_sync_once(conn, client, data_dir, now, &mut on_progress).await? {
             return Ok(outcome);
         }
     }
@@ -132,6 +186,7 @@ async fn try_sync_once(
     client: &S3Client,
     data_dir: &Path,
     now: DateTime<Utc>,
+    on_progress: &mut dyn FnMut(SyncProgress),
 ) -> Result<Option<SyncOutcome>, SyncError> {
     let (mut manifest, precondition) = match client.get_object(MANIFEST_KEY).await? {
         Some((bytes, etag)) => (Manifest::from_gz_bytes(&bytes)?, Some(etag)),
@@ -142,18 +197,18 @@ async fn try_sync_once(
     let tombstones_applied = apply_tombstones_locally(conn, data_dir, &manifest).await?;
 
     let mut pulled = 0;
-    pulled += pull_sources(conn, client, &manifest, now).await?;
-    pulled += pull_categories(conn, client, &manifest, now).await?;
-    pulled += pull_articles(conn, client, &manifest, now).await?;
+    pulled += pull_sources(conn, client, &manifest, now, on_progress).await?;
+    pulled += pull_categories(conn, client, &manifest, now, on_progress).await?;
+    pulled += pull_articles(conn, client, &manifest, now, on_progress).await?;
 
     resolve_source_collisions(conn, now)?;
     resolve_category_collisions(conn, now)?;
     resolve_article_collisions(conn, now)?;
 
     let mut pushed = 0;
-    pushed += push_sources(conn, client, &mut manifest).await?;
-    pushed += push_categories(conn, client, &mut manifest).await?;
-    pushed += push_articles(conn, client, &mut manifest).await?;
+    pushed += push_sources(conn, client, &mut manifest, on_progress).await?;
+    pushed += push_categories(conn, client, &mut manifest, on_progress).await?;
+    pushed += push_articles(conn, client, &mut manifest, on_progress).await?;
 
     merge_local_tombstones_into_manifest(conn, &mut manifest)?;
 
@@ -256,13 +311,14 @@ fn needs_pull(local: Option<&str>, entry_updated_at: &str) -> bool {
     }
 }
 
-/// Whether the local row (`local_updated_at`) is strictly newer than
-/// what the manifest currently says (`None` if this id isn't in the
-/// manifest at all yet) — i.e. this device should push it.
-fn needs_push(local_updated_at: &str, manifest_entry: Option<&ManifestEntry>) -> bool {
-    match manifest_entry {
+/// Whether a local row's `updated_at` is strictly newer than what the
+/// manifest currently has for this id (`None` if it's not there at
+/// all yet) — i.e. this device should push it. Symmetric with
+/// `needs_pull` above, just comparing in the opposite direction.
+fn needs_push(local_updated_at: &str, existing_updated_at: Option<&str>) -> bool {
+    match existing_updated_at {
         None => true,
-        Some(entry) => parse_ts(local_updated_at) > parse_ts(&entry.updated_at),
+        Some(existing) => parse_ts(local_updated_at) > parse_ts(existing),
     }
 }
 
@@ -282,11 +338,66 @@ fn colliding_local_id<'a>(
         .filter(|&local_id| local_id != entry.id)
 }
 
+/// Generic concurrent "fetch every plain (non-collision) id" phase
+/// shared by the three `pull_*` functions: downloads each blob with up
+/// to `SYNC_CONCURRENCY` requests in flight, applying each one (via
+/// `apply_one`, which *does* touch the DB — safe here since it only
+/// ever runs on this function's own task after a fetch completes, never
+/// inside the spawned download task itself) as it completes. Returns how
+/// many were actually applied (a fetch that 404s or fails to deserialize
+/// is skipped, not an error — matches every pull path's existing
+/// tolerance for a manifest entry whose blob went missing).
+async fn pull_concurrently<T>(
+    conn: &Connection,
+    client: &S3Client,
+    ids: Vec<String>,
+    entity_type: EntityType,
+    phase: SyncPhase,
+    on_progress: &mut dyn FnMut(SyncProgress),
+    apply_one: impl Fn(&Connection, T) -> rusqlite::Result<()>,
+) -> Result<usize, SyncError>
+where
+    T: serde::de::DeserializeOwned + Send + 'static,
+{
+    let total = ids.len();
+    if total == 0 {
+        return Ok(0);
+    }
+
+    let mut join_set = tokio::task::JoinSet::new();
+    let mut ids_iter = ids.into_iter();
+    let mut applied = 0usize;
+    let mut completed = 0usize;
+
+    loop {
+        while join_set.len() < SYNC_CONCURRENCY {
+            let Some(id) = ids_iter.next() else { break };
+            let client = client.clone();
+            join_set.spawn(async move {
+                client.get_object(&blob_key(entity_type, &id)).await
+            });
+        }
+        let Some(joined) = join_set.join_next().await else {
+            break;
+        };
+        let fetch_result = joined.map_err(|e| SyncError::TaskJoin(e.to_string()))??;
+        completed += 1;
+        on_progress(SyncProgress { phase, completed, total });
+        let Some((bytes, _)) = fetch_result else { continue };
+        let Some(row) = from_gz_json::<T>(&bytes) else { continue };
+        apply_one(conn, row)?;
+        applied += 1;
+    }
+
+    Ok(applied)
+}
+
 async fn pull_sources(
     conn: &Connection,
     client: &S3Client,
     manifest: &Manifest,
     now: DateTime<Utc>,
+    on_progress: &mut dyn FnMut(SyncProgress),
 ) -> Result<usize, SyncError> {
     let local_rows = sync_rows::list_sources_for_sync(conn)?;
     let local_by_id: HashMap<&str, &SyncSourceRow> =
@@ -297,6 +408,7 @@ async fn pull_sources(
         .collect();
 
     let mut pulled = 0;
+    let mut to_fetch = Vec::new();
     for entry in manifest
         .live_entries()
         .filter(|e| e.entity_type == EntityType::Source)
@@ -322,17 +434,19 @@ async fn pull_sources(
         ) {
             continue;
         }
-
-        let Some((bytes, _)) = client.get_object(&blob_key(EntityType::Source, &entry.id)).await?
-        else {
-            continue;
-        };
-        let Some(row) = from_gz_json::<SyncSourceRow>(&bytes) else {
-            continue;
-        };
-        sync_rows::upsert_synced_source(conn, &row)?;
-        pulled += 1;
+        to_fetch.push(entry.id.clone());
     }
+
+    pulled += pull_concurrently::<SyncSourceRow>(
+        conn,
+        client,
+        to_fetch,
+        EntityType::Source,
+        SyncPhase::PullSources,
+        on_progress,
+        |conn, row| sync_rows::upsert_synced_source(conn, &row),
+    )
+    .await?;
     Ok(pulled)
 }
 
@@ -341,6 +455,7 @@ async fn pull_categories(
     client: &S3Client,
     manifest: &Manifest,
     now: DateTime<Utc>,
+    on_progress: &mut dyn FnMut(SyncProgress),
 ) -> Result<usize, SyncError> {
     let local_rows = sync_rows::list_categories_for_sync(conn)?;
     let local_by_id: HashMap<&str, &SyncCategoryRow> =
@@ -350,7 +465,7 @@ async fn pull_categories(
         .map(|r| (r.name.as_str(), r.id.as_str()))
         .collect();
 
-    let mut pulled = 0;
+    let mut to_fetch = Vec::new();
     for entry in manifest
         .live_entries()
         .filter(|e| e.entity_type == EntityType::Category)
@@ -372,19 +487,19 @@ async fn pull_categories(
         ) {
             continue;
         }
-
-        let Some((bytes, _)) =
-            client.get_object(&blob_key(EntityType::Category, &entry.id)).await?
-        else {
-            continue;
-        };
-        let Some(row) = from_gz_json::<SyncCategoryRow>(&bytes) else {
-            continue;
-        };
-        sync_rows::upsert_synced_category(conn, &row)?;
-        pulled += 1;
+        to_fetch.push(entry.id.clone());
     }
-    Ok(pulled)
+
+    pull_concurrently::<SyncCategoryRow>(
+        conn,
+        client,
+        to_fetch,
+        EntityType::Category,
+        SyncPhase::PullCategories,
+        on_progress,
+        |conn, row| sync_rows::upsert_synced_category(conn, &row),
+    )
+    .await
 }
 
 async fn pull_articles(
@@ -392,6 +507,7 @@ async fn pull_articles(
     client: &S3Client,
     manifest: &Manifest,
     now: DateTime<Utc>,
+    on_progress: &mut dyn FnMut(SyncProgress),
 ) -> Result<usize, SyncError> {
     let local_rows = sync_rows::list_articles_for_sync(conn)?;
     let local_by_id: HashMap<&str, &SyncArticleRow> =
@@ -402,6 +518,7 @@ async fn pull_articles(
         .collect();
 
     let mut pulled = 0;
+    let mut to_fetch = Vec::new();
     for entry in manifest
         .live_entries()
         .filter(|e| e.entity_type == EntityType::Article)
@@ -410,6 +527,9 @@ async fn pull_articles(
         // winner decided (and the loser's mutable state - tags, reading
         // progress, favorited - merged into whichever survives) before
         // any insert is attempted; see colliding_local_id's doc comment.
+        // Handled inline/sequentially here (rare in practice) rather
+        // than folded into the concurrent phase below, which only ever
+        // handles the plain, no-collision case.
         if let Some(loser_id) = colliding_local_id(entry, &local_by_key) {
             let local = local_by_id[loser_id].clone();
             let local_candidate = Candidate { id: loser_id.to_string(), created_at: local.fetched_at.clone() };
@@ -480,51 +600,103 @@ async fn pull_articles(
         ) {
             continue;
         }
-
-        let Some((bytes, _)) =
-            client.get_object(&blob_key(EntityType::Article, &entry.id)).await?
-        else {
-            continue;
-        };
-        let Some(row) = from_gz_json::<SyncArticleRow>(&bytes) else {
-            continue;
-        };
-        sync_rows::upsert_synced_article(conn, &row)?;
-        pulled += 1;
+        to_fetch.push(entry.id.clone());
     }
+
+    pulled += pull_concurrently::<SyncArticleRow>(
+        conn,
+        client,
+        to_fetch,
+        EntityType::Article,
+        SyncPhase::PullArticles,
+        on_progress,
+        |conn, row| sync_rows::upsert_synced_article(conn, &row),
+    )
+    .await?;
     Ok(pulled)
+}
+
+/// Generic concurrent "push what changed" loop shared by
+/// `push_sources`/`push_categories`/`push_articles`: uploads every row in
+/// `to_push` via `upload_one` with up to `SYNC_CONCURRENCY` requests in
+/// flight at once, reporting one [`SyncProgress`] per completed upload.
+/// `upload_one` does the blob serialization/upload only — no DB access —
+/// so it can run inside a `tokio::spawn`'d task, which requires `'static`
+/// (hence `to_push` is consumed by value, and `client` is cloned per
+/// task rather than borrowed — see `S3Client`'s `Clone` impl doc comment).
+async fn push_concurrently<T, F, Fut>(
+    client: &S3Client,
+    to_push: Vec<T>,
+    phase: SyncPhase,
+    on_progress: &mut dyn FnMut(SyncProgress),
+    upload_one: F,
+) -> Result<Vec<ManifestEntry>, SyncError>
+where
+    T: Send + 'static,
+    F: Fn(S3Client, T) -> Fut + Copy + Send + 'static,
+    Fut: std::future::Future<Output = Result<ManifestEntry, S3Error>> + Send + 'static,
+{
+    let total = to_push.len();
+    let mut new_entries = Vec::with_capacity(total);
+    if total == 0 {
+        return Ok(new_entries);
+    }
+
+    let mut join_set = tokio::task::JoinSet::new();
+    let mut rows_iter = to_push.into_iter();
+    let mut completed = 0usize;
+
+    loop {
+        while join_set.len() < SYNC_CONCURRENCY {
+            let Some(row) = rows_iter.next() else { break };
+            let client = client.clone();
+            join_set.spawn(upload_one(client, row));
+        }
+        let Some(joined) = join_set.join_next().await else {
+            break;
+        };
+        let entry = joined.map_err(|e| SyncError::TaskJoin(e.to_string()))??;
+        new_entries.push(entry);
+        completed += 1;
+        on_progress(SyncProgress { phase, completed, total });
+    }
+
+    Ok(new_entries)
 }
 
 async fn push_sources(
     conn: &Connection,
     client: &S3Client,
     manifest: &mut Manifest,
+    on_progress: &mut dyn FnMut(SyncProgress),
 ) -> Result<usize, SyncError> {
-    let existing: HashMap<&str, &ManifestEntry> = manifest
+    let existing: HashMap<String, String> = manifest
         .entries
         .iter()
         .filter(|e| e.entity_type == EntityType::Source)
-        .map(|e| (e.id.as_str(), e))
+        .map(|e| (e.id.clone(), e.updated_at.clone()))
         .collect();
-    let mut pushed = 0;
-    let mut new_entries = Vec::new();
-    for row in sync_rows::list_sources_for_sync(conn)? {
-        if !needs_push(&row.updated_at, existing.get(row.id.as_str()).copied()) {
-            continue;
-        }
+    let to_push: Vec<SyncSourceRow> = sync_rows::list_sources_for_sync(conn)?
+        .into_iter()
+        .filter(|row| needs_push(&row.updated_at, existing.get(&row.id).map(|s| s.as_str())))
+        .collect();
+
+    let new_entries = push_concurrently(client, to_push, SyncPhase::PushSources, on_progress, |client, row| async move {
         let bytes = gz_json(&row);
         let hash = content_hash(&bytes);
         client.put_object(&blob_key(EntityType::Source, &row.id), bytes).await?;
-        new_entries.push(ManifestEntry {
+        Ok(ManifestEntry {
             id: row.id.clone(),
             entity_type: EntityType::Source,
             conflict_key: row.feed_url.clone(),
             updated_at: row.updated_at.clone(),
             created_at: row.created_at.clone(),
             content_hash: hash,
-        });
-        pushed += 1;
-    }
+        })
+    })
+    .await?;
+
+    let pushed = new_entries.len();
     replace_entries(manifest, EntityType::Source, new_entries);
     Ok(pushed)
 }
@@ -533,32 +705,35 @@ async fn push_categories(
     conn: &Connection,
     client: &S3Client,
     manifest: &mut Manifest,
+    on_progress: &mut dyn FnMut(SyncProgress),
 ) -> Result<usize, SyncError> {
-    let existing: HashMap<&str, &ManifestEntry> = manifest
+    let existing: HashMap<String, String> = manifest
         .entries
         .iter()
         .filter(|e| e.entity_type == EntityType::Category)
-        .map(|e| (e.id.as_str(), e))
+        .map(|e| (e.id.clone(), e.updated_at.clone()))
         .collect();
-    let mut pushed = 0;
-    let mut new_entries = Vec::new();
-    for row in sync_rows::list_categories_for_sync(conn)? {
-        if !needs_push(&row.updated_at, existing.get(row.id.as_str()).copied()) {
-            continue;
-        }
+    let to_push: Vec<SyncCategoryRow> = sync_rows::list_categories_for_sync(conn)?
+        .into_iter()
+        .filter(|row| needs_push(&row.updated_at, existing.get(&row.id).map(|s| s.as_str())))
+        .collect();
+
+    let new_entries = push_concurrently(client, to_push, SyncPhase::PushCategories, on_progress, |client, row| async move {
         let bytes = gz_json(&row);
         let hash = content_hash(&bytes);
         client.put_object(&blob_key(EntityType::Category, &row.id), bytes).await?;
-        new_entries.push(ManifestEntry {
+        Ok(ManifestEntry {
             id: row.id.clone(),
             entity_type: EntityType::Category,
             conflict_key: row.name.to_lowercase(),
             updated_at: row.updated_at.clone(),
             created_at: row.created_at.clone(),
             content_hash: hash,
-        });
-        pushed += 1;
-    }
+        })
+    })
+    .await?;
+
+    let pushed = new_entries.len();
     replace_entries(manifest, EntityType::Category, new_entries);
     Ok(pushed)
 }
@@ -567,40 +742,39 @@ async fn push_articles(
     conn: &Connection,
     client: &S3Client,
     manifest: &mut Manifest,
+    on_progress: &mut dyn FnMut(SyncProgress),
 ) -> Result<usize, SyncError> {
-    let existing: HashMap<&str, &ManifestEntry> = manifest
+    let existing: HashMap<String, String> = manifest
         .entries
         .iter()
         .filter(|e| e.entity_type == EntityType::Article)
-        .map(|e| (e.id.as_str(), e))
+        .map(|e| (e.id.clone(), e.updated_at.clone()))
         .collect();
-    let mut pushed = 0;
-    let mut new_entries = Vec::new();
-    for row in sync_rows::list_articles_for_sync(conn)? {
-        if !needs_push(&row.updated_at, existing.get(row.id.as_str()).copied()) {
-            continue;
-        }
+    let to_push: Vec<SyncArticleRow> = sync_rows::list_articles_for_sync(conn)?
+        .into_iter()
+        .filter(|row| needs_push(&row.updated_at, existing.get(&row.id).map(|s| s.as_str())))
+        .collect();
+
+    let new_entries = push_concurrently(client, to_push, SyncPhase::PushArticles, on_progress, |client, row| async move {
         let bytes = gz_json(&row);
         let hash = content_hash(&bytes);
         client.put_object(&blob_key(EntityType::Article, &row.id), bytes).await?;
-        new_entries.push(ManifestEntry {
+        Ok(ManifestEntry {
             id: row.id.clone(),
             entity_type: EntityType::Article,
             conflict_key: row.link.clone(),
             updated_at: row.updated_at.clone(),
             created_at: row.fetched_at.clone(),
             content_hash: hash,
-        });
-        pushed += 1;
-    }
+        })
+    })
+    .await?;
+
+    let pushed = new_entries.len();
     replace_entries(manifest, EntityType::Article, new_entries);
     Ok(pushed)
 }
 
-/// Replaces every existing manifest entry of `entity_type` that also
-/// appears in `new_entries` and appends any that are brand new — entries
-/// for ids that weren't pushed this round (nothing changed locally) are
-/// left untouched.
 fn replace_entries(manifest: &mut Manifest, entity_type: EntityType, new_entries: Vec<ManifestEntry>) {
     if new_entries.is_empty() {
         return;
@@ -898,6 +1072,61 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn pushing_many_articles_reports_monotonic_progress_and_pushes_all_of_them() {
+        let (base_url, _store) = spawn_mock_s3().await;
+        let client = test_client(&base_url);
+        let data_dir = tempfile::tempdir().unwrap();
+
+        let device = migrated_conn();
+        const ARTICLE_COUNT: usize = 25;
+        for i in 0..ARTICLE_COUNT {
+            crate::db::queries::insert_captured_article(
+                &device,
+                &format!("art-{i}"),
+                None,
+                "direct",
+                &sample_output(&format!("https://example.com/{i}"), &format!("Title {i}")),
+                &[],
+            )
+            .unwrap();
+        }
+
+        let progress_log = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log_for_callback = progress_log.clone();
+        let outcome = run_sync(&device, &client, data_dir.path(), Utc::now(), move |p: SyncProgress| {
+            log_for_callback.lock().unwrap().push(p);
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(outcome.pushed, ARTICLE_COUNT);
+
+        let log = progress_log.lock().unwrap();
+        let article_pushes: Vec<&SyncProgress> = log
+            .iter()
+            .filter(|p| p.phase == SyncPhase::PushArticles)
+            .collect();
+        assert_eq!(
+            article_pushes.len(),
+            ARTICLE_COUNT,
+            "one progress update per pushed article, not batched or skipped"
+        );
+        assert!(
+            article_pushes.iter().all(|p| p.total == ARTICLE_COUNT),
+            "total must stay fixed for the whole phase"
+        );
+        let completed: Vec<usize> = article_pushes.iter().map(|p| p.completed).collect();
+        let mut sorted = completed.clone();
+        sorted.sort_unstable();
+        assert_eq!(
+            sorted,
+            (1..=ARTICLE_COUNT).collect::<Vec<_>>(),
+            "completed counts must cover 1..=total exactly once each, regardless of which \
+             concurrent upload happens to finish in which order"
+        );
+    }
+
+    #[tokio::test]
     async fn a_captured_article_pushed_by_one_device_is_pulled_by_another() {
         let (base_url, _store) = spawn_mock_s3().await;
         let client = test_client(&base_url);
@@ -914,13 +1143,13 @@ mod tests {
         )
         .unwrap();
 
-        let outcome_a = run_sync(&device_a, &client, data_dir.path(), Utc::now())
+        let outcome_a = run_sync(&device_a, &client, data_dir.path(), Utc::now(), |_| {})
             .await
             .expect("device A syncs cleanly against an empty bucket");
         assert_eq!(outcome_a.pushed, 1);
 
         let device_b = migrated_conn();
-        let outcome_b = run_sync(&device_b, &client, data_dir.path(), Utc::now())
+        let outcome_b = run_sync(&device_b, &client, data_dir.path(), Utc::now(), |_| {})
             .await
             .expect("device B syncs cleanly");
         assert_eq!(outcome_b.pulled, 1);
@@ -949,24 +1178,24 @@ mod tests {
             &[],
         )
         .unwrap();
-        run_sync(&device_a, &client, data_dir.path(), Utc::now())
+        run_sync(&device_a, &client, data_dir.path(), Utc::now(), |_| {})
             .await
             .unwrap();
 
         let device_b = migrated_conn();
-        run_sync(&device_b, &client, data_dir.path(), Utc::now())
+        run_sync(&device_b, &client, data_dir.path(), Utc::now(), |_| {})
             .await
             .unwrap();
         assert!(sync_rows::get_article_for_sync(&device_b, "art-1").unwrap().is_some());
 
         // Device A deletes it and pushes the tombstone.
         crate::db::queries::delete_article(&device_a, "art-1").unwrap();
-        run_sync(&device_a, &client, data_dir.path(), Utc::now())
+        run_sync(&device_a, &client, data_dir.path(), Utc::now(), |_| {})
             .await
             .unwrap();
 
         // Device B syncs again and must remove its own copy.
-        let outcome = run_sync(&device_b, &client, data_dir.path(), Utc::now())
+        let outcome = run_sync(&device_b, &client, data_dir.path(), Utc::now(), |_| {})
             .await
             .unwrap();
         assert_eq!(outcome.tombstones_applied, 1);
@@ -975,7 +1204,7 @@ mod tests {
         // And device B must never resurrect it even if it tries to push
         // a local copy again (it can't, since delete_article removed the
         // row — this asserts there is nothing left to push).
-        let outcome2 = run_sync(&device_b, &client, data_dir.path(), Utc::now())
+        let outcome2 = run_sync(&device_b, &client, data_dir.path(), Utc::now(), |_| {})
             .await
             .unwrap();
         assert_eq!(outcome2.pushed, 0);
@@ -1025,12 +1254,12 @@ mod tests {
 
         // A pushes first, B pulls A's copy (creating the collision
         // locally), resolves it, and pushes the resolution.
-        run_sync(&device_a, &client, data_dir.path(), Utc::now()).await.unwrap();
-        run_sync(&device_b, &client, data_dir.path(), Utc::now()).await.unwrap();
+        run_sync(&device_a, &client, data_dir.path(), Utc::now(), |_| {}).await.unwrap();
+        run_sync(&device_b, &client, data_dir.path(), Utc::now(), |_| {}).await.unwrap();
         // A syncs again to pick up B's resolution.
-        run_sync(&device_a, &client, data_dir.path(), Utc::now()).await.unwrap();
+        run_sync(&device_a, &client, data_dir.path(), Utc::now(), |_| {}).await.unwrap();
         // B syncs once more so both fully converge on the same tombstone view.
-        run_sync(&device_b, &client, data_dir.path(), Utc::now()).await.unwrap();
+        run_sync(&device_b, &client, data_dir.path(), Utc::now(), |_| {}).await.unwrap();
 
         let a_rows = sync_rows::list_articles_for_sync(&device_a).unwrap();
         let b_rows = sync_rows::list_articles_for_sync(&device_b).unwrap();
