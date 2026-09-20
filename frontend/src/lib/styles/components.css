@@ -45,7 +45,10 @@
    layout — icon buttons need a real touch target there, not just the
    desktop hover-target size. */
 @media (max-width: 768px) {
-  .btn-icon { width: 44px; height: 44px; }
+  /* Width only, not height — every button stays the slim 36px tall so a
+     text button and an icon button in the same row line up. `.btn-icon`
+     still widens to 44px as a horizontal touch-target concession. */
+  .btn-icon { width: 44px; }
 }
 
 .field > label {

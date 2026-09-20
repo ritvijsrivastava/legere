@@ -133,7 +133,7 @@ Confirmed anti-references: the previous default Tauri/Android template icon and 
 Calm and warm at rest, with a single deep, confident green doing all of the system's "this is active / this is mine / this matters" signaling.
 
 ### Primary
-- **Ledger Pine** (`#2d6b50` light / `#7fc39d` dark): the one accent. Filled buttons, active nav/segment state, links inside prose, favorite markers, focus rings, progress fills. Used for identity too — it's the fill color of the bookmark-ribbon mark. There is deliberately no separate "unread" mark — see the Library section below.
+- **Ledger Pine** (`#2d6b50` light / `#7fc39d` dark): the one accent. Filled buttons, active nav/segment state, links inside prose, favorite markers, focus rings, progress fills. Used for identity too — it's the color of the gather-spiral mark. There is deliberately no separate "unread" mark — see the Library section below.
 
 ### Neutral
 - **Warm Paper** (`#faf8f3` light / `#1a1814` dark): the page background.
@@ -176,7 +176,7 @@ The reader column is capped by a user-selectable measure (narrow 600px / default
 
 Scrollbars are **thin** (6px, see `tokens.css`) — a classic space-reserving scrollbar is part of the scroll container's content box, so anything wider visibly nudges the content beside it (e.g. the sidebar's rows shifting left) the moment a section grows tall enough to need one. Keep new scrollable areas on this width; don't re-widen or overlay-compensate per component. The desktop sidebar is the one exception: it hides its scrollbar entirely (`scrollbar-width: none` in `Shell.svelte`) — it only overflows when a large section is expanded, and even a thin reserved track shifted its rows left; wheel and keyboard scrolling still work, the handle is just never shown.
 
-Mobile touch targets floor at 44px (`.btn-icon` widens from 36px to 44px under 768px); this floor is load-bearing, not decorative, and should be preserved in any new mobile control.
+Mobile touch targets get a 44px-wide floor (`.btn-icon` widens from 36px to 44px under 768px; height stays 36px so a text button and an icon button in the same row line up) — width-only, a deliberate trade of full-square touch area for row consistency. The bottom tab bar is the one exception that stays a true 44px+ square target (see Navigation).
 
 The mobile collection header (Library/Favorites/category pages) is three rows, not a shrunk desktop toolbar: title + refresh/view-toggle icons share the top row, a full-width search field gets its own row, and category/tag chips scroll in a third. `ArticleCollection`'s `.header-controls` wrapper goes `display: contents` under the mobile breakpoint so its children can become direct CSS Grid participants of `.header-row` without duplicating any markup.
 
@@ -197,12 +197,12 @@ Quietly layered, not flat and not heavily lifted. Every surface that needs separ
 
 ## Shapes
 
-Consistently soft, never sharp and never maximal. Radius scales with the size and formality of the container: `5px` (small controls), `9px` (buttons, inputs, tags), `15px` (cards), `20px` (dialogs), and a full `999px` pill for every segmented control. The bookmark-mark logo uses the same soft-square logic (rounded-corner app icon). No hard/neobrutalist edges, no fully sharp corners anywhere in the system.
+Consistently soft, never sharp and never maximal. Radius scales with the size and formality of the container: `5px` (small controls), `9px` (buttons, inputs, tags), `15px` (cards), `20px` (dialogs), and a full `999px` pill for every segmented control. The gather-mark favicon uses the same soft-square logic (rounded-corner host square); the platform app icon ships as an unrounded full-bleed square source and lets each OS apply its own icon mask instead. No hard/neobrutalist edges, no fully sharp corners anywhere in the system.
 
 ## Components
 
 ### Buttons
-- **Shape:** 9px radius (`--radius-md`); icon buttons are 36px square (44px on mobile).
+- **Shape:** 9px radius (`--radius-md`); icon buttons are 36px square (36px tall / 44px wide on mobile — width-only touch-target widening, see Layout).
 - **Primary:** Ledger Pine fill, white/near-black text (light/dark), Title-weight (650) label.
 - **Secondary:** transparent fill, hairline border, ink text.
 - **Ghost:** no border, accent-colored text, used for low-emphasis actions (back button, "Details").
@@ -241,12 +241,13 @@ Consistently soft, never sharp and never maximal. Radius scales with the size an
 - **Style:** full viewport width, anchored to the bottom, 20px radius on the top two corners only, a small centered drag-handle bar, Bright Stock background, `--shadow-lg`, same ink-tinted scrim as a dialog.
 - **Motion:** scrim fades in, sheet slides up + fades in, both on `--duration-base`/`--ease-snap` — the same signature as a dialog's entrance, just from the bottom edge instead of a center pop.
 
-### Bookmark Mark (signature component)
-The brand mark is a single filled bookmark-ribbon shape (not a lettermark) — a rounded-top rectangle with a V-notch cut at the bottom. It renders in `currentColor` inline next to the "Legere" wordmark (sidebar/topbar) and as a paper-ribbon-on-Ledger-Pine app icon/favicon. It never gets a second color, a gradient, or a drop shadow of its own.
+### Gather Mark (signature component)
+The brand mark is a single open spiral winding into a solid dot (not a lettermark) — `Logo.svelte`. `Legere` means both "to read" and "to gather, to pick out" (the root of *collect*, *select*, *elect*); the mark makes that literal: a loose line (scattered feeds and links) coils inward and resolves into one solid, readable point. It renders in `currentColor` inline next to the "Legere" wordmark (sidebar/topbar) and, fixed to its dark form regardless of the app's own light/dark theme, as the app icon/favicon — near-black host (`#14120e`) with the spiral in Ledger Pine Dark (`#7fc39d`). It never gets a second color, a gradient, or a drop shadow of its own. A `spinning` prop turns it into the app's one branded loading indicator (a slow, continuous rotation — see Motion) for ambient "still gathering" moments, such as the mobile pull-to-refresh indicator; buttons whose job is specifically "tap to sync" keep the conventional circular-arrows `Refresh` icon instead, since legibility of the action there matters more than brand reinforcement.
 
 ## Do's and Don'ts
 
 ### Do:
+- **Do** render every button/control through the shared `.btn` vocabulary in `components.css` (`.btn-primary` / `.btn-secondary` / `.btn-ghost` / `.btn-danger` / `.btn-icon` / `.btn-block`), even when the same action (e.g. "Add source") appears in more than one place. Layout-only concerns (width, margin, position) belong in a page/component's own scoped class layered on top of `.btn`; radius, height, padding, and type never get re-declared per instance — that drift is how the same button ends up a different size in two spots.
 - **Do** keep Literata inside the reading surface only; every other piece of type is Inter.
 - **Do** give every new card/surface a hairline ring before considering a shadow.
 - **Do** use the pill (999px) shape for any new segmented/toggle control.

@@ -205,7 +205,7 @@
 					Legere
 				</div>
 			</div>
-			<button onclick={() => uiStore.openAddSource()} class="add-source-btn">
+			<button onclick={() => uiStore.openAddSource()} class="btn btn-primary btn-block add-source-btn">
 				<Plus size={15} />
 				Add source
 			</button>
@@ -453,29 +453,13 @@
 		flex: 1;
 		min-height: 16px;
 	}
+	/* Same shared `.btn .btn-primary` chrome as the Sources page's own
+	   "Add source" button (`routes/sources/+page.svelte`) — only the layout
+	   (full sidebar width, spacing below) is bespoke here. Don't reintroduce
+	   one-off padding/radius/font overrides; this is the same action
+	   rendered in a second place; it should always look identical. */
 	.add-source-btn {
-		display: flex;
-		flex: none;
-		align-items: center;
-		justify-content: center;
-		gap: 7px;
-		background: var(--color-accent);
-		color: var(--color-accent-fg);
-		border: none;
-		border-radius: 12px;
-		font-family: var(--font-heading);
-		font-weight: 600;
-		font-size: 13.5px;
-		padding: 12px;
-		cursor: pointer;
 		margin-bottom: 18px;
-		transition: transform var(--duration-fast) var(--ease-snap), background var(--duration-base) var(--ease-snap);
-	}
-	.add-source-btn:hover {
-		background: color-mix(in srgb, var(--color-accent) 88%, black);
-	}
-	.add-source-btn:active {
-		transform: scale(0.97);
 	}
 	/* Only rendered while `captureJobsStore` has something to show (see the
 	   markup above) — a background "add a source" job in progress, or one
