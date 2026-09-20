@@ -40,6 +40,19 @@ impl EntityType {
             Self::Source => "source",
         }
     }
+
+    /// The plural form used in the bucket's blob path
+    /// (`blobs/<plural>/<id>/...`, see `remote_sync::engine::blob_key`).
+    /// A real function, not `format!("{}s", self.as_str())`: that naive
+    /// concatenation is correct for "article"/"source" but produces
+    /// "categorys" for "category" - this is that bug's fix.
+    pub const fn plural_str(self) -> &'static str {
+        match self {
+            Self::Article => "articles",
+            Self::Category => "categories",
+            Self::Source => "sources",
+        }
+    }
 }
 
 /// One row's sync-relevant fingerprint. `conflict_key` backs the

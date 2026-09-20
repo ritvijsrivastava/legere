@@ -296,8 +296,8 @@ async fn apply_tombstones_locally(
 
 fn blob_key(entity_type: EntityType, id: &str) -> String {
     format!(
-        "legere-sync/blobs/{}s/{id}/meta.json.gz",
-        entity_type.as_str()
+        "legere-sync/blobs/{}/{id}/meta.json.gz",
+        entity_type.plural_str()
     )
 }
 
@@ -947,9 +947,32 @@ mod tests {
     use axum::routing::get;
     use rusqlite::Connection;
 
-    use super::*;
+use super::*;
     use crate::capture::LocalCaptureOutput;
     use crate::db::sync_rows;
+
+    #[test]
+    fn blob_key_uses_the_correct_plural_for_every_entity_type() {
+        // Regression test: `blob_key` used to naively append "s" to
+        // `EntityType::as_str()`, which is correct for article/source
+        // but produced the wrong path ("categorys") for category. Pins
+        // the exact expected string per type so this can't silently
+        // regress again — the mock-server-based integration tests below
+        // don't catch this class of bug, since they just store whatever
+        // key string they're given and round-trip it correctly either way.
+        assert_eq!(
+            blob_key(EntityType::Article, "abc"),
+            "legere-sync/blobs/articles/abc/meta.json.gz"
+        );
+        assert_eq!(
+            blob_key(EntityType::Category, "abc"),
+            "legere-sync/blobs/categories/abc/meta.json.gz"
+        );
+        assert_eq!(
+            blob_key(EntityType::Source, "abc"),
+            "legere-sync/blobs/sources/abc/meta.json.gz"
+        );
+    }
 
     type Store = Arc<Mutex<HashMap<String, (Vec<u8>, String)>>>;
 
