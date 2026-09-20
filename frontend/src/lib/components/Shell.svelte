@@ -201,7 +201,7 @@
 		<div class="sidebar">
 			<div class="brand-row">
 				<div class="brand">
-					<span class="brand-mark"><Logo size={17} /></span>
+					<span class="brand-mark"><Logo size={24} /></span>
 					Legere
 				</div>
 			</div>
@@ -334,7 +334,7 @@
 	.brand {
 		display: flex;
 		align-items: center;
-		gap: 8px;
+		gap: 10px;
 		font-family: var(--font-heading);
 		font-weight: 700;
 		font-size: 18px;

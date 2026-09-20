@@ -147,12 +147,18 @@ and is out of scope unless revisited later.)
 
 - Name: **Legere** — Latin infinitive, "to read." This is fixed and is
   the one durable naming/etymology fact to design around.
-- No other visual identity is locked. The current mark (a plain
-  rounded-square app icon with a flat "L" glyph, plus a colored-dot +
-  wordmark in the sidebar/topbar) is explicitly called out by the user
-  as dated/generic and is an **anti-reference**, not a constraint to
-  preserve — it and the current token palette/typography are open for
-  full replacement.
+- Visual identity is now locked — see DESIGN.md's "Nocturne" system:
+  warm-paper/soft-ink neutrals plus one accent (Ledger Pine), and a
+  brand mark, the **Gather Mark** (`Logo.svelte`) — an open spiral
+  winding into a solid dot, playing on `legere`'s other sense, "to
+  gather, to pick out." The app icon/favicon fixes the mark to its dark
+  form (`#14120e` host, spiral in `#7fc39d`) regardless of the app's
+  own light/dark theme. Two earlier marks are explicitly superseded
+  **anti-references**, not constraints to preserve: a plain
+  rounded-square icon with a flat "L" glyph (the original placeholder,
+  called out as dated/generic), and after that a bookmark-ribbon shape
+  (replaced because the user wanted something built specifically around
+  the "to gather" etymology, in black-and-green, dark-mode-first).
 - The "Aa" typography popover concept is a working product convention,
   not binding visual style; keep the concept, redesign the execution.
   The reader theme was previously a separate three-way axis (`light` /

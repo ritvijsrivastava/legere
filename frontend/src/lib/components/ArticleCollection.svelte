@@ -16,6 +16,7 @@
 	import Grid from '$lib/icons/Grid.svelte';
 	import ListIcon from '$lib/icons/ListIcon.svelte';
 	import Refresh from '$lib/icons/Refresh.svelte';
+	import Logo from '$lib/icons/Logo.svelte';
 	import Hash from '$lib/icons/Hash.svelte';
 	import Folder from '$lib/icons/Folder.svelte';
 	import X from '$lib/icons/X.svelte';
@@ -688,7 +689,7 @@
 
 	{#if showRefresh}
 		<div class="pull-indicator" class:dragging={isPulling} style:height="{pullY}px">
-			<Refresh size={16} spinning={uiStore.syncing} />
+			<Logo size={18} spinning={uiStore.syncing} />
 		</div>
 	{/if}
 	<div class="scroll-area" bind:this={scrollAreaEl}>
