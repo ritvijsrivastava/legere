@@ -56,18 +56,22 @@ fn set_setting(conn: &Connection, key: &str, value: &str) -> rusqlite::Result<()
 /// `None` when sync has never been configured on this device (no
 /// `remote_sync_bucket_name` saved yet) — the caller's cue to show setup
 /// rather than a sync status/error.
+fn ensure_device_id(conn: &Connection) -> rusqlite::Result<String> {
+    match get_setting(conn, "remote_sync_device_id")? {
+        Some(id) => Ok(id),
+        None => {
+            let id = Uuid::new_v4().to_string();
+            set_setting(conn, "remote_sync_device_id", &id)?;
+            Ok(id)
+        }
+    }
+}
+
 pub fn get_remote_sync_config(conn: &Connection) -> rusqlite::Result<Option<RemoteSyncConfig>> {
     let Some(bucket_name) = get_setting(conn, "remote_sync_bucket_name")? else {
         return Ok(None);
     };
-    let device_id = match get_setting(conn, "remote_sync_device_id")? {
-        Some(id) => id,
-        None => {
-            let id = Uuid::new_v4().to_string();
-            set_setting(conn, "remote_sync_device_id", &id)?;
-            id
-        }
-    };
+    let device_id = ensure_device_id(conn)?;
 
     Ok(Some(RemoteSyncConfig {
         enabled: get_setting(conn, "remote_sync_enabled")?.as_deref() == Some("true"),
@@ -84,17 +88,13 @@ pub fn get_remote_sync_config(conn: &Connection) -> rusqlite::Result<Option<Remo
     }))
 }
 
-/// Saves every field except `device_id`, which is fixed at first
-/// creation by [`get_remote_sync_config`] and never overwritten — a
-/// device changing its bucket/credentials is still the same device.
+/// Saves every field except `device_id`, which `ensure_device_id` owns
+/// entirely: whatever the caller's `config.device_id` says is ignored,
+/// not merely overridden on first save, since trusting client input for
+/// this field is exactly the bug this function used to have (a
+/// not-yet-configured frontend has no real id to send yet).
 pub fn save_remote_sync_config(conn: &Connection, config: &RemoteSyncConfig) -> rusqlite::Result<()> {
-    // Ensures a device_id already exists before this device's config is
-    // otherwise considered "set up" — see get_remote_sync_config's own
-    // generation path, called here too so a fresh save doesn't race with
-    // it under concurrent access to the same connection.
-    if get_setting(conn, "remote_sync_device_id")?.is_none() {
-        set_setting(conn, "remote_sync_device_id", &config.device_id)?;
-    }
+    ensure_device_id(conn)?;
 
     set_setting(conn, "remote_sync_enabled", if config.enabled { "true" } else { "false" })?;
     set_setting(conn, "remote_sync_endpoint", &config.endpoint)?;
@@ -196,6 +196,24 @@ mod tests {
 
         let second_id = get_remote_sync_config(&conn).unwrap().unwrap().device_id;
         assert_eq!(first_id, second_id, "device_id must never change once set");
+    }
+
+    #[test]
+    fn first_ever_save_never_persists_the_frontend_supplied_device_id() {
+        // Regression test: before any device_id exists yet (a brand-new
+        // device that has never called get_remote_sync_config with a
+        // bucket already configured), the very first save must not take
+        // config.device_id at face value - a fresh frontend form has
+        // nothing real to put there.
+        let conn = migrated_conn();
+        let mut config = sample_config();
+        config.device_id = String::new();
+
+        save_remote_sync_config(&conn, &config).unwrap();
+
+        let saved_id = get_remote_sync_config(&conn).unwrap().unwrap().device_id;
+        assert!(!saved_id.is_empty(), "an empty client-supplied device_id must never be persisted");
+        assert_eq!(saved_id.len(), 36, "a real UUID, not whatever the client happened to send");
     }
 
     #[test]
