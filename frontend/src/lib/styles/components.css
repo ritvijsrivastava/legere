@@ -178,6 +178,14 @@
 }
 .dialog {
   width: min(420px, 90vw);
+  /* Caps height to the viewport and scrolls internally rather than
+     overflowing the fixed backdrop. This dialog otherwise had no height
+     bound: on a short viewport (or a form with more fields than fit,
+     like RemoteSyncDialog) the content spilled past the backdrop and the
+     page behind it scrolled instead of the dialog itself, cutting off
+     the action buttons with no way to reach them. */
+  max-height: min(85vh, 720px);
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 16px;
