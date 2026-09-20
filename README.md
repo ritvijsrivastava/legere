@@ -10,7 +10,9 @@ opens the cleaned live link in your system browser (or shares it via the
 platform share sheet).
 
 Built with Tauri 2 (Rust) + SvelteKit (Svelte 5 runes) + SQLite. No accounts,
-no server, no sync — every device keeps its own independent local library.
+no Legere-run server — cross-device sync is opt-in and syncs directly to
+an S3-compatible bucket you supply yourself; see "Cross-device sync"
+below.
 
 ## Features
 
@@ -45,6 +47,12 @@ no server, no sync — every device keeps its own independent local library.
   global defaults.
 - **Self-updating** — desktop builds (AppImage/.deb/.rpm) and Android
   sideload builds check GitHub releases for updates in-app.
+- **Cross-device sync** — opt-in, off by default. Bring your own
+  S3-compatible bucket (Cloudflare R2, AWS S3, Backblaze B2, Minio, ...)
+  and sync articles, categories, and sources across the devices you set
+  it up on yourself; Legere never runs a server or sees your data. Runs
+  hourly, plus a manual "Sync now" button. See ARCHITECTURE.md's
+  "Cross-device sync" section.
 
 ## Documentation
 
@@ -150,7 +158,8 @@ access, no external services required).
 
 Legere is a personal project, developed in the open. It works today on Linux
 desktop and Android; macOS/Windows targets are configured but less exercised.
-There is no sync, no accounts, and no telemetry — by design.
+There are no accounts and no telemetry, by design. Cross-device sync exists
+but is opt-in, off by default, and never touches a Legere-run server.
 
 ## License
 

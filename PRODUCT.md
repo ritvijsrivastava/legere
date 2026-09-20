@@ -20,9 +20,11 @@ wanted instead of one shared identity. -->
 ## Users
 
 Primary user is the developer/owner reading their own RSS feeds and
-saved links — a personal, single-user offline reader (no accounts, no
-multi-user backend; independent local SQLite per device, sync
-explicitly out of scope). The situation it's built for: reading with an
+saved links — a personal, single-user reader (no accounts, no
+multi-user backend; independent local SQLite per device). Cross-device
+sync is opt-in and user-hosted: nothing is synced unless the user
+explicitly configures their own S3-compatible bucket, and Legere never
+runs a server of its own. The situation it's built for: reading with an
 unreliable or absent connection (commute, flight, spotty wifi) and
 wanting a calm, tracking-free, ad-free version of a saved article rather
 than the live page. The recurring job: "add this feed/link now, read it
@@ -46,9 +48,11 @@ page-archiver, Legere's mechanism is deliberately narrow: only the
 readable extraction and its own images are made durable and offline
 (`content/<id>/`); the original page is never archived or rendered
 in-app — "view original" is a plain external link, opened in the system
-browser, with tracking params already cleaned off it. No server, no
-account, no cloud sync: every device keeps its own local library. (An
-earlier design captured a full-page ZIM/"Original" viewer per article;
+browser, with tracking params already cleaned off it. No Legere-run
+server or account, ever — cross-device sync (opt-in) replicates
+articles/categories/sources between a user's own devices via a bucket
+they supply themselves; each device still keeps a full local library.
+(An earlier design captured a full-page ZIM/"Original" viewer per article;
 that was cut for the MVP — see ARCHITECTURE.md's historical decisions —
 and is out of scope unless revisited later.)
 
@@ -64,7 +68,9 @@ and is out of scope unless revisited later.)
   read/reading/read-later state, favorites, and tags (feed-derived at
   capture time, freely editable afterward — always lowercase, no upper
   limit per article).
-- No backend service to design for — everything above is local-first.
+- No Legere-run backend service to design for — everything above is
+  local-first; opt-in cross-device sync (see Capabilities below) talks
+  directly to a bucket the user supplies, not a service Legere operates.
 
 ## Capabilities and Constraints
 
@@ -133,6 +139,15 @@ and is out of scope unless revisited later.)
   Sources is its own top-level nav destination (desktop sidebar and
   mobile bottom bar), and folder/category management lives in the
   sidebar/library, see above.
+- Cross-device sync: opt-in, off by default, configured from Settings.
+  The user supplies their own S3-compatible bucket (Cloudflare R2, AWS
+  S3, Backblaze B2, Minio, ...); Legere never hosts or sees the data.
+  Syncs articles (including content and tags), categories, and sources;
+  local-only settings (font size, theme, etc.) never leave the device.
+  A deleted article/category/source never reappears from another
+  device once the deletion has propagated. Runs automatically once an
+  hour when enabled, plus a manual "Sync now" action — see
+  ARCHITECTURE.md's Sync section for the full design.
 - Constraint: fully offline-capable by design — no remote fonts/icons,
   vendored fonts only (`@fontsource*`), a real (non-null) CSP, SSRF-
   guarded fetches. Any new visual asset (fonts, icons, the app icon)
@@ -187,9 +202,10 @@ separate marketing surface to populate with proof.
    handled as layout/density/safe-area adaptations of one design, not
    two designs.
 4. **Narrow, honest scope.** Legere reflects exactly what it does
-   (readable-view capture, not full-page archiving); the UI should never
-   imply capabilities (sync, accounts, full-page snapshots) it doesn't
-   have.
+   (readable-view capture, not full-page archiving; opt-in, user-hosted
+   cross-device sync, not an account-based cloud service); the UI should
+   never imply capabilities (accounts, a Legere-run server, full-page
+   snapshots) it doesn't have.
 
 ## Accessibility & Inclusion
 

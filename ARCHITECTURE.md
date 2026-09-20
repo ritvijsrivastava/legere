@@ -17,8 +17,11 @@ These are the locked decisions everything else follows:
    icons, and every other asset ship vendored with the app; captured articles
    keep their readable view and its own images on disk forever.
 2. **Local-first, no server.** One SQLite database per device, no accounts,
-   no sync. The schema is sync-friendly (UUID primary keys, `updated_at` on
-   every row) so sync could be added later, but nothing assumes it.
+   no Legere-run backend. Cross-device sync exists but is opt-in and talks
+   directly to a bucket the user supplies themselves (see "Cross-device
+   sync" below). The schema was made sync-friendly (UUID primary keys,
+   `updated_at` on every row) well before that landed, and cross-device
+   sync is the payoff of that decision, not a reversal of it.
 3. **One capture pipeline.** RSS entries, pasted links, Raindrop import rows,
    and re-captures all converge on a single
    `capture::capture_local` fetch→extract→sanitize→localize→store pipeline.
@@ -319,7 +322,7 @@ share sheet -> ShareActivity (invisible trampoline, never inflates a layout)
 - **Desktop has no equivalent** — there's no OS-level share-sheet concept
   on Linux; this is Android-only.
 
-## Sync and lifecycle
+## RSS autosync and lifecycle
 
 - **Autosync** (`sync.rs`) — a foreground interval task (15 minutes) spawned
   at startup when enabled; toggling the setting spawns/aborts it. No
@@ -335,6 +338,142 @@ share sheet -> ShareActivity (invisible trampoline, never inflates a layout)
 - **State** (`state.rs`) — `AppState` holds the DB pool, the shared
   SSRF-guarded HTTP client, the data dir, autosync/cancellation handles,
   and (per-platform, cfg-gated) pending-update slots.
+
+## Cross-device sync
+
+Opt-in, off by default, configured from Settings. The user supplies their
+own S3-compatible bucket (Cloudflare R2, AWS S3, Backblaze B2, Minio, ...);
+Legere never runs a server or sees the data — this is the payoff of Design
+principle 2's "sync-friendly schema," not an exception to "no server."
+Independent from RSS autosync above: separate schedule (hourly vs. 15
+minutes), separate event namespace (`remote-sync:*` vs. `sync:*`), separate
+settings storage, can be toggled independently.
+
+**What syncs and what doesn't** — `articles` (including `content_html`,
+tags, reading state/progress, favorited, per-article reading-appearance
+overrides), `categories`, and `sources` sync in full. `settings` (the app's
+own local-only preferences, including RSS autosync's on/off flag) never
+syncs, by design — those are per-device choices, not library data.
+
+**Bucket layout** (`remote_sync::engine`):
+
+```
+legere-sync/
+  manifest.json.gz                      # small index: entries + tombstones
+  blobs/articles/<id>/meta.json.gz      # full row: metadata + content_html
+  blobs/categories/<id>.json.gz
+  blobs/sources/<id>.json.gz
+```
+
+The manifest is deliberately just an index (id/type/`conflict_key`/
+`updated_at`/`created_at`/content hash per entry, plus the tombstone list)
+— never the content itself — since it's the one object every device
+contends on and has to stay cheap to re-diff and rewrite. Heavy content
+lives in per-entity blobs, fetched only when a device's diff says it needs
+them.
+
+**Scope cut, not yet done:** inline images under `content/<id>/` and hero
+thumbnails aren't synced yet — only metadata and `content_html`. A pulled
+article renders with broken images until image blob sync lands as a
+follow-up. This is called out in `remote_sync::engine`'s own module doc
+comment; don't let it go unnoticed as "sync is done."
+
+**The algorithm** (`remote_sync::engine::run_sync`), one pass:
+
+1. Fetch `manifest.json`, or start from an empty one if the bucket has none
+   yet.
+2. Purge tombstones older than the fixed 60-day retention window (see
+   "Tombstones" below).
+3. Apply every remaining tombstone locally, via the *same* delete functions
+   a local user action would call (`queries::delete_article`/
+   `delete_category`/`remove_source`) — not a separate deletion code path.
+   A tombstoned id is refused unconditionally, regardless of what any
+   `entries` row says about it (see `Manifest::live_entries`).
+4. Pull: for each live manifest entry newer than (or missing from) the
+   local DB, fetch its blob and upsert it — sources, then categories, then
+   articles, so foreign keys (`category_id`, `source_id`) always resolve.
+5. Push: for each local row newer than what the manifest currently has (or
+   entirely absent from it), upload its blob and update the manifest's
+   in-memory index.
+6. Merge this device's `sync_tombstones` into the manifest's tombstone list.
+7. Write the manifest back with a conditional PUT (`If-Match` the ETag just
+   read, or `If-None-Match: *` for a brand-new bucket). On conflict (another
+   device won the race), retry the whole pass from step 1, up to 5 times.
+
+**Same-identity collisions** (`remote_sync::conflict`, and the
+`colliding_local_id` check inside each `pull_*` function in `engine.rs`):
+two devices can independently create "the same" article (same `link`),
+category (same case-insensitive name), or source (same `feed_url`) before
+either has synced — and all three columns are `UNIQUE`-constrained locally
+(`db::schema`'s `V2`/`V9`/`V16`), so this *must* be resolved before either
+row is materialized, not after, or the insert itself fails against the
+constraint. Every device resolves the same collision to the same winner
+regardless of merge order: smaller `(created_at, id)` wins, tie-broken by
+id string. For articles specifically, the loser's mutable state (tags,
+reading progress, favorited) is folded into the winner — union tags,
+`max(reading_progress)`, OR the favorited flags — before the loser is
+tombstoned, so a harmless capture race never silently discards a real user
+action taken on the losing copy.
+
+**Tombstones** (`sync_tombstones` table, `db::schema`'s `V17`) — a side
+table, not a `deleted_at` column on the synced tables themselves (that
+would force `UNIQUE(link)`/`UNIQUE(feed_url)`/`idx_categories_name` into
+partial indexes and touch every existing query against them). Every
+deletion path (`queries::delete_article`/`delete_all_articles`/
+`delete_category`/`remove_source`) writes a tombstone in addition to its
+normal hard-delete, via one shared `record_tombstone` choke point —
+the same one-function-per-invariant pattern `normalize_tags` already
+models for tags. A tombstoned id is sticky and final — no
+timestamp comparison, no undelete — once any device has seen it, that id
+can never be resurrected by another device's stale copy. Retention is a
+fixed 60 days (`manifest::TOMBSTONE_RETENTION`, not user-configurable): a
+device offline longer than that risks reviving an old delete on reconnect,
+an accepted low-severity trade against the complexity of a device-ack
+quorum for a tool aimed at 2–3 personal devices, not an unbounded fleet.
+
+**Provider requirement:** conditional writes (`If-Match`/`If-None-Match`)
+are required, checked once via
+`remote_sync::client::S3Client::probe_conditional_write_support` at setup
+time (`commands::remote_sync::test_remote_sync_connection`/
+`save_remote_sync_config`). A provider that fails this check is rejected
+outright — setup refuses to enable sync against it — rather than degraded
+to a racy advisory-lock fallback. R2, AWS S3, and Backblaze B2 all qualify.
+
+**Signing** (`remote_sync::client`) — `rusty-s3` (pure Rust, Sans-IO: it
+only builds signed URLs) over a bare `reqwest::Client`, deliberately *not*
+`capture::ssrf::ssrf_guarded_client_builder`'s guarded client — the bucket
+endpoint is infrastructure the user explicitly configured, not
+attacker-influenced page content, so SSRF-guarding it would protect against
+a threat model that doesn't apply here.
+
+**Config storage** (`db::sync_config`) — bucket credentials and this
+device's `device_id` live in the same local-only `settings` KV table every
+other preference uses, under a `remote_sync_*` key prefix
+`queries::get_settings`'s unknown-key fallthrough ignores. `device_id` is
+generated once (`ensure_device_id`) and is never accepted from the
+frontend on save, even on the very first save before one exists — a real
+bug this shipped with briefly (a not-yet-configured frontend has no real
+id to send yet) before being caught by a test and fixed.
+
+**Encryption:** none. Content and credentials sit in the bucket as
+plaintext JSON/gzip. Accepted for v1 given the target use case (2–3
+personal devices, a bucket the user already trusts with their own
+credentials); revisit if that trust assumption ever needs to change.
+
+**Scheduling and events** (`remote_sync::orchestrate`) — mirrors
+`sync.rs`'s shape for RSS autosync: `spawn_remote_sync_autosync` runs the
+first sync immediately, then hourly, alongside (not instead of) RSS's own
+15-minute loop. `run_remote_sync_once` is the single entry point both the
+scheduler and the manual "Sync now" button
+(`commands::remote_sync::remote_sync_now`) call; it emits
+`remote-sync:started/finished/error` and records
+`remote_sync_last_synced_at`/`remote_sync_last_error` via
+`db::sync_config` either way. Every DB+network interleaving
+(`engine::run_sync` awaits mid-transaction throughout) runs inside a
+`spawn_blocking` closure driven by `block_on` in place, not `tokio::spawn`,
+since `rusqlite::Connection` isn't `Sync` and a future holding `&Connection`
+across an `.await` therefore isn't `Send` — `block_on` only requires the
+*closure* to be `Send`, not the future it drives.
 
 ## Storage and schema
 
