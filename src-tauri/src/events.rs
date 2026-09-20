@@ -62,6 +62,13 @@ pub fn emit_remote_sync_error(app: &AppHandle, message: &str) {
     let _ = app.emit("remote-sync:error", message);
 }
 
+/// A sync pass was cancelled (the user's own "Cancel" button, or turning
+/// sync off while one was running). This is a deliberate, quiet outcome,
+/// not an error — `remote-sync:error` is reserved for real failures.
+pub fn emit_remote_sync_cancelled(app: &AppHandle) {
+    let _ = app.emit("remote-sync:cancelled", ());
+}
+
 /// Mirrors `remote_sync::engine::SyncPhase`/`SyncProgress`'s shape rather
 /// than serializing that type directly — keeps the event's wire schema
 /// stable independent of the internal Rust enum's own naming/shape.

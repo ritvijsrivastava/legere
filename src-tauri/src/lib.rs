@@ -154,6 +154,7 @@ pub fn run() {
                 last_foreground_sync: std::sync::Mutex::new(None),
                 import_cancel: Mutex::new(None),
                 article_import_cancel: Mutex::new(None),
+                remote_sync_cancel: Mutex::new(None),
                 capture_jobs: Default::default(),
                 #[cfg(not(target_os = "android"))]
                 pending_update: Default::default(),
@@ -253,6 +254,7 @@ pub fn run() {
             commands::remote_sync::test_remote_sync_connection,
             commands::remote_sync::save_remote_sync_config,
             commands::remote_sync::remote_sync_now,
+            commands::remote_sync::cancel_remote_sync,
             commands::import::import_raindrop_csv,
             commands::import::preview_raindrop_csv,
             commands::import::cancel_raindrop_import,

@@ -39,6 +39,14 @@ pub struct AppState {
     /// can't be confused with each other, even though only one importer of
     /// either kind is ever allowed to run at a time in practice.
     pub article_import_cancel: Mutex<Option<Arc<AtomicBool>>>,
+    /// Cancellation flag for an in-progress `remote_sync::engine::run_sync`
+    /// pass. Same dual-purpose pattern as `import_cancel`: `Some` also
+    /// means "a cross-device sync is already running," which
+    /// `orchestrate::run_remote_sync_once` checks to refuse a second
+    /// concurrent run (from the hourly scheduler racing a manual "Sync
+    /// now", or vice versa) rather than letting two passes run at once.
+    /// Also flipped when the user turns sync off while one is running.
+    pub remote_sync_cancel: Mutex<Option<Arc<AtomicBool>>>,
     /// In-flight/failed "add a source" background captures — see
     /// `capture_jobs`'s module docs for why this is in-memory only.
     pub capture_jobs: CaptureJobs,

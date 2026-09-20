@@ -82,6 +82,7 @@ impl From<crate::remote_sync::engine::SyncError> for AppError {
             SyncError::InvalidEndpoint(_) => AppError::Internal(e.to_string()),
             SyncError::Manifest(_) => AppError::Internal(e.to_string()),
             SyncError::TaskJoin(_) => AppError::Internal(e.to_string()),
+            SyncError::Cancelled => AppError::Internal(e.to_string()),
             SyncError::Db(_) => AppError::Database(e.to_string()),
         }
     }

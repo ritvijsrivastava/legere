@@ -65,6 +65,14 @@ class RemoteSyncStore {
 			this.busy = false;
 		}
 	}
+
+	/** Requests cancellation of whatever pass is currently running. Doesn't
+	 *  itself flip `busy`/`progress` back — the backend's
+	 *  `remote-sync:cancelled` event (see `lib/events.ts`) does that once
+	 *  the pass actually stops, which may be a moment after this resolves. */
+	async cancel() {
+		await api.cancelRemoteSync();
+	}
 }
 
 export const remoteSyncStore = new RemoteSyncStore();

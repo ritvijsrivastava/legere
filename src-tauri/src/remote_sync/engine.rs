@@ -17,6 +17,8 @@
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use chrono::{DateTime, Utc};
 use rusqlite::Connection;
@@ -63,6 +65,14 @@ pub enum SyncError {
     /// itself doesn't implement `Clone`/`Serialize` and this crate's error
     /// types are kept simple string-carrying variants throughout.
     TaskJoin(String),
+    /// The caller's cancellation flag was set mid-pass. See
+    /// `run_sync`'s `cancel` parameter. Treated exactly like a hard
+    /// process kill mid-sync (see the "what happens if the app closes
+    /// mid-sync" behavior this mirrors on purpose): no manifest write
+    /// happens, whatever already uploaded stays in the bucket as a
+    /// harmless not-yet-referenced blob, and the next sync just resumes
+    /// from a fresh diff. Not surfaced to the user as an error.
+    Cancelled,
 }
 
 impl std::fmt::Display for SyncError {
@@ -76,6 +86,7 @@ impl std::fmt::Display for SyncError {
             }
             Self::InvalidEndpoint(endpoint) => write!(f, "invalid bucket endpoint URL: {endpoint}"),
             Self::TaskJoin(msg) => write!(f, "a concurrent sync task failed: {msg}"),
+            Self::Cancelled => write!(f, "sync was cancelled"),
         }
     }
 }
@@ -154,10 +165,16 @@ pub async fn run_sync(
     client: &S3Client,
     data_dir: &Path,
     now: DateTime<Utc>,
+    cancel: &Arc<AtomicBool>,
     mut on_progress: impl FnMut(SyncProgress),
 ) -> Result<SyncOutcome, SyncError> {
     for _ in 0..MAX_CONFLICT_RETRIES {
-        if let Some(outcome) = try_sync_once(conn, client, data_dir, now, &mut on_progress).await? {
+        if cancel.load(Ordering::Relaxed) {
+            return Err(SyncError::Cancelled);
+        }
+        if let Some(outcome) =
+            try_sync_once(conn, client, data_dir, now, cancel, &mut on_progress).await?
+        {
             return Ok(outcome);
         }
     }
@@ -186,6 +203,7 @@ async fn try_sync_once(
     client: &S3Client,
     data_dir: &Path,
     now: DateTime<Utc>,
+    cancel: &Arc<AtomicBool>,
     on_progress: &mut dyn FnMut(SyncProgress),
 ) -> Result<Option<SyncOutcome>, SyncError> {
     let (mut manifest, precondition) = match client.get_object(MANIFEST_KEY).await? {
@@ -197,18 +215,22 @@ async fn try_sync_once(
     let tombstones_applied = apply_tombstones_locally(conn, data_dir, &manifest).await?;
 
     let mut pulled = 0;
-    pulled += pull_sources(conn, client, &manifest, now, on_progress).await?;
-    pulled += pull_categories(conn, client, &manifest, now, on_progress).await?;
-    pulled += pull_articles(conn, client, &manifest, now, on_progress).await?;
+    pulled += pull_sources(conn, client, &manifest, now, cancel, on_progress).await?;
+    pulled += pull_categories(conn, client, &manifest, now, cancel, on_progress).await?;
+    pulled += pull_articles(conn, client, &manifest, now, cancel, on_progress).await?;
 
     resolve_source_collisions(conn, now)?;
     resolve_category_collisions(conn, now)?;
     resolve_article_collisions(conn, now)?;
 
+    if cancel.load(Ordering::Relaxed) {
+        return Err(SyncError::Cancelled);
+    }
+
     let mut pushed = 0;
-    pushed += push_sources(conn, client, &mut manifest, on_progress).await?;
-    pushed += push_categories(conn, client, &mut manifest, on_progress).await?;
-    pushed += push_articles(conn, client, &mut manifest, on_progress).await?;
+    pushed += push_sources(conn, client, &mut manifest, cancel, on_progress).await?;
+    pushed += push_categories(conn, client, &mut manifest, cancel, on_progress).await?;
+    pushed += push_articles(conn, client, &mut manifest, cancel, on_progress).await?;
 
     merge_local_tombstones_into_manifest(conn, &mut manifest)?;
 
@@ -347,12 +369,14 @@ fn colliding_local_id<'a>(
 /// many were actually applied (a fetch that 404s or fails to deserialize
 /// is skipped, not an error — matches every pull path's existing
 /// tolerance for a manifest entry whose blob went missing).
+#[allow(clippy::too_many_arguments)]
 async fn pull_concurrently<T>(
     conn: &Connection,
     client: &S3Client,
     ids: Vec<String>,
     entity_type: EntityType,
     phase: SyncPhase,
+    cancel: &Arc<AtomicBool>,
     on_progress: &mut dyn FnMut(SyncProgress),
     apply_one: impl Fn(&Connection, T) -> rusqlite::Result<()>,
 ) -> Result<usize, SyncError>
@@ -370,6 +394,9 @@ where
     let mut completed = 0usize;
 
     loop {
+        if cancel.load(Ordering::Relaxed) {
+            return Err(SyncError::Cancelled);
+        }
         while join_set.len() < SYNC_CONCURRENCY {
             let Some(id) = ids_iter.next() else { break };
             let client = client.clone();
@@ -397,6 +424,7 @@ async fn pull_sources(
     client: &S3Client,
     manifest: &Manifest,
     now: DateTime<Utc>,
+    cancel: &Arc<AtomicBool>,
     on_progress: &mut dyn FnMut(SyncProgress),
 ) -> Result<usize, SyncError> {
     let local_rows = sync_rows::list_sources_for_sync(conn)?;
@@ -443,6 +471,7 @@ async fn pull_sources(
         to_fetch,
         EntityType::Source,
         SyncPhase::PullSources,
+        cancel,
         on_progress,
         |conn, row| sync_rows::upsert_synced_source(conn, &row),
     )
@@ -455,6 +484,7 @@ async fn pull_categories(
     client: &S3Client,
     manifest: &Manifest,
     now: DateTime<Utc>,
+    cancel: &Arc<AtomicBool>,
     on_progress: &mut dyn FnMut(SyncProgress),
 ) -> Result<usize, SyncError> {
     let local_rows = sync_rows::list_categories_for_sync(conn)?;
@@ -496,6 +526,7 @@ async fn pull_categories(
         to_fetch,
         EntityType::Category,
         SyncPhase::PullCategories,
+        cancel,
         on_progress,
         |conn, row| sync_rows::upsert_synced_category(conn, &row),
     )
@@ -507,6 +538,7 @@ async fn pull_articles(
     client: &S3Client,
     manifest: &Manifest,
     now: DateTime<Utc>,
+    cancel: &Arc<AtomicBool>,
     on_progress: &mut dyn FnMut(SyncProgress),
 ) -> Result<usize, SyncError> {
     let local_rows = sync_rows::list_articles_for_sync(conn)?;
@@ -609,6 +641,7 @@ async fn pull_articles(
         to_fetch,
         EntityType::Article,
         SyncPhase::PullArticles,
+        cancel,
         on_progress,
         |conn, row| sync_rows::upsert_synced_article(conn, &row),
     )
@@ -628,6 +661,7 @@ async fn push_concurrently<T, F, Fut>(
     client: &S3Client,
     to_push: Vec<T>,
     phase: SyncPhase,
+    cancel: &Arc<AtomicBool>,
     on_progress: &mut dyn FnMut(SyncProgress),
     upload_one: F,
 ) -> Result<Vec<ManifestEntry>, SyncError>
@@ -647,6 +681,9 @@ where
     let mut completed = 0usize;
 
     loop {
+        if cancel.load(Ordering::Relaxed) {
+            return Err(SyncError::Cancelled);
+        }
         while join_set.len() < SYNC_CONCURRENCY {
             let Some(row) = rows_iter.next() else { break };
             let client = client.clone();
@@ -668,6 +705,7 @@ async fn push_sources(
     conn: &Connection,
     client: &S3Client,
     manifest: &mut Manifest,
+    cancel: &Arc<AtomicBool>,
     on_progress: &mut dyn FnMut(SyncProgress),
 ) -> Result<usize, SyncError> {
     let existing: HashMap<String, String> = manifest
@@ -681,7 +719,7 @@ async fn push_sources(
         .filter(|row| needs_push(&row.updated_at, existing.get(&row.id).map(|s| s.as_str())))
         .collect();
 
-    let new_entries = push_concurrently(client, to_push, SyncPhase::PushSources, on_progress, |client, row| async move {
+    let new_entries = push_concurrently(client, to_push, SyncPhase::PushSources, cancel, on_progress, |client, row| async move {
         let bytes = gz_json(&row);
         let hash = content_hash(&bytes);
         client.put_object(&blob_key(EntityType::Source, &row.id), bytes).await?;
@@ -705,6 +743,7 @@ async fn push_categories(
     conn: &Connection,
     client: &S3Client,
     manifest: &mut Manifest,
+    cancel: &Arc<AtomicBool>,
     on_progress: &mut dyn FnMut(SyncProgress),
 ) -> Result<usize, SyncError> {
     let existing: HashMap<String, String> = manifest
@@ -718,7 +757,7 @@ async fn push_categories(
         .filter(|row| needs_push(&row.updated_at, existing.get(&row.id).map(|s| s.as_str())))
         .collect();
 
-    let new_entries = push_concurrently(client, to_push, SyncPhase::PushCategories, on_progress, |client, row| async move {
+    let new_entries = push_concurrently(client, to_push, SyncPhase::PushCategories, cancel, on_progress, |client, row| async move {
         let bytes = gz_json(&row);
         let hash = content_hash(&bytes);
         client.put_object(&blob_key(EntityType::Category, &row.id), bytes).await?;
@@ -742,6 +781,7 @@ async fn push_articles(
     conn: &Connection,
     client: &S3Client,
     manifest: &mut Manifest,
+    cancel: &Arc<AtomicBool>,
     on_progress: &mut dyn FnMut(SyncProgress),
 ) -> Result<usize, SyncError> {
     let existing: HashMap<String, String> = manifest
@@ -755,7 +795,7 @@ async fn push_articles(
         .filter(|row| needs_push(&row.updated_at, existing.get(&row.id).map(|s| s.as_str())))
         .collect();
 
-    let new_entries = push_concurrently(client, to_push, SyncPhase::PushArticles, on_progress, |client, row| async move {
+    let new_entries = push_concurrently(client, to_push, SyncPhase::PushArticles, cancel, on_progress, |client, row| async move {
         let bytes = gz_json(&row);
         let hash = content_hash(&bytes);
         client.put_object(&blob_key(EntityType::Article, &row.id), bytes).await?;
@@ -947,9 +987,52 @@ mod tests {
     use axum::routing::get;
     use rusqlite::Connection;
 
-use super::*;
+    use super::*;
     use crate::capture::LocalCaptureOutput;
     use crate::db::sync_rows;
+
+    fn no_cancel() -> Arc<AtomicBool> {
+        Arc::new(AtomicBool::new(false))
+    }
+
+    #[tokio::test]
+    async fn cancelling_mid_push_stops_the_pass_and_writes_no_manifest() {
+        let (base_url, store) = spawn_mock_s3().await;
+        let client = test_client(&base_url);
+        let data_dir = tempfile::tempdir().unwrap();
+
+        let device = migrated_conn();
+        for i in 0..25 {
+            crate::db::queries::insert_captured_article(
+                &device,
+                &format!("art-{i}"),
+                None,
+                "direct",
+                &sample_output(&format!("https://example.com/{i}"), &format!("Title {i}")),
+                &[],
+            )
+            .unwrap();
+        }
+
+        // Flip the flag as soon as the first upload reports progress —
+        // well before all 25 would finish, so this exercises a real
+        // mid-flight stop, not a race against the pass already being done.
+        let cancel = Arc::new(AtomicBool::new(false));
+        let cancel_setter = cancel.clone();
+        let result = run_sync(&device, &client, data_dir.path(), Utc::now(), &cancel, move |_: SyncProgress| {
+            cancel_setter.store(true, Ordering::Relaxed);
+        })
+        .await;
+
+        assert!(
+            matches!(result, Err(SyncError::Cancelled)),
+            "expected Cancelled, got {result:?}"
+        );
+        assert!(
+            store.lock().unwrap().get(MANIFEST_KEY).is_none(),
+            "a cancelled pass must never write the manifest"
+        );
+    }
 
     #[test]
     fn blob_key_uses_the_correct_plural_for_every_entity_type() {
@@ -1116,7 +1199,7 @@ use super::*;
 
         let progress_log = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let log_for_callback = progress_log.clone();
-        let outcome = run_sync(&device, &client, data_dir.path(), Utc::now(), move |p: SyncProgress| {
+        let outcome = run_sync(&device, &client, data_dir.path(), Utc::now(), &no_cancel(), move |p: SyncProgress| {
             log_for_callback.lock().unwrap().push(p);
         })
         .await
@@ -1166,13 +1249,13 @@ use super::*;
         )
         .unwrap();
 
-        let outcome_a = run_sync(&device_a, &client, data_dir.path(), Utc::now(), |_| {})
+        let outcome_a = run_sync(&device_a, &client, data_dir.path(), Utc::now(), &no_cancel(), |_| {})
             .await
             .expect("device A syncs cleanly against an empty bucket");
         assert_eq!(outcome_a.pushed, 1);
 
         let device_b = migrated_conn();
-        let outcome_b = run_sync(&device_b, &client, data_dir.path(), Utc::now(), |_| {})
+        let outcome_b = run_sync(&device_b, &client, data_dir.path(), Utc::now(), &no_cancel(), |_| {})
             .await
             .expect("device B syncs cleanly");
         assert_eq!(outcome_b.pulled, 1);
@@ -1201,24 +1284,24 @@ use super::*;
             &[],
         )
         .unwrap();
-        run_sync(&device_a, &client, data_dir.path(), Utc::now(), |_| {})
+        run_sync(&device_a, &client, data_dir.path(), Utc::now(), &no_cancel(), |_| {})
             .await
             .unwrap();
 
         let device_b = migrated_conn();
-        run_sync(&device_b, &client, data_dir.path(), Utc::now(), |_| {})
+        run_sync(&device_b, &client, data_dir.path(), Utc::now(), &no_cancel(), |_| {})
             .await
             .unwrap();
         assert!(sync_rows::get_article_for_sync(&device_b, "art-1").unwrap().is_some());
 
         // Device A deletes it and pushes the tombstone.
         crate::db::queries::delete_article(&device_a, "art-1").unwrap();
-        run_sync(&device_a, &client, data_dir.path(), Utc::now(), |_| {})
+        run_sync(&device_a, &client, data_dir.path(), Utc::now(), &no_cancel(), |_| {})
             .await
             .unwrap();
 
         // Device B syncs again and must remove its own copy.
-        let outcome = run_sync(&device_b, &client, data_dir.path(), Utc::now(), |_| {})
+        let outcome = run_sync(&device_b, &client, data_dir.path(), Utc::now(), &no_cancel(), |_| {})
             .await
             .unwrap();
         assert_eq!(outcome.tombstones_applied, 1);
@@ -1227,7 +1310,7 @@ use super::*;
         // And device B must never resurrect it even if it tries to push
         // a local copy again (it can't, since delete_article removed the
         // row — this asserts there is nothing left to push).
-        let outcome2 = run_sync(&device_b, &client, data_dir.path(), Utc::now(), |_| {})
+        let outcome2 = run_sync(&device_b, &client, data_dir.path(), Utc::now(), &no_cancel(), |_| {})
             .await
             .unwrap();
         assert_eq!(outcome2.pushed, 0);
@@ -1277,12 +1360,12 @@ use super::*;
 
         // A pushes first, B pulls A's copy (creating the collision
         // locally), resolves it, and pushes the resolution.
-        run_sync(&device_a, &client, data_dir.path(), Utc::now(), |_| {}).await.unwrap();
-        run_sync(&device_b, &client, data_dir.path(), Utc::now(), |_| {}).await.unwrap();
+        run_sync(&device_a, &client, data_dir.path(), Utc::now(), &no_cancel(), |_| {}).await.unwrap();
+        run_sync(&device_b, &client, data_dir.path(), Utc::now(), &no_cancel(), |_| {}).await.unwrap();
         // A syncs again to pick up B's resolution.
-        run_sync(&device_a, &client, data_dir.path(), Utc::now(), |_| {}).await.unwrap();
+        run_sync(&device_a, &client, data_dir.path(), Utc::now(), &no_cancel(), |_| {}).await.unwrap();
         // B syncs once more so both fully converge on the same tombstone view.
-        run_sync(&device_b, &client, data_dir.path(), Utc::now(), |_| {}).await.unwrap();
+        run_sync(&device_b, &client, data_dir.path(), Utc::now(), &no_cancel(), |_| {}).await.unwrap();
 
         let a_rows = sync_rows::list_articles_for_sync(&device_a).unwrap();
         let b_rows = sync_rows::list_articles_for_sync(&device_b).unwrap();

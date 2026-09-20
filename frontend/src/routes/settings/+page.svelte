@@ -583,16 +583,24 @@
 			<div class="card-divider"></div>
 
 			<div class="row">
-				<button class="btn btn-secondary" onclick={() => (syncDialogOpen = true)}>
+				<button
+					class="btn btn-secondary"
+					onclick={() => (syncDialogOpen = true)}
+					disabled={remoteSyncStore.busy}
+				>
 					Edit configuration
 				</button>
-				<button
-					class="btn btn-primary"
-					onclick={syncNow}
-					disabled={remoteSyncStore.busy || !remoteSyncStore.config.enabled}
-				>
-					{remoteSyncStore.busy ? 'Syncing…' : 'Sync now'}
-				</button>
+				{#if remoteSyncStore.busy}
+					<button class="btn btn-danger" onclick={() => remoteSyncStore.cancel()}>Cancel</button>
+				{:else}
+					<button
+						class="btn btn-primary"
+						onclick={syncNow}
+						disabled={!remoteSyncStore.config.enabled}
+					>
+						Sync now
+					</button>
+				{/if}
 			</div>
 		{/if}
 	</section>

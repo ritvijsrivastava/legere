@@ -522,6 +522,7 @@ mod tests {
             last_foreground_sync: std::sync::Mutex::new(None),
             import_cancel: Mutex::new(None),
             article_import_cancel: Mutex::new(None),
+            remote_sync_cancel: Mutex::new(None),
             capture_jobs: Default::default(),
             pending_update: Default::default(),
             pending_linux_update: Default::default(),

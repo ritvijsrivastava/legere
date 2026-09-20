@@ -185,6 +185,7 @@ mod tests {
             last_foreground_sync: std::sync::Mutex::new(None),
             import_cancel: TokioMutex::new(None),
             article_import_cancel: TokioMutex::new(None),
+            remote_sync_cancel: TokioMutex::new(None),
             capture_jobs: Default::default(),
             pending_update: Default::default(),
             pending_linux_update: Default::default(),

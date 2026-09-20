@@ -9,7 +9,7 @@ use tauri::{AppHandle, State};
 use crate::db::sync_config::{self, RemoteSyncConfig, RemoteSyncStatus};
 use crate::error::AppError;
 use crate::remote_sync::engine::{self, SyncOutcome};
-use crate::remote_sync::orchestrate::{run_remote_sync_once, spawn_remote_sync_autosync};
+use crate::remote_sync::orchestrate::{cancel_running_sync, run_remote_sync_once, spawn_remote_sync_autosync};
 use crate::state::AppState;
 
 const REMOTE_SYNC_INTERVAL: Duration = Duration::from_secs(60 * 60);
@@ -91,11 +91,26 @@ pub async fn save_remote_sync_config(
         if handle_guard.is_none() {
             *handle_guard = Some(spawn_remote_sync_autosync(app, REMOTE_SYNC_INTERVAL));
         }
-    } else if let Some(handle) = handle_guard.take() {
-        handle.abort();
+    } else {
+        if let Some(handle) = handle_guard.take() {
+            handle.abort();
+        }
+        // Turning sync off must not leave a pass silently finishing (or
+        // failing to write a manifest anyone can still see) in the
+        // background after the user thinks it's off.
+        cancel_running_sync(&state).await;
     }
 
     Ok(config)
+}
+
+/// Cancels whatever cross-device sync pass is currently running on this
+/// device, if any — a no-op otherwise. Backs the settings screen's
+/// "Cancel" action, shown only while a sync is in progress.
+#[tauri::command]
+pub async fn cancel_remote_sync(state: State<'_, AppState>) -> Result<(), AppError> {
+    cancel_running_sync(&state).await;
+    Ok(())
 }
 
 /// The manual "Sync now" button. `Ok(None)` means sync isn't configured

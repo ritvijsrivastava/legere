@@ -126,4 +126,10 @@ export function registerBackendEvents() {
 		remoteSyncStore.refreshStatus();
 		uiStore.showToast(`Sync failed: ${event.payload}`);
 	});
+
+	listen('remote-sync:cancelled', () => {
+		remoteSyncStore.busy = false;
+		remoteSyncStore.progress = null;
+		uiStore.showToast('Sync cancelled');
+	});
 }

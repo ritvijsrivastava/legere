@@ -316,6 +316,12 @@ export function remoteSyncNow(): Promise<RemoteSyncOutcome | null> {
 	return invoke<RemoteSyncOutcome | null>('remote_sync_now');
 }
 
+/** Cancels whatever sync pass is currently running on this device, if
+ *  any — a no-op otherwise. */
+export function cancelRemoteSync(): Promise<void> {
+	return invoke<void>('cancel_remote_sync');
+}
+
 let dataDirPromise: Promise<string> | null = null;
 
 function getDataDir(): Promise<string> {
