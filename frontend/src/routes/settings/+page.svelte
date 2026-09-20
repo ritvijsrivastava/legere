@@ -10,7 +10,9 @@
 	import Globe from '$lib/icons/Globe.svelte';
 	import FileText from '$lib/icons/FileText.svelte';
 	import ExportResultCard from '$lib/components/ExportResultCard.svelte';
-	import type { AppTheme, ExportResult, LibraryView, ReaderMeasure } from '$lib/types';
+	import RemoteSyncDialog from '$lib/components/RemoteSyncDialog.svelte';
+	import { remoteSyncStore } from '$lib/stores/remoteSync.svelte';
+	import type { AppTheme, ExportResult, LibraryView, ReaderMeasure, RemoteSyncConfig } from '$lib/types';
 	import { isTauri } from '$lib/platform';
 	import { errorMessage } from '$lib/api';
 	import * as api from '$lib/api';
@@ -83,7 +85,36 @@
 		shouldShowLinuxUpdateWarning().then((show) => (showLinuxWarning = show));
 		handleCheck();
 		loadChangelog();
+		remoteSyncStore.refresh();
 	});
+
+	let syncDialogOpen = $state(false);
+
+	function formatLastSynced(iso: string | null): string {
+		if (!iso) return 'Never';
+		return new Date(iso).toLocaleString();
+	}
+
+	async function toggleRemoteSync(enabled: boolean) {
+		if (!remoteSyncStore.config) return;
+		try {
+			await remoteSyncStore.save({ ...remoteSyncStore.config, enabled });
+		} catch (e) {
+			uiStore.showToast(errorMessage(e));
+		}
+	}
+
+	function syncNow() {
+		// Errors surface via the global `remote-sync:error` toast (see
+		// `lib/events.ts`) - catching here only prevents an unhandled
+		// promise rejection, not a second toast.
+		remoteSyncStore.syncNow().catch(() => {});
+	}
+
+	function onRemoteSyncSaved(config: RemoteSyncConfig) {
+		remoteSyncStore.config = config;
+		syncDialogOpen = false;
+	}
 
 	async function loadChangelog() {
 		changelogState = 'loading';
@@ -466,6 +497,78 @@
 		{/if}
 	</section>
 
+	<!-- Cross-device sync: a separate system from RSS autosync/export/
+	     import above — opt-in, bring-your-own S3-compatible bucket. See
+	     ARCHITECTURE.md's Sync section. -->
+	<section class="settings-card zone-start">
+		<h2 class="group-title">Cross-device sync</h2>
+
+		{#if !tauri}
+			<p class="text-muted section-desc">Not available in the web build.</p>
+		{:else if !remoteSyncStore.loaded}
+			<p class="text-muted section-desc">Loading…</p>
+		{:else if !remoteSyncStore.config}
+			<p class="text-muted section-desc">
+				Sync your library across devices you set up yourself, using your own S3-compatible
+				storage (Cloudflare R2, AWS S3, Backblaze B2, Minio, ...). Legere never runs a server or
+				sees your credentials.
+			</p>
+			<button class="btn btn-primary" onclick={() => (syncDialogOpen = true)}>Set up sync</button>
+		{:else}
+			<div class="row">
+				<div class="row-copy">
+					<span class="row-label">Sync</span>
+					<p class="row-sublabel text-muted">{remoteSyncStore.config.bucket_name}</p>
+				</div>
+				<div class="seg seg-compact">
+					<label class="seg-opt">
+						<input
+							type="radio"
+							name="remote-sync-enabled"
+							checked={remoteSyncStore.config.enabled}
+							onchange={() => toggleRemoteSync(true)}
+						/>
+						<span>On</span>
+					</label>
+					<label class="seg-opt">
+						<input
+							type="radio"
+							name="remote-sync-enabled"
+							checked={!remoteSyncStore.config.enabled}
+							onchange={() => toggleRemoteSync(false)}
+						/>
+						<span>Off</span>
+					</label>
+				</div>
+			</div>
+
+			<div class="row">
+				<span class="row-label">Last synced</span>
+				<span class="version-value text-muted">
+					{formatLastSynced(remoteSyncStore.status.last_synced_at)}
+				</span>
+			</div>
+			{#if remoteSyncStore.status.last_error}
+				<p class="error-text">{remoteSyncStore.status.last_error}</p>
+			{/if}
+
+			<div class="card-divider"></div>
+
+			<div class="row">
+				<button class="btn btn-secondary" onclick={() => (syncDialogOpen = true)}>
+					Edit configuration
+				</button>
+				<button
+					class="btn btn-primary"
+					onclick={syncNow}
+					disabled={remoteSyncStore.busy || !remoteSyncStore.config.enabled}
+				>
+					{remoteSyncStore.busy ? 'Syncing…' : 'Sync now'}
+				</button>
+			</div>
+		{/if}
+	</section>
+
 	<!-- App -->
 	<section class="settings-card zone-start">
 		<h2 class="group-title">About &amp; Updates</h2>
@@ -599,6 +702,13 @@
 		<p class="text-muted version">Legere — offline article reader.</p>
 	</div>
 </div>
+
+<RemoteSyncDialog
+	open={syncDialogOpen}
+	initial={remoteSyncStore.config}
+	onclose={() => (syncDialogOpen = false)}
+	onSaved={onRemoteSyncSaved}
+/>
 
 <style>
 	.settings-page {
