@@ -5,7 +5,8 @@ import { uiStore } from './stores/ui.svelte';
 import { importStore } from './stores/import.svelte';
 import { articleImportStore } from './stores/articleImport.svelte';
 import { captureJobsStore } from './stores/captureJobs.svelte';
-import type { CaptureSucceeded, ImportFinished, ImportProgress } from './types';
+import { remoteSyncStore } from './stores/remoteSync.svelte';
+import type { CaptureSucceeded, ImportFinished, ImportProgress, RemoteSyncOutcome } from './types';
 
 interface SyncFinishedPayload {
 	new_article_count: number;
@@ -94,5 +95,22 @@ export function registerBackendEvents() {
 				? `Following “${event.payload.title}”`
 				: `Added “${event.payload.title}”`
 		);
+	});
+
+	// Cross-device sync's own events, a separate namespace from `sync:*`
+	// above - see `commands::remote_sync`'s doc comment for why.
+	listen('remote-sync:started', () => {
+		remoteSyncStore.busy = true;
+	});
+
+	listen<RemoteSyncOutcome>('remote-sync:finished', () => {
+		remoteSyncStore.busy = false;
+		remoteSyncStore.refreshStatus();
+	});
+
+	listen<string>('remote-sync:error', (event) => {
+		remoteSyncStore.busy = false;
+		remoteSyncStore.refreshStatus();
+		uiStore.showToast(`Sync failed: ${event.payload}`);
 	});
 }
