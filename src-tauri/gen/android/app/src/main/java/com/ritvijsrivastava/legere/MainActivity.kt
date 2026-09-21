@@ -17,6 +17,9 @@ class MainActivity : TauriActivity() {
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
     initTls()
+    // See RemoteSyncWorker.schedulePeriodic's doc comment for why this
+    // runs unconditionally rather than only when sync is enabled.
+    RemoteSyncWorker.schedulePeriodic(applicationContext)
   }
 
   // Every <input>/<textarea> in the WebView is backed by a real Android

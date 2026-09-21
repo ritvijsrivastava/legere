@@ -9,4 +9,13 @@
     <string name="share_no_link_found">"No link found in shared content"</string>
     <string name="share_saved_title">"Saved to Legere"</string>
     <string name="share_failed_title">"Couldn\u2019t save article"</string>
+
+    <!-- Cross-device sync notification (RemoteSyncWorker) -->
+    <string name="remote_sync_notification_channel_name">"Cross-device sync"</string>
+    <string name="remote_sync_notification_channel_description">"Progress syncing your library across your devices"</string>
+    <string name="remote_sync_running_title">"Syncing\u2026"</string>
+    <string name="remote_sync_finished_title">"Sync complete"</string>
+    <string name="remote_sync_finished_text">"%1$d pulled, %2$d pushed"</string>
+    <string name="remote_sync_failed_title">"Sync failed"</string>
+    <string name="remote_sync_unknown_error">"Unknown error"</string>
 </resources>

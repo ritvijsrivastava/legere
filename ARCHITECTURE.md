@@ -485,6 +485,32 @@ since `rusqlite::Connection` isn't `Sync` and a future holding `&Connection`
 across an `.await` therefore isn't `Send` — `block_on` only requires the
 *closure* to be `Send`, not the future it drives.
 
+**Android background execution:** the hourly in-process loop above only
+ever actually ticks while the app happens to be in the foreground —
+Android suspends/kills the process otherwise, same limitation
+`RSS autosync and lifecycle` above already has. `RemoteSyncWorker.kt`
+(`gen/android`, see README's "manual patches" list) is what makes sync
+actually run on a schedule on Android: a `WorkManager` `PeriodicWorkRequest`
+enqueued once from `MainActivity.onCreate`, calling
+`NativeSync.runRemoteSyncOnce` →
+`Java_com_ritvijsrivastava_legere_NativeSync_runRemoteSyncOnce`
+(`remote_sync_intent.rs`) on its own background thread. That JNI entrypoint
+mirrors `share_intent.rs`'s exact running-app-or-standalone-fallback shape:
+routes through this process's real `AppState` if one exists (reusing its
+single-sync-at-a-time guard), or builds a throwaway pool/client/runtime
+otherwise — WorkManager can and does invoke this with no Tauri runtime
+alive in the process at all. The periodic job is scheduled unconditionally
+on every app launch regardless of whether sync is actually configured/
+enabled; `run_sync`'s own config check just no-ops each time it isn't,
+which is simpler than reaching from Rust back into WorkManager to
+schedule/cancel every time the setting changes, at the cost of an hourly
+no-op wakeup while sync is off. Posts one low-priority notification per
+run (`RemoteSyncWorker`'s own channel, separate from `ShareWorker`'s) with
+an indeterminate spinner while running — not a determinate percentage,
+since that would need a JNI callback from mid-`run_sync` back into Kotlin,
+which doesn't exist yet; `SyncProgress` is currently only wired to the
+desktop/frontend `remote-sync:progress` event.
+
 **Concurrency, cancellation, and cleanup:** blob uploads/downloads within
 a phase run up to 8 at a time (`SYNC_CONCURRENCY`, `engine::push_concurrently`/
 `pull_concurrently`, both `tokio::task::JoinSet`-based) rather than one at

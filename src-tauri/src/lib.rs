@@ -11,6 +11,8 @@ mod mobile_tls;
 mod models;
 mod remote_sync;
 #[cfg(target_os = "android")]
+mod remote_sync_intent;
+#[cfg(target_os = "android")]
 mod share_intent;
 mod sources;
 mod state;

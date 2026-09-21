@@ -114,7 +114,7 @@ Install/launch with `adb install -r <apk>` and
 
 Legere's `frontend/` is a sibling of `src-tauri/`, not its parent, which
 breaks a few of Tauri's default Android-project assumptions. The generated
-`gen/android` tree (committed to this repo) has four manual fixes on top of
+`gen/android` tree (committed to this repo) has five manual fixes on top of
 what `tauri android init` produces:
 
 1. **Root `package.json`** — a minimal delegating package so Gradle's
@@ -137,8 +137,15 @@ what `tauri android init` produces:
    `res/values/strings.xml`, and the `androidx.work:work-runtime-ktx`
    dependency in `app/build.gradle.kts`. See ARCHITECTURE.md's "Share
    intent (Android)" section.
+5. **The cross-device sync background worker** — `NativeSync.kt`,
+   `RemoteSyncWorker.kt` (same hand-written shape as the share-intent
+   files above, reusing the same `androidx.work` dependency and
+   notification permissions), the `RemoteSyncWorker.schedulePeriodic`
+   call in `MainActivity.onCreate`, and the `remote_sync_*` strings in
+   `res/values/strings.xml`. See ARCHITECTURE.md's "Cross-device sync"
+   section.
 
-If `gen/android` is ever regenerated from scratch, reapply these four before
+If `gen/android` is ever regenerated from scratch, reapply these five before
 building. (A release build additionally needs the `signingConfigs.release`
 block described in [docs/RELEASING.md](docs/RELEASING.md).)
 
