@@ -372,11 +372,21 @@ contends on and has to stay cheap to re-diff and rewrite. Heavy content
 lives in per-entity blobs, fetched only when a device's diff says it needs
 them.
 
-**Scope cut, not yet done:** inline images under `content/<id>/` and hero
-thumbnails aren't synced yet — only metadata and `content_html`. A pulled
-article renders with broken images until image blob sync lands as a
-follow-up. This is called out in `remote_sync::engine`'s own module doc
-comment; don't let it go unnoticed as "sync is done."
+**Images:** synced too, on an eager-push/lazy-pull split rather than
+eagerly both ways. Pushing an article for the first time
+(`engine::push_articles`'s `is_new` check) uploads its hero thumbnail
+and every file under `content/<id>/` alongside its metadata; a later
+metadata-only push (a tag edit, a favorite toggle) never re-uploads them,
+since an existing id's images are immutable (the one thing that changes
+an article's images, re-capture, always produces a brand-new id).
+Pulling devices don't download images as part of a regular sync pass,
+though: `remote_sync::lazy_images::pull_article_images` fetches them the
+first time an article is actually opened for reading
+(`commands::articles::open_for_reading`), awaited before the reader
+renders, so the first open of a newly-pulled article pays a one-time
+network cost instead of every device eagerly downloading every article's
+images regardless of whether it's ever opened there. A no-op if
+`content/<id>/` already exists locally, however it got there.
 
 **The algorithm** (`remote_sync::engine::run_sync`), one pass:
 

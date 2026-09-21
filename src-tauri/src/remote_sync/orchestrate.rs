@@ -181,6 +181,51 @@ async fn run_once_inner(
     .map_err(|join_err| RunOnceError::Sync(engine::SyncError::TaskJoin(join_err.to_string())))?
 }
 
+/// Fetches `id`'s images from the bucket if (and only if) sync is
+/// configured/enabled on this device and the article doesn't already
+/// have them locally — see `lazy_images::pull_article_images`'s doc
+/// comment for the full "why lazy" rationale. Called from
+/// `commands::articles::open_for_reading`; deliberately infallible
+/// (logs and swallows every error) since a sync/network hiccup must
+/// never block opening an article that's otherwise perfectly readable.
+pub async fn ensure_article_images_synced(state: &AppState, id: &str) {
+    let pool = state.pool.clone();
+    let config = {
+        let Ok(conn) = pool.get() else { return };
+        sync_config::get_remote_sync_config(&conn).ok().flatten()
+    };
+    let Some(config) = config else {
+        return;
+    };
+    if !config.enabled {
+        return;
+    }
+
+    let hero_image_path = {
+        let Ok(conn) = pool.get() else { return };
+        match crate::db::sync_rows::get_article_for_sync(&conn, id) {
+            Ok(Some(row)) => row.hero_image_path,
+            _ => return,
+        }
+    };
+
+    let client = match engine::client_from_config(&config) {
+        Ok(client) => client,
+        Err(err) => {
+            tracing::warn!(%err, "could not build sync client for lazy image fetch");
+            return;
+        }
+    };
+
+    crate::remote_sync::lazy_images::pull_article_images(
+        &client,
+        &state.data_dir,
+        id,
+        hero_image_path.as_deref(),
+    )
+    .await;
+}
+
 /// Spawns the foreground hourly cross-device sync loop, mirroring
 /// `sync::spawn_autosync`'s shape (immediate run, then every `interval`).
 /// A disabled/unconfigured device just no-ops every tick via

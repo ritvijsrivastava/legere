@@ -199,6 +199,14 @@ pub async fn open_for_reading(
     })
     .await??;
 
+    // Best-effort, infallible: fetches this article's images from the
+    // bucket if it was pulled via cross-device sync and doesn't have them
+    // yet. Awaited (not fire-and-forget) so the reader renders with its
+    // images already in place rather than a flash of broken ones on an
+    // article's very first open — see `lazy_images`'s doc comment for why
+    // this is lazy at all rather than eager like metadata.
+    crate::remote_sync::orchestrate::ensure_article_images_synced(&state, &id).await;
+
     events::emit_articles_changed(&app);
 
     Ok(detail)

@@ -5,15 +5,16 @@
 //! — see ARCHITECTURE.md's Sync section for the full design this
 //! implements.
 //!
-//! Scope note: this pulls/pushes article *metadata* (title, link,
-//! `content_html`, tags, reading state, ...) and categories/sources in
-//! full. It does **not** yet transfer the inline images under
-//! `content/<id>/` or the hero thumbnail file — those still need to
-//! exist locally before a captured article's readable view renders
-//! correctly. Image blob sync is a follow-up milestone; until it lands,
-//! a pulled article will show broken inline images on the pulling
-//! device. Metadata/content sync (including tags, reading progress, and
-//! deletion) is fully functional today.
+//! Article images sync too: pushing an article for the *first* time
+//! (see `push_articles`'s `is_new` check) eagerly uploads its hero
+//! thumbnail and every file under `content/<id>/` alongside its
+//! metadata, since a re-capture (the one thing that ever changes an
+//! article's images) always produces a brand-new id — an existing id's
+//! images are immutable, so there's nothing to re-upload on a later
+//! metadata-only push (a tag edit, a favorite toggle, ...). Pulling
+//! devices don't download images as part of a regular sync pass, though
+//! — see `remote_sync::lazy_images` for why that's fetched lazily, on
+//! first open, instead.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -235,7 +236,7 @@ async fn try_sync_once(
     let mut pushed = 0;
     pushed += push_sources(conn, client, &mut manifest, cancel, on_progress).await?;
     pushed += push_categories(conn, client, &mut manifest, cancel, on_progress).await?;
-    pushed += push_articles(conn, client, &mut manifest, cancel, on_progress).await?;
+    pushed += push_articles(conn, client, &mut manifest, data_dir, cancel, on_progress).await?;
 
     merge_local_tombstones_into_manifest(conn, &mut manifest)?;
 
@@ -690,7 +691,7 @@ async fn push_concurrently<T, F, Fut>(
 ) -> Result<Vec<ManifestEntry>, SyncError>
 where
     T: Send + 'static,
-    F: Fn(S3Client, T) -> Fut + Copy + Send + 'static,
+    F: Fn(S3Client, T) -> Fut,
     Fut: std::future::Future<Output = Result<ManifestEntry, S3Error>> + Send + 'static,
 {
     let total = to_push.len();
@@ -800,10 +801,82 @@ async fn push_categories(
     Ok(pushed)
 }
 
+/// Uploads an article's images — its hero thumbnail (if any) and every
+/// file under `content/<id>/` — to the bucket. Only ever called for an
+/// article this device is pushing for the *first* time (see
+/// `push_articles`'s `is_new` check): a given id's images are immutable
+/// after capture (the one path that changes an article's content,
+/// re-capture, produces a brand-new id — see ARCHITECTURE.md's capture
+/// pipeline), so re-uploading them on every later metadata-only push
+/// (a tag edit, a favorite toggle, ...) would be pure waste. A missing
+/// local file (already evicted, or this row has no images at all) is
+/// skipped, not an error.
+async fn upload_article_images(
+    client: &S3Client,
+    data_dir: &Path,
+    id: &str,
+    hero_image_path: Option<&str>,
+) -> Result<(), S3Error> {
+    if let Some(hero) = hero_image_path
+        && let Ok(bytes) = tokio::fs::read(data_dir.join(hero)).await
+    {
+        client
+            .put_object(&format!("legere-sync/blobs/articles/{id}/hero.jpg"), bytes)
+            .await?;
+    }
+
+    let content_dir = data_dir.join("content").join(id);
+    for file in collect_files_recursively(&content_dir).await {
+        let Ok(relative) = file.strip_prefix(&content_dir) else {
+            continue;
+        };
+        let Some(relative_str) = relative.to_str() else {
+            continue;
+        };
+        let Ok(bytes) = tokio::fs::read(&file).await else {
+            continue;
+        };
+        client
+            .put_object(
+                &format!("legere-sync/blobs/articles/{id}/images/{relative_str}"),
+                bytes,
+            )
+            .await?;
+    }
+
+    Ok(())
+}
+
+/// Every regular file under `dir`, recursively — `content/<id>/` can
+/// nest arbitrarily deep (mirroring the source page's own URL path, see
+/// `urlx`'s path mapping). Returns an empty list rather than an error for
+/// a directory that doesn't exist (an article with no images at all).
+async fn collect_files_recursively(dir: &Path) -> Vec<std::path::PathBuf> {
+    let mut files = Vec::new();
+    let mut pending = vec![dir.to_path_buf()];
+    while let Some(current) = pending.pop() {
+        let Ok(mut entries) = tokio::fs::read_dir(&current).await else {
+            continue;
+        };
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let Ok(file_type) = entry.file_type().await else {
+                continue;
+            };
+            if file_type.is_dir() {
+                pending.push(entry.path());
+            } else if file_type.is_file() {
+                files.push(entry.path());
+            }
+        }
+    }
+    files
+}
+
 async fn push_articles(
     conn: &Connection,
     client: &S3Client,
     manifest: &mut Manifest,
+    data_dir: &Path,
     cancel: &Arc<AtomicBool>,
     on_progress: &mut dyn FnMut(SyncProgress),
 ) -> Result<usize, SyncError> {
@@ -813,24 +886,43 @@ async fn push_articles(
         .filter(|e| e.entity_type == EntityType::Article)
         .map(|e| (e.id.clone(), e.updated_at.clone()))
         .collect();
-    let to_push: Vec<SyncArticleRow> = sync_rows::list_articles_for_sync(conn)?
+    let to_push: Vec<(SyncArticleRow, bool)> = sync_rows::list_articles_for_sync(conn)?
         .into_iter()
         .filter(|row| needs_push(&row.updated_at, existing.get(&row.id).map(|s| s.as_str())))
+        .map(|row| {
+            let is_new = !existing.contains_key(&row.id);
+            (row, is_new)
+        })
         .collect();
 
-    let new_entries = push_concurrently(client, to_push, SyncPhase::PushArticles, cancel, on_progress, |client, row| async move {
-        let bytes = gz_json(&row);
-        let hash = content_hash(&bytes);
-        client.put_object(&blob_key(EntityType::Article, &row.id), bytes).await?;
-        Ok(ManifestEntry {
-            id: row.id.clone(),
-            entity_type: EntityType::Article,
-            conflict_key: row.link.clone(),
-            updated_at: row.updated_at.clone(),
-            created_at: row.fetched_at.clone(),
-            content_hash: hash,
-        })
-    })
+    let data_dir = data_dir.to_path_buf();
+    let new_entries = push_concurrently(
+        client,
+        to_push,
+        SyncPhase::PushArticles,
+        cancel,
+        on_progress,
+        move |client, (row, is_new)| {
+            let data_dir = data_dir.clone();
+            async move {
+                if is_new {
+                    upload_article_images(&client, &data_dir, &row.id, row.hero_image_path.as_deref())
+                        .await?;
+                }
+                let bytes = gz_json(&row);
+                let hash = content_hash(&bytes);
+                client.put_object(&blob_key(EntityType::Article, &row.id), bytes).await?;
+                Ok(ManifestEntry {
+                    id: row.id.clone(),
+                    entity_type: EntityType::Article,
+                    conflict_key: row.link.clone(),
+                    updated_at: row.updated_at.clone(),
+                    created_at: row.fetched_at.clone(),
+                    content_hash: hash,
+                })
+            }
+        },
+    )
     .await?;
 
     let pushed = new_entries.len();
@@ -1019,6 +1111,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn images_upload_once_for_a_new_article_and_never_again_on_metadata_only_pushes() {
+        let (base_url, store) = spawn_mock_s3().await;
+        let client = test_client(&base_url);
+        let data_dir = tempfile::tempdir().unwrap();
+
+        let device = migrated_conn();
+        std::fs::create_dir_all(data_dir.path().join("content/art-1/sub")).unwrap();
+        std::fs::write(data_dir.path().join("content/art-1/sub/image.jpg"), b"fake image").unwrap();
+        std::fs::create_dir_all(data_dir.path().join("media")).unwrap();
+        std::fs::write(data_dir.path().join("media/art-1.jpg"), b"fake hero").unwrap();
+
+        let mut output = sample_output("https://example.com/a", "Hello");
+        output.hero_image_path = Some("media/art-1.jpg".to_string());
+        crate::db::queries::insert_captured_article(&device, "art-1", None, "direct", &output, &[])
+            .unwrap();
+
+        run_sync(&device, &client, data_dir.path(), Utc::now(), &no_cancel(), |_| {})
+            .await
+            .unwrap();
+
+        let hero_key = "legere-sync/blobs/articles/art-1/hero.jpg";
+        let image_key = "legere-sync/blobs/articles/art-1/images/sub/image.jpg";
+        let meta_key = "legere-sync/blobs/articles/art-1/meta.json.gz";
+        {
+            let guard = store.lock().unwrap();
+            assert_eq!(guard.get(hero_key).unwrap().2, 1, "hero must upload once");
+            assert_eq!(guard.get(image_key).unwrap().2, 1, "content image must upload once");
+            assert_eq!(guard.get(meta_key).unwrap().2, 1);
+        }
+
+        // A metadata-only change (no re-capture, no new id) must push the
+        // metadata blob again but never touch the already-uploaded images.
+        device
+            .execute(
+                "UPDATE articles SET favorited = 1, updated_at = '2030-01-01T00:00:00Z' WHERE id = 'art-1'",
+                [],
+            )
+            .unwrap();
+        run_sync(&device, &client, data_dir.path(), Utc::now(), &no_cancel(), |_| {})
+            .await
+            .unwrap();
+
+        let guard = store.lock().unwrap();
+        assert_eq!(guard.get(hero_key).unwrap().2, 1, "hero must not be re-uploaded");
+        assert_eq!(guard.get(image_key).unwrap().2, 1, "content image must not be re-uploaded");
+        assert_eq!(guard.get(meta_key).unwrap().2, 2, "metadata must still be pushed again");
+    }
+
+    #[tokio::test]
     async fn cancelling_mid_push_stops_the_pass_and_writes_no_manifest() {
         let (base_url, store) = spawn_mock_s3().await;
         let client = test_client(&base_url);
@@ -1080,7 +1221,11 @@ mod tests {
         );
     }
 
-    type Store = Arc<Mutex<HashMap<String, (Vec<u8>, String)>>>;
+    /// `(bytes, etag, put_count)` — `put_count` (times this exact key has
+    /// ever been PUT) backs tests that assert something was uploaded
+    /// exactly once, e.g. that an already-pushed article's images are
+    /// never re-uploaded on a later metadata-only push.
+    type Store = Arc<Mutex<HashMap<String, (Vec<u8>, String, usize)>>>;
 
     /// A minimal S3-compatible mock: enough `GET`/`PUT` (with
     /// `If-Match`/`If-None-Match` conditional handling)/`DELETE` on
@@ -1097,7 +1242,7 @@ mod tests {
             AxumPath((_bucket, key)): AxumPath<(String, String)>,
         ) -> impl axum::response::IntoResponse {
             match store.lock().unwrap().get(&key) {
-                Some((bytes, etag)) => {
+                Some((bytes, etag, _put_count)) => {
                     (StatusCode::OK, [("etag", etag.clone())], bytes.clone()).into_response()
                 }
                 None => StatusCode::NOT_FOUND.into_response(),
@@ -1111,7 +1256,9 @@ mod tests {
             body: Bytes,
         ) -> impl axum::response::IntoResponse {
             let mut guard = store.lock().unwrap();
-            let current_etag = guard.get(&key).map(|(_, etag)| etag.clone());
+            let existing = guard.get(&key);
+            let current_etag = existing.map(|(_, etag, _)| etag.clone());
+            let put_count = existing.map_or(0, |(_, _, count)| *count);
 
             if let Some(expected) = headers.get("if-match").and_then(|v| v.to_str().ok())
                 && current_etag.as_deref() != Some(expected)
@@ -1125,7 +1272,7 @@ mod tests {
             }
 
             let new_etag = format!("{:x}", md5_like_hash(&body));
-            guard.insert(key, (body.to_vec(), new_etag.clone()));
+            guard.insert(key, (body.to_vec(), new_etag.clone(), put_count + 1));
             (StatusCode::OK, [("etag", new_etag)]).into_response()
         }
 
