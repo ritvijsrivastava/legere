@@ -97,8 +97,8 @@ Every ingestion path funnels into `capture::capture_local(client, data_dir, id, 
    (SHA-256) before being written, so two *different* URLs that happen to
    resolve to identical bytes still only get stored once. Every fetched
    asset also passes through `capture::image_optimize::optimize_content_image`
-   before being handed to the rewrite/store steps — downscaled to 1600px
-   width if wider, and re-encoded as JPEG quality 80 (or PNG if it
+   before being handed to the rewrite/store steps — downscaled to 1200px
+   width if wider, and re-encoded as JPEG quality 70 (or PNG if it
    actually uses transparency; GIFs are flattened to their first frame
    and re-encoded the same way, not kept as animated) — unless doing so
    wouldn't actually shrink it, in which case the original bytes are kept
@@ -133,8 +133,13 @@ Every ingestion path funnels into `capture::capture_local(client, data_dir, id, 
    candidate has been dropped.
 6. **Store** (`capture::archive`) — assets are written to
    `content/<article_id>/<local_path>` (directory wiped first, so recapture
-   never leaves stale files); the hero image is a resized JPEG in `media/`,
-   reusing already-fetched bytes when the hero also appears in the content
+   never leaves stale files) — SVG assets are gzip-compressed before
+   writing (reusing `db::compression`'s generic byte-level primitives,
+   see Storage and schema below), since `image_optimize` can't re-encode
+   a format it can't decode as a raster image, but as XML text an SVG
+   compresses just as well as `content_html` does; `content_server`
+   decompresses it back out on serve. The hero image is a resized JPEG in
+   `media/`, reusing already-fetched bytes when the hero also appears in the content
    (now already downscaled/re-encoded by step 4 above, a bonus rather than
    the point of that step).
 
@@ -187,7 +192,10 @@ The handler:
   though `local_path_for` already prevents it, and handles symlinked data
   dirs like macOS `/var`);
 - serves bytes with an extension-guessed MIME type and
-  `Cache-Control: immutable` (content is write-once per capture).
+  `Cache-Control: immutable` (content is write-once per capture);
+- decompresses SVG assets (gzip-compressed at rest by `capture::archive`,
+  see below) before serving, falling back to the raw bytes on a decompress
+  failure so an SVG captured before this existed still serves correctly.
 
 ## Ingestion paths
 

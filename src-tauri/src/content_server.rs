@@ -16,6 +16,7 @@ use std::borrow::Cow;
 
 use tauri::http::{Response, StatusCode, header};
 
+use crate::db::compression::decompress_bytes;
 use crate::db::queries;
 use crate::state::AppState;
 
@@ -139,7 +140,20 @@ pub fn serve(state: &AppState, request_path: &str) -> Response<Cow<'static, [u8]
     }
 
     match std::fs::read(&canonical) {
-        Ok(bytes) => ok_response(bytes, guess_content_type(&entry_path)),
+        Ok(bytes) => {
+            let mimetype = guess_content_type(&entry_path);
+            // SVG assets are gzip-compressed at rest (see
+            // `capture::archive::write_content_files`). Falls back to the
+            // raw bytes on a decompress failure rather than erroring —
+            // an SVG captured before this compression existed is still a
+            // valid, already-plain file on disk.
+            let bytes = if mimetype == "image/svg+xml" {
+                decompress_bytes(&bytes).unwrap_or(bytes)
+            } else {
+                bytes
+            };
+            ok_response(bytes, mimetype)
+        }
         Err(_) => text_response(StatusCode::NOT_FOUND, "no such entry"),
     }
 }
@@ -285,5 +299,49 @@ mod tests {
 
         let resp = serve(&state, "/article-1");
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn serves_a_gzip_compressed_svg_decompressed_with_the_right_mimetype() {
+        let data_dir = tempfile::tempdir().expect("tempdir");
+        let state = build_state(data_dir.path());
+        insert_article(&state, "article-1");
+        let svg = b"<svg xmlns='http://www.w3.org/2000/svg'></svg>";
+        write_entry(
+            data_dir.path(),
+            "article-1",
+            "https/example.com/icon.svg",
+            &crate::db::compression::compress_bytes(svg),
+        );
+
+        let resp = serve(&state, "/article-1/https/example.com/icon.svg");
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get(header::CONTENT_TYPE).unwrap(),
+            "image/svg+xml"
+        );
+        assert_eq!(resp.body().as_ref(), svg);
+    }
+
+    #[test]
+    fn serves_a_pre_existing_plain_svg_unchanged_when_it_is_not_gzip_compressed() {
+        // An SVG captured before gzip-at-rest was introduced for this
+        // format is still a valid, already-plain file on disk — the
+        // decompress attempt must fall back to the raw bytes rather than
+        // erroring the whole request.
+        let data_dir = tempfile::tempdir().expect("tempdir");
+        let state = build_state(data_dir.path());
+        insert_article(&state, "article-1");
+        let svg = b"<svg xmlns='http://www.w3.org/2000/svg'></svg>";
+        write_entry(
+            data_dir.path(),
+            "article-1",
+            "https/example.com/icon.svg",
+            svg,
+        );
+
+        let resp = serve(&state, "/article-1/https/example.com/icon.svg");
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(resp.body().as_ref(), svg);
     }
 }
