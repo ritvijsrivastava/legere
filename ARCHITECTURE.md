@@ -572,10 +572,12 @@ which doesn't exist yet; `SyncProgress` is currently only wired to the
 desktop/frontend `remote-sync:progress` event.
 
 **Concurrency, cancellation, and cleanup:** blob uploads/downloads within
-a phase run up to 8 at a time (`SYNC_CONCURRENCY`, `engine::push_concurrently`/
+a phase run up to 24 at a time (`SYNC_CONCURRENCY`, `engine::push_concurrently`/
 `pull_concurrently`, both `tokio::task::JoinSet`-based) rather than one at
 a time — a first sync of a real library (1,600+ articles) made the cost
-of a fully sequential loop obvious immediately. Only one sync pass may
+of a fully sequential loop obvious immediately. (8 originally; raised to
+24 once image bundling above turned every concurrent slot into exactly
+one request instead of one request per image file.) Only one sync pass may
 run on a given device at a time (`AppState::remote_sync_cancel` doubles
 as both the cancellation flag and the "is one already running" guard,
 mirroring `import_cancel`'s existing shape); a scheduler tick racing a

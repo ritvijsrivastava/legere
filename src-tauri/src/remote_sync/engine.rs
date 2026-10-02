@@ -41,7 +41,18 @@ const MAX_CONFLICT_RETRIES: u32 = 5;
 /// sites being captured from, while sync only ever talks to the user's
 /// own bucket, so there's no politeness budget to spend carefully. Not
 /// user-configurable (yet) to keep the setup surface small.
-const SYNC_CONCURRENCY: usize = 8;
+///
+/// Bumped from the original 8 to 24 once bundling (`build_article_archive`)
+/// removed the one-request-per-image-file inner loop each concurrent slot
+/// used to run sequentially on its own — each slot is now exactly one
+/// request (one article's metadata, or one article's image archive), so
+/// the old value was leaving real concurrency on the table. 24 in flight
+/// holds at most ~24 articles' worth of bytes in memory at once (low
+/// single-digit MB for a typical article, per this library's own
+/// ~550KB/article average), and R2/S3/B2 all handle that level of
+/// concurrent traffic against one bucket without rate-limiting a single
+/// personal account.
+const SYNC_CONCURRENCY: usize = 24;
 
 #[derive(Debug)]
 pub enum SyncError {
