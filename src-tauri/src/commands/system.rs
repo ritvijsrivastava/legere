@@ -34,10 +34,10 @@ pub async fn read_text_file(path: String) -> Result<String, AppError> {
 
 /// Desktop only: the follow-up to the "an import is still running —
 /// quit anyway?" dialog (`app:quit-blocked-by-import`, raised from
-/// `RunEvent::ExitRequested` in `lib.rs`). Calling `AppHandle::exit`
-/// directly, rather than retrying the normal close path, is what actually
-/// bypasses that same `ExitRequested` handler — it would otherwise just
-/// block again on the very same still-running import.
+/// `WindowEvent::CloseRequested` in `lib.rs`). `AppHandle::exit` goes
+/// through `RunEvent::ExitRequested` instead — a separate event from the
+/// one that handler guards — so this doesn't loop back into the same
+/// dialog a second time.
 #[cfg(not(target_os = "android"))]
 #[tauri::command]
 pub fn force_quit(app: AppHandle) {

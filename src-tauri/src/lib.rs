@@ -317,22 +317,34 @@ pub fn run() {
             // running regardless of window focus.
             let _ = (&app_handle, &event);
 
-            // Desktop only: block an actual app exit (Cmd+Q, the Quit
-            // menu, or the last window closing) while a Raindrop or
-            // article CSV import is still running, same two guards
-            // `import_raindrop_csv`/`import_articles_csv` already use as
-            // their single-import-at-a-time lock. `try_lock` rather than
-            // `.lock().await` because this closure is sync and runs on
-            // the event loop's own thread — either guard is only ever
-            // held briefly to read/write the `Option`, never across an
-            // await, so a failed `try_lock` here would just mean asking
-            // again next time rather than a real race. Does *not* fire on
-            // a plain window-close that doesn't exit the app (there is no
-            // system tray/background mode here, so today a window close
-            // and an app exit are the same event anyway) — the import
-            // keeps running either way until this actually fires.
+            // Desktop only: block the window's close button (and
+            // anything else that routes through `WindowEvent::
+            // CloseRequested` — Alt+F4, the taskbar/dock close action)
+            // while a Raindrop or article CSV import is still running,
+            // same two guards `import_raindrop_csv`/`import_articles_csv`
+            // already use as their single-import-at-a-time lock.
+            // Deliberately hooking `CloseRequested`, not `RunEvent::
+            // ExitRequested`: the latter only fires *after* the window is
+            // already destroyed, by which point there's no webview left
+            // to render a confirmation dialog in — `prevent_exit()`
+            // there would just strand a headless process running with no
+            // visible window at all, never asking anything. `CloseRequested`
+            // fires first, while the window (and its webview) is still
+            // alive, so `prevent_close()` actually keeps a visible window
+            // around for `QuitBlockedDialog` to render in. `force_quit`'s
+            // `app.exit()` goes through `ExitRequested` instead, so it
+            // isn't caught by this same guard a second time. `try_lock`
+            // rather than `.lock().await` because this closure is sync
+            // and runs on the event loop's own thread — either guard is
+            // only ever held briefly to read/write the `Option`, never
+            // across an await, so a failed `try_lock` here would just
+            // mean asking again next time rather than a real race.
             #[cfg(not(any(target_os = "android", test)))]
-            if let tauri::RunEvent::ExitRequested { api, .. } = &event {
+            if let tauri::RunEvent::WindowEvent {
+                event: tauri::WindowEvent::CloseRequested { api, .. },
+                ..
+            } = &event
+            {
                 let state = app_handle.state::<AppState>();
                 let blocking_kind = state
                     .import_cancel
@@ -349,7 +361,7 @@ pub fn run() {
                             .map(|_| "article_csv")
                     });
                 if let Some(kind) = blocking_kind {
-                    api.prevent_exit();
+                    api.prevent_close();
                     events::emit_quit_blocked_by_import(app_handle, kind);
                 }
             }

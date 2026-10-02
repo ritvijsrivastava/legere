@@ -134,8 +134,8 @@ export function registerBackendEvents() {
 	});
 
 	// Desktop only (see `commands::system::force_quit`'s doc comment) —
-	// `RunEvent::ExitRequested` found an import still running and prevented
-	// the exit; `QuitBlockedDialog` reads `quitBlockedByImportKind`.
+	// `WindowEvent::CloseRequested` found an import still running and
+	// prevented the close; `QuitBlockedDialog` reads `quitBlockedByImportKind`.
 	listen<'raindrop' | 'article_csv'>('app:quit-blocked-by-import', (event) => {
 		uiStore.quitBlockedByImport(event.payload);
 	});
