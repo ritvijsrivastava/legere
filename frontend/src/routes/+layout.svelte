@@ -8,6 +8,7 @@
 	import ImportArticlesDialog from '$lib/components/ImportArticlesDialog.svelte';
 	import ImportSourcesDialog from '$lib/components/ImportSourcesDialog.svelte';
 	import DeleteAllArticlesDialog from '$lib/components/DeleteAllArticlesDialog.svelte';
+	import QuitBlockedDialog from '$lib/components/QuitBlockedDialog.svelte';
 	import MoveToCategoryDialog from '$lib/components/MoveToCategoryDialog.svelte';
 	import Toast from '$lib/components/Toast.svelte';
 	import { libraryStatsStore } from '$lib/stores/libraryStats.svelte';
@@ -42,5 +43,6 @@
 <ImportArticlesDialog />
 <ImportSourcesDialog />
 <DeleteAllArticlesDialog />
+<QuitBlockedDialog />
 <MoveToCategoryDialog />
 <Toast />

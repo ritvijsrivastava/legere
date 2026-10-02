@@ -178,3 +178,15 @@ pub struct CaptureSucceeded {
 pub fn emit_capture_succeeded(app: &AppHandle, payload: &CaptureSucceeded) {
     let _ = app.emit("capture:succeeded", payload);
 }
+
+/// Desktop only: `RunEvent::ExitRequested`'s handler found a Raindrop or
+/// article CSV import still running and called `prevent_exit()`, so the
+/// frontend needs to show a "quit anyway?" dialog instead of the app just
+/// disappearing mid-import. `kind` is `"raindrop"` or `"article_csv"` —
+/// just enough to word the dialog, matching `import:*`/`article_import:*`'s
+/// own split. See `force_quit` for the follow-up command this dialog's
+/// "Quit anyway" button calls.
+#[cfg(not(any(target_os = "android", test)))]
+pub fn emit_quit_blocked_by_import(app: &AppHandle, kind: &str) {
+    let _ = app.emit("app:quit-blocked-by-import", kind);
+}

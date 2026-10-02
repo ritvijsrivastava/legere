@@ -1,4 +1,4 @@
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use crate::error::AppError;
 use crate::state::AppState;
@@ -30,4 +30,16 @@ pub async fn write_text_file(path: String, contents: String) -> Result<(), AppEr
 #[tauri::command]
 pub async fn read_text_file(path: String) -> Result<String, AppError> {
     Ok(tokio::fs::read_to_string(&path).await?)
+}
+
+/// Desktop only: the follow-up to the "an import is still running —
+/// quit anyway?" dialog (`app:quit-blocked-by-import`, raised from
+/// `RunEvent::ExitRequested` in `lib.rs`). Calling `AppHandle::exit`
+/// directly, rather than retrying the normal close path, is what actually
+/// bypasses that same `ExitRequested` handler — it would otherwise just
+/// block again on the very same still-running import.
+#[cfg(not(target_os = "android"))]
+#[tauri::command]
+pub fn force_quit(app: AppHandle) {
+    app.exit(0);
 }

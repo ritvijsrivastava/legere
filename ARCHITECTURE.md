@@ -266,6 +266,16 @@ clamped user setting). Design points:
   cancels dispatch of *new* rows while in-flight fetches finish.
 - The import runs in the background and survives the dialog closing; the
   single-import guard is the same flag stored in `AppState`.
+- Desktop: quitting the app (Cmd+Q, the Quit menu, or the last window
+  closing — there's no tray/background mode, so these are one event) while
+  `import_cancel`/`article_import_cancel` is `Some` is blocked via
+  `RunEvent::ExitRequested`'s `prevent_exit()`, firing `app:quit-blocked-
+  by-import` so the frontend's `QuitBlockedDialog` can offer "wait" or
+  "quit anyway" (the latter calls `force_quit`, which bypasses this same
+  handler). True backgrounding — the import surviving the process itself
+  exiting — isn't possible here the way it is for Android's share intent
+  (see "Share intent (Android)" below): the desktop app *is* the process,
+  so this quit guard is desktop-only, not a substitute for it.
 
 ## Share intent (Android)
 

@@ -7,6 +7,12 @@ class UiStore {
 	importArticlesDialogOpen = $state(false);
 	importSourcesDialogOpen = $state(false);
 	deleteAllArticlesDialogOpen = $state(false);
+	/** Set from the `app:quit-blocked-by-import` event (desktop only) when
+	 *  `RunEvent::ExitRequested` found a Raindrop or article CSV import
+	 *  still running and called `prevent_exit()` — `"raindrop"` or
+	 *  `"article_csv"`, just enough for `QuitBlockedDialog` to word itself.
+	 *  `null` means no quit attempt is currently being blocked. */
+	quitBlockedByImportKind = $state<'raindrop' | 'article_csv' | null>(null);
 	/** Set by any "move to category" trigger (article card/row, reader
 	 *  overflow menu) — the single globally-mounted `MoveToCategoryDialog`
 	 *  reads this rather than each call site owning its own dialog. */
@@ -56,6 +62,13 @@ class UiStore {
 	}
 	closeDeleteAllArticlesDialog() {
 		this.deleteAllArticlesDialogOpen = false;
+	}
+
+	quitBlockedByImport(kind: 'raindrop' | 'article_csv') {
+		this.quitBlockedByImportKind = kind;
+	}
+	dismissQuitBlockedByImport() {
+		this.quitBlockedByImportKind = null;
 	}
 
 	/** `onMoved` fires once, right after the article's category is actually

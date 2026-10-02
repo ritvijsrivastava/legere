@@ -287,6 +287,8 @@ pub fn run() {
             commands::system::get_data_dir,
             commands::system::write_text_file,
             commands::system::read_text_file,
+            #[cfg(not(target_os = "android"))]
+            commands::system::force_quit,
             get_last_dismissed_version,
             set_last_dismissed_version,
             get_last_update_check,
@@ -314,6 +316,43 @@ pub fn run() {
             // Unused on desktop, where autosync's own interval loop keeps
             // running regardless of window focus.
             let _ = (&app_handle, &event);
+
+            // Desktop only: block an actual app exit (Cmd+Q, the Quit
+            // menu, or the last window closing) while a Raindrop or
+            // article CSV import is still running, same two guards
+            // `import_raindrop_csv`/`import_articles_csv` already use as
+            // their single-import-at-a-time lock. `try_lock` rather than
+            // `.lock().await` because this closure is sync and runs on
+            // the event loop's own thread — either guard is only ever
+            // held briefly to read/write the `Option`, never across an
+            // await, so a failed `try_lock` here would just mean asking
+            // again next time rather than a real race. Does *not* fire on
+            // a plain window-close that doesn't exit the app (there is no
+            // system tray/background mode here, so today a window close
+            // and an app exit are the same event anyway) — the import
+            // keeps running either way until this actually fires.
+            #[cfg(not(any(target_os = "android", test)))]
+            if let tauri::RunEvent::ExitRequested { api, .. } = &event {
+                let state = app_handle.state::<AppState>();
+                let blocking_kind = state
+                    .import_cancel
+                    .try_lock()
+                    .ok()
+                    .filter(|g| g.is_some())
+                    .map(|_| "raindrop")
+                    .or_else(|| {
+                        state
+                            .article_import_cancel
+                            .try_lock()
+                            .ok()
+                            .filter(|g| g.is_some())
+                            .map(|_| "article_csv")
+                    });
+                if let Some(kind) = blocking_kind {
+                    api.prevent_exit();
+                    events::emit_quit_blocked_by_import(app_handle, kind);
+                }
+            }
 
             #[cfg(mobile)]
             if let tauri::RunEvent::Resumed = event {

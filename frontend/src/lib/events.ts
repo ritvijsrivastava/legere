@@ -132,4 +132,11 @@ export function registerBackendEvents() {
 		remoteSyncStore.progress = null;
 		uiStore.showToast('Sync cancelled');
 	});
+
+	// Desktop only (see `commands::system::force_quit`'s doc comment) —
+	// `RunEvent::ExitRequested` found an import still running and prevented
+	// the exit; `QuitBlockedDialog` reads `quitBlockedByImportKind`.
+	listen<'raindrop' | 'article_csv'>('app:quit-blocked-by-import', (event) => {
+		uiStore.quitBlockedByImport(event.payload);
+	});
 }

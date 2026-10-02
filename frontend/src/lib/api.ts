@@ -322,6 +322,13 @@ export function cancelRemoteSync(): Promise<void> {
 	return invoke<void>('cancel_remote_sync');
 }
 
+/** Desktop only: bypasses the "an import is still running" quit guard
+ *  (`QuitBlockedDialog`'s "Quit anyway") by exiting the process directly
+ *  rather than retrying the normal close path. */
+export function forceQuit(): Promise<void> {
+	return invoke<void>('force_quit');
+}
+
 let dataDirPromise: Promise<string> | null = null;
 
 function getDataDir(): Promise<string> {
