@@ -19,6 +19,7 @@
 	import {
 		currentVersion,
 		checkForUpdate,
+		checkForUpdateThrottled,
 		installUpdate,
 		shouldShowLinuxUpdateWarning,
 		getReleaseNotes,
@@ -83,7 +84,13 @@
 		if (!tauri) return;
 		version = await currentVersion();
 		shouldShowLinuxUpdateWarning().then((show) => (showLinuxWarning = show));
-		handleCheck();
+		// Throttled, not a forced check: this page is torn down and rebuilt
+		// every time the user navigates away from and back to Settings, and an
+		// unthrottled check here used to mean every single visit re-hit
+		// GitHub's API for an answer that's virtually always unchanged from
+		// the last one. The explicit "Check now" button below still forces a
+		// fresh one.
+		handleCheck({ throttled: true });
 		loadChangelog();
 		remoteSyncStore.refresh();
 	});
@@ -177,7 +184,7 @@
 		}
 	}
 
-	async function handleCheck() {
+	async function handleCheck(options?: { throttled?: boolean }) {
 		checkState = 'checking';
 		checkError = '';
 		updateResult = null;
@@ -185,7 +192,7 @@
 		updateDetailsState = 'idle';
 		updateChangelog = [];
 		try {
-			updateResult = await checkForUpdate();
+			updateResult = options?.throttled ? await checkForUpdateThrottled() : await checkForUpdate();
 			checkState = 'idle';
 		} catch (e) {
 			checkError = errorMessage(e);
@@ -689,7 +696,7 @@
 				<button
 					class="btn btn-secondary"
 					disabled={checkState === 'checking'}
-					onclick={handleCheck}
+					onclick={() => handleCheck()}
 				>
 					{checkState === 'checking' ? 'Checking…' : 'Check now'}
 				</button>

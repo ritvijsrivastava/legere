@@ -87,6 +87,8 @@ mod tests {
             article_count: 3,
             last_synced_at: Some("2024-01-01T00:00:00Z".to_string()),
             created_at: "2024-01-01T00:00:00Z".to_string(),
+            feed_etag: None,
+            feed_last_modified: None,
         }
     }
 

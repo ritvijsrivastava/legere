@@ -26,9 +26,7 @@ use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 
 use crate::db::sync_config::RemoteSyncConfig;
-use crate::db::sync_rows::{
-    self, LocalTombstone, SyncArticleRow, SyncCategoryRow, SyncSourceRow,
-};
+use crate::db::sync_rows::{self, LocalTombstone, SyncArticleRow, SyncCategoryRow, SyncSourceRow};
 
 use super::client::{BucketConfig, PutOutcome, S3Client, S3Error};
 use super::conflict::{self, ArticleMutableState, Candidate};
@@ -254,7 +252,11 @@ async fn try_sync_once(
             // like every other phase does, since "the user asked this to
             // stop" shouldn't be swallowed just because it happened
             // during cleanup instead of the main pass.
-            let orphans_deleted = match super::bucket_gc::sweep_orphaned_blobs(client, &manifest, cancel).await {
+            let orphans_deleted = match super::bucket_gc::sweep_orphaned_blobs(
+                client, &manifest, cancel,
+            )
+            .await
+            {
                 Ok(count) => count,
                 Err(SyncError::Cancelled) => return Err(SyncError::Cancelled),
                 Err(err) => {
@@ -424,18 +426,24 @@ where
         while join_set.len() < SYNC_CONCURRENCY {
             let Some(id) = ids_iter.next() else { break };
             let client = client.clone();
-            join_set.spawn(async move {
-                client.get_object(&blob_key(entity_type, &id)).await
-            });
+            join_set.spawn(async move { client.get_object(&blob_key(entity_type, &id)).await });
         }
         let Some(joined) = join_set.join_next().await else {
             break;
         };
         let fetch_result = joined.map_err(|e| SyncError::TaskJoin(e.to_string()))??;
         completed += 1;
-        on_progress(SyncProgress { phase, completed, total });
-        let Some((bytes, _)) = fetch_result else { continue };
-        let Some(row) = from_gz_json::<T>(&bytes) else { continue };
+        on_progress(SyncProgress {
+            phase,
+            completed,
+            total,
+        });
+        let Some((bytes, _)) = fetch_result else {
+            continue;
+        };
+        let Some(row) = from_gz_json::<T>(&bytes) else {
+            continue;
+        };
         apply_one(conn, row)?;
         applied += 1;
     }
@@ -467,8 +475,14 @@ async fn pull_sources(
     {
         if let Some(loser_id) = colliding_local_id(entry, &local_by_key) {
             let local = local_by_id[loser_id];
-            let local_candidate = Candidate { id: loser_id.to_string(), created_at: local.created_at.clone() };
-            let remote_candidate = Candidate { id: entry.id.clone(), created_at: entry.created_at.clone() };
+            let local_candidate = Candidate {
+                id: loser_id.to_string(),
+                created_at: local.created_at.clone(),
+            };
+            let remote_candidate = Candidate {
+                id: entry.id.clone(),
+                created_at: entry.created_at.clone(),
+            };
             let (winner, _loser) = conflict::pick_winner(&local_candidate, &remote_candidate);
             if winner.id == entry.id {
                 // Remote wins: drop the local competitor, then fall
@@ -481,7 +495,9 @@ async fn pull_sources(
                 continue;
             }
         } else if !needs_pull(
-            local_by_id.get(entry.id.as_str()).map(|r| r.updated_at.as_str()),
+            local_by_id
+                .get(entry.id.as_str())
+                .map(|r| r.updated_at.as_str()),
             &entry.updated_at,
         ) {
             continue;
@@ -526,8 +542,14 @@ async fn pull_categories(
     {
         if let Some(loser_id) = colliding_local_id(entry, &local_by_key) {
             let local = local_by_id[loser_id];
-            let local_candidate = Candidate { id: loser_id.to_string(), created_at: local.created_at.clone() };
-            let remote_candidate = Candidate { id: entry.id.clone(), created_at: entry.created_at.clone() };
+            let local_candidate = Candidate {
+                id: loser_id.to_string(),
+                created_at: local.created_at.clone(),
+            };
+            let remote_candidate = Candidate {
+                id: entry.id.clone(),
+                created_at: entry.created_at.clone(),
+            };
             let (winner, _loser) = conflict::pick_winner(&local_candidate, &remote_candidate);
             if winner.id == entry.id {
                 sync_rows::apply_tombstone(conn, "category", loser_id, &now.to_rfc3339())?;
@@ -536,7 +558,9 @@ async fn pull_categories(
                 continue;
             }
         } else if !needs_pull(
-            local_by_id.get(entry.id.as_str()).map(|r| r.updated_at.as_str()),
+            local_by_id
+                .get(entry.id.as_str())
+                .map(|r| r.updated_at.as_str()),
             &entry.updated_at,
         ) {
             continue;
@@ -588,12 +612,19 @@ async fn pull_articles(
         // handles the plain, no-collision case.
         if let Some(loser_id) = colliding_local_id(entry, &local_by_key) {
             let local = local_by_id[loser_id].clone();
-            let local_candidate = Candidate { id: loser_id.to_string(), created_at: local.fetched_at.clone() };
-            let remote_candidate = Candidate { id: entry.id.clone(), created_at: entry.created_at.clone() };
+            let local_candidate = Candidate {
+                id: loser_id.to_string(),
+                created_at: local.fetched_at.clone(),
+            };
+            let remote_candidate = Candidate {
+                id: entry.id.clone(),
+                created_at: entry.created_at.clone(),
+            };
             let (winner, _loser) = conflict::pick_winner(&local_candidate, &remote_candidate);
 
-            let Some((bytes, _)) =
-                client.get_object(&blob_key(EntityType::Article, &entry.id)).await?
+            let Some((bytes, _)) = client
+                .get_object(&blob_key(EntityType::Article, &entry.id))
+                .await?
             else {
                 continue;
             };
@@ -651,7 +682,9 @@ async fn pull_articles(
         }
 
         if !needs_pull(
-            local_by_id.get(entry.id.as_str()).map(|r| r.updated_at.as_str()),
+            local_by_id
+                .get(entry.id.as_str())
+                .map(|r| r.updated_at.as_str()),
             &entry.updated_at,
         ) {
             continue;
@@ -719,7 +752,11 @@ where
         let entry = joined.map_err(|e| SyncError::TaskJoin(e.to_string()))??;
         new_entries.push(entry);
         completed += 1;
-        on_progress(SyncProgress { phase, completed, total });
+        on_progress(SyncProgress {
+            phase,
+            completed,
+            total,
+        });
     }
 
     Ok(new_entries)
@@ -743,19 +780,28 @@ async fn push_sources(
         .filter(|row| needs_push(&row.updated_at, existing.get(&row.id).map(|s| s.as_str())))
         .collect();
 
-    let new_entries = push_concurrently(client, to_push, SyncPhase::PushSources, cancel, on_progress, |client, row| async move {
-        let bytes = gz_json(&row);
-        let hash = content_hash(&bytes);
-        client.put_object(&blob_key(EntityType::Source, &row.id), bytes).await?;
-        Ok(ManifestEntry {
-            id: row.id.clone(),
-            entity_type: EntityType::Source,
-            conflict_key: row.feed_url.clone(),
-            updated_at: row.updated_at.clone(),
-            created_at: row.created_at.clone(),
-            content_hash: hash,
-        })
-    })
+    let new_entries = push_concurrently(
+        client,
+        to_push,
+        SyncPhase::PushSources,
+        cancel,
+        on_progress,
+        |client, row| async move {
+            let bytes = gz_json(&row);
+            let hash = content_hash(&bytes);
+            client
+                .put_object(&blob_key(EntityType::Source, &row.id), bytes)
+                .await?;
+            Ok(ManifestEntry {
+                id: row.id.clone(),
+                entity_type: EntityType::Source,
+                conflict_key: row.feed_url.clone(),
+                updated_at: row.updated_at.clone(),
+                created_at: row.created_at.clone(),
+                content_hash: hash,
+            })
+        },
+    )
     .await?;
 
     let pushed = new_entries.len();
@@ -781,19 +827,28 @@ async fn push_categories(
         .filter(|row| needs_push(&row.updated_at, existing.get(&row.id).map(|s| s.as_str())))
         .collect();
 
-    let new_entries = push_concurrently(client, to_push, SyncPhase::PushCategories, cancel, on_progress, |client, row| async move {
-        let bytes = gz_json(&row);
-        let hash = content_hash(&bytes);
-        client.put_object(&blob_key(EntityType::Category, &row.id), bytes).await?;
-        Ok(ManifestEntry {
-            id: row.id.clone(),
-            entity_type: EntityType::Category,
-            conflict_key: row.name.to_lowercase(),
-            updated_at: row.updated_at.clone(),
-            created_at: row.created_at.clone(),
-            content_hash: hash,
-        })
-    })
+    let new_entries = push_concurrently(
+        client,
+        to_push,
+        SyncPhase::PushCategories,
+        cancel,
+        on_progress,
+        |client, row| async move {
+            let bytes = gz_json(&row);
+            let hash = content_hash(&bytes);
+            client
+                .put_object(&blob_key(EntityType::Category, &row.id), bytes)
+                .await?;
+            Ok(ManifestEntry {
+                id: row.id.clone(),
+                entity_type: EntityType::Category,
+                conflict_key: row.name.to_lowercase(),
+                updated_at: row.updated_at.clone(),
+                created_at: row.created_at.clone(),
+                content_hash: hash,
+            })
+        },
+    )
     .await?;
 
     let pushed = new_entries.len();
@@ -906,12 +961,19 @@ async fn push_articles(
             let data_dir = data_dir.clone();
             async move {
                 if is_new {
-                    upload_article_images(&client, &data_dir, &row.id, row.hero_image_path.as_deref())
-                        .await?;
+                    upload_article_images(
+                        &client,
+                        &data_dir,
+                        &row.id,
+                        row.hero_image_path.as_deref(),
+                    )
+                    .await?;
                 }
                 let bytes = gz_json(&row);
                 let hash = content_hash(&bytes);
-                client.put_object(&blob_key(EntityType::Article, &row.id), bytes).await?;
+                client
+                    .put_object(&blob_key(EntityType::Article, &row.id), bytes)
+                    .await?;
                 Ok(ManifestEntry {
                     id: row.id.clone(),
                     entity_type: EntityType::Article,
@@ -930,7 +992,11 @@ async fn push_articles(
     Ok(pushed)
 }
 
-fn replace_entries(manifest: &mut Manifest, entity_type: EntityType, new_entries: Vec<ManifestEntry>) {
+fn replace_entries(
+    manifest: &mut Manifest,
+    entity_type: EntityType,
+    new_entries: Vec<ManifestEntry>,
+) {
     if new_entries.is_empty() {
         return;
     }
@@ -952,9 +1018,12 @@ fn resolve_source_collisions(conn: &Connection, now: DateTime<Utc>) -> Result<()
 
 fn resolve_category_collisions(conn: &Connection, now: DateTime<Utc>) -> Result<(), SyncError> {
     let rows = sync_rows::list_categories_for_sync(conn)?;
-    for loser_id in
-        collision_losers(&rows, |r| r.name.to_lowercase(), |r| &r.id, |r| &r.created_at)
-    {
+    for loser_id in collision_losers(
+        &rows,
+        |r| r.name.to_lowercase(),
+        |r| &r.id,
+        |r| &r.created_at,
+    ) {
         sync_rows::apply_tombstone(conn, "category", &loser_id, &now.to_rfc3339())?;
     }
     Ok(())
@@ -982,8 +1051,16 @@ fn resolve_article_collisions(conn: &Connection, now: DateTime<Utc>) -> Result<(
                 created_at: candidate_row.fetched_at.clone(),
             };
             let (winner, loser) = conflict::pick_winner(&winner_candidate, &candidate);
-            let loser_row = if loser.id == winner_row.id { winner_row } else { candidate_row };
-            winner_row = if winner.id == winner_row.id { winner_row } else { candidate_row };
+            let loser_row = if loser.id == winner_row.id {
+                winner_row
+            } else {
+                candidate_row
+            };
+            winner_row = if winner.id == winner_row.id {
+                winner_row
+            } else {
+                candidate_row
+            };
 
             let merged = conflict::merge_article_state(
                 &ArticleMutableState {
@@ -1118,7 +1195,11 @@ mod tests {
 
         let device = migrated_conn();
         std::fs::create_dir_all(data_dir.path().join("content/art-1/sub")).unwrap();
-        std::fs::write(data_dir.path().join("content/art-1/sub/image.jpg"), b"fake image").unwrap();
+        std::fs::write(
+            data_dir.path().join("content/art-1/sub/image.jpg"),
+            b"fake image",
+        )
+        .unwrap();
         std::fs::create_dir_all(data_dir.path().join("media")).unwrap();
         std::fs::write(data_dir.path().join("media/art-1.jpg"), b"fake hero").unwrap();
 
@@ -1127,9 +1208,16 @@ mod tests {
         crate::db::queries::insert_captured_article(&device, "art-1", None, "direct", &output, &[])
             .unwrap();
 
-        run_sync(&device, &client, data_dir.path(), Utc::now(), &no_cancel(), |_| {})
-            .await
-            .unwrap();
+        run_sync(
+            &device,
+            &client,
+            data_dir.path(),
+            Utc::now(),
+            &no_cancel(),
+            |_| {},
+        )
+        .await
+        .unwrap();
 
         let hero_key = "legere-sync/blobs/articles/art-1/hero.jpg";
         let image_key = "legere-sync/blobs/articles/art-1/images/sub/image.jpg";
@@ -1137,7 +1225,11 @@ mod tests {
         {
             let guard = store.lock().unwrap();
             assert_eq!(guard.get(hero_key).unwrap().2, 1, "hero must upload once");
-            assert_eq!(guard.get(image_key).unwrap().2, 1, "content image must upload once");
+            assert_eq!(
+                guard.get(image_key).unwrap().2,
+                1,
+                "content image must upload once"
+            );
             assert_eq!(guard.get(meta_key).unwrap().2, 1);
         }
 
@@ -1149,14 +1241,33 @@ mod tests {
                 [],
             )
             .unwrap();
-        run_sync(&device, &client, data_dir.path(), Utc::now(), &no_cancel(), |_| {})
-            .await
-            .unwrap();
+        run_sync(
+            &device,
+            &client,
+            data_dir.path(),
+            Utc::now(),
+            &no_cancel(),
+            |_| {},
+        )
+        .await
+        .unwrap();
 
         let guard = store.lock().unwrap();
-        assert_eq!(guard.get(hero_key).unwrap().2, 1, "hero must not be re-uploaded");
-        assert_eq!(guard.get(image_key).unwrap().2, 1, "content image must not be re-uploaded");
-        assert_eq!(guard.get(meta_key).unwrap().2, 2, "metadata must still be pushed again");
+        assert_eq!(
+            guard.get(hero_key).unwrap().2,
+            1,
+            "hero must not be re-uploaded"
+        );
+        assert_eq!(
+            guard.get(image_key).unwrap().2,
+            1,
+            "content image must not be re-uploaded"
+        );
+        assert_eq!(
+            guard.get(meta_key).unwrap().2,
+            2,
+            "metadata must still be pushed again"
+        );
     }
 
     #[tokio::test]
@@ -1183,9 +1294,16 @@ mod tests {
         // mid-flight stop, not a race against the pass already being done.
         let cancel = Arc::new(AtomicBool::new(false));
         let cancel_setter = cancel.clone();
-        let result = run_sync(&device, &client, data_dir.path(), Utc::now(), &cancel, move |_: SyncProgress| {
-            cancel_setter.store(true, Ordering::Relaxed);
-        })
+        let result = run_sync(
+            &device,
+            &client,
+            data_dir.path(),
+            Utc::now(),
+            &cancel,
+            move |_: SyncProgress| {
+                cancel_setter.store(true, Ordering::Relaxed);
+            },
+        )
         .await;
 
         assert!(
@@ -1369,9 +1487,16 @@ mod tests {
 
         let progress_log = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let log_for_callback = progress_log.clone();
-        let outcome = run_sync(&device, &client, data_dir.path(), Utc::now(), &no_cancel(), move |p: SyncProgress| {
-            log_for_callback.lock().unwrap().push(p);
-        })
+        let outcome = run_sync(
+            &device,
+            &client,
+            data_dir.path(),
+            Utc::now(),
+            &no_cancel(),
+            move |p: SyncProgress| {
+                log_for_callback.lock().unwrap().push(p);
+            },
+        )
         .await
         .unwrap();
 
@@ -1419,15 +1544,29 @@ mod tests {
         )
         .unwrap();
 
-        let outcome_a = run_sync(&device_a, &client, data_dir.path(), Utc::now(), &no_cancel(), |_| {})
-            .await
-            .expect("device A syncs cleanly against an empty bucket");
+        let outcome_a = run_sync(
+            &device_a,
+            &client,
+            data_dir.path(),
+            Utc::now(),
+            &no_cancel(),
+            |_| {},
+        )
+        .await
+        .expect("device A syncs cleanly against an empty bucket");
         assert_eq!(outcome_a.pushed, 1);
 
         let device_b = migrated_conn();
-        let outcome_b = run_sync(&device_b, &client, data_dir.path(), Utc::now(), &no_cancel(), |_| {})
-            .await
-            .expect("device B syncs cleanly");
+        let outcome_b = run_sync(
+            &device_b,
+            &client,
+            data_dir.path(),
+            Utc::now(),
+            &no_cancel(),
+            |_| {},
+        )
+        .await
+        .expect("device B syncs cleanly");
         assert_eq!(outcome_b.pulled, 1);
 
         let pulled = sync_rows::get_article_for_sync(&device_b, "art-1")
@@ -1454,35 +1593,78 @@ mod tests {
             &[],
         )
         .unwrap();
-        run_sync(&device_a, &client, data_dir.path(), Utc::now(), &no_cancel(), |_| {})
-            .await
-            .unwrap();
+        run_sync(
+            &device_a,
+            &client,
+            data_dir.path(),
+            Utc::now(),
+            &no_cancel(),
+            |_| {},
+        )
+        .await
+        .unwrap();
 
         let device_b = migrated_conn();
-        run_sync(&device_b, &client, data_dir.path(), Utc::now(), &no_cancel(), |_| {})
-            .await
-            .unwrap();
-        assert!(sync_rows::get_article_for_sync(&device_b, "art-1").unwrap().is_some());
+        run_sync(
+            &device_b,
+            &client,
+            data_dir.path(),
+            Utc::now(),
+            &no_cancel(),
+            |_| {},
+        )
+        .await
+        .unwrap();
+        assert!(
+            sync_rows::get_article_for_sync(&device_b, "art-1")
+                .unwrap()
+                .is_some()
+        );
 
         // Device A deletes it and pushes the tombstone.
         crate::db::queries::delete_article(&device_a, "art-1").unwrap();
-        run_sync(&device_a, &client, data_dir.path(), Utc::now(), &no_cancel(), |_| {})
-            .await
-            .unwrap();
+        run_sync(
+            &device_a,
+            &client,
+            data_dir.path(),
+            Utc::now(),
+            &no_cancel(),
+            |_| {},
+        )
+        .await
+        .unwrap();
 
         // Device B syncs again and must remove its own copy.
-        let outcome = run_sync(&device_b, &client, data_dir.path(), Utc::now(), &no_cancel(), |_| {})
-            .await
-            .unwrap();
+        let outcome = run_sync(
+            &device_b,
+            &client,
+            data_dir.path(),
+            Utc::now(),
+            &no_cancel(),
+            |_| {},
+        )
+        .await
+        .unwrap();
         assert_eq!(outcome.tombstones_applied, 1);
-        assert!(sync_rows::get_article_for_sync(&device_b, "art-1").unwrap().is_none());
+        assert!(
+            sync_rows::get_article_for_sync(&device_b, "art-1")
+                .unwrap()
+                .is_none()
+        );
 
         // And device B must never resurrect it even if it tries to push
         // a local copy again (it can't, since delete_article removed the
         // row — this asserts there is nothing left to push).
-        let outcome2 = run_sync(&device_b, &client, data_dir.path(), Utc::now(), &no_cancel(), |_| {})
-            .await
-            .unwrap();
+        let outcome2 = run_sync(
+            &device_b,
+            &client,
+            data_dir.path(),
+            Utc::now(),
+            &no_cancel(),
+            |_| {},
+        )
+        .await
+        .unwrap();
         assert_eq!(outcome2.pushed, 0);
     }
 
@@ -1530,23 +1712,73 @@ mod tests {
 
         // A pushes first, B pulls A's copy (creating the collision
         // locally), resolves it, and pushes the resolution.
-        run_sync(&device_a, &client, data_dir.path(), Utc::now(), &no_cancel(), |_| {}).await.unwrap();
-        run_sync(&device_b, &client, data_dir.path(), Utc::now(), &no_cancel(), |_| {}).await.unwrap();
+        run_sync(
+            &device_a,
+            &client,
+            data_dir.path(),
+            Utc::now(),
+            &no_cancel(),
+            |_| {},
+        )
+        .await
+        .unwrap();
+        run_sync(
+            &device_b,
+            &client,
+            data_dir.path(),
+            Utc::now(),
+            &no_cancel(),
+            |_| {},
+        )
+        .await
+        .unwrap();
         // A syncs again to pick up B's resolution.
-        run_sync(&device_a, &client, data_dir.path(), Utc::now(), &no_cancel(), |_| {}).await.unwrap();
+        run_sync(
+            &device_a,
+            &client,
+            data_dir.path(),
+            Utc::now(),
+            &no_cancel(),
+            |_| {},
+        )
+        .await
+        .unwrap();
         // B syncs once more so both fully converge on the same tombstone view.
-        run_sync(&device_b, &client, data_dir.path(), Utc::now(), &no_cancel(), |_| {}).await.unwrap();
+        run_sync(
+            &device_b,
+            &client,
+            data_dir.path(),
+            Utc::now(),
+            &no_cancel(),
+            |_| {},
+        )
+        .await
+        .unwrap();
 
         let a_rows = sync_rows::list_articles_for_sync(&device_a).unwrap();
         let b_rows = sync_rows::list_articles_for_sync(&device_b).unwrap();
-        assert_eq!(a_rows.len(), 1, "device A must converge to exactly one surviving row");
-        assert_eq!(b_rows.len(), 1, "device B must converge to exactly one surviving row");
-        assert_eq!(a_rows[0].id, "art-a", "the earlier-created row must win deterministically");
+        assert_eq!(
+            a_rows.len(),
+            1,
+            "device A must converge to exactly one surviving row"
+        );
+        assert_eq!(
+            b_rows.len(),
+            1,
+            "device B must converge to exactly one surviving row"
+        );
+        assert_eq!(
+            a_rows[0].id, "art-a",
+            "the earlier-created row must win deterministically"
+        );
         assert_eq!(b_rows[0].id, "art-a");
         assert!(
             a_rows[0].tags.contains(&"from-b".to_string()),
             "the loser's tags must be merged into the survivor, not discarded"
         );
-        assert!(a_rows[0].favorited, "the loser's favorited flag must be merged in");
+        assert!(
+            a_rows[0].favorited,
+            "the loser's favorited flag must be merged in"
+        );
     }
 }

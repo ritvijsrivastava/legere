@@ -137,7 +137,9 @@ impl Manifest {
     pub fn from_gz_bytes(bytes: &[u8]) -> Result<Self, ManifestError> {
         let mut decoder = GzDecoder::new(bytes);
         let mut json = Vec::new();
-        decoder.read_to_end(&mut json).map_err(ManifestError::Gzip)?;
+        decoder
+            .read_to_end(&mut json)
+            .map_err(ManifestError::Gzip)?;
         serde_json::from_slice(&json).map_err(ManifestError::Json)
     }
 
@@ -273,6 +275,10 @@ mod tests {
         };
 
         manifest.purge_expired_tombstones(Utc::now(), TOMBSTONE_RETENTION);
-        assert_eq!(manifest.tombstones.len(), 1, "unparseable timestamps must not be purged");
+        assert_eq!(
+            manifest.tombstones.len(),
+            1,
+            "unparseable timestamps must not be purged"
+        );
     }
 }

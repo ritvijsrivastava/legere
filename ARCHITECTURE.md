@@ -191,9 +191,14 @@ The handler:
 
 ## Ingestion paths
 
-**RSS sync** (`sources::rss`) — fetch + `feed-rs` parse, backfill the
-source's display name only while it's still the URL placeholder (never
-overwrite a user rename), capture up to 30 new entries per sync
+**RSS sync** (`sources::rss`) — conditional GET (`If-None-Match`/
+`If-Modified-Since`, backed by each source's cached `feed_etag`/
+`feed_last_modified` columns) so an unchanged feed costs one bodyless
+`304` instead of a full re-download + re-parse every autosync cycle; a
+`304` still counts as a clean sync (status/`last_synced_at` update, zero
+new articles). On an actual `200`, `feed-rs` parse, backfill the source's
+display name only while it's still the URL placeholder (never overwrite a
+user rename), capture up to 30 new entries per sync
 (`MAX_ENTRIES_PER_SYNC`), tagging from `<category>` elements. Errored
 sources are retried every autosync cycle (no backoff) so they recover on
 their own; paused sources are skipped.
@@ -469,6 +474,16 @@ endpoint is infrastructure the user explicitly configured, not
 attacker-influenced page content, so SSRF-guarding it would protect against
 a threat model that doesn't apply here.
 
+**Client reuse** (`AppState::remote_sync_client_cache`,
+`remote_sync::orchestrate::cached_client`) — the `S3Client` built from a
+given `RemoteSyncConfig` is cached on `AppState` and reused, rather than
+rebuilt fresh (losing the underlying `reqwest::Client`'s connection
+pool/TLS session every time) on every call. This matters most for
+`ensure_article_images_synced`, which runs on every `open_for_reading`, far
+more often than a sync pass itself. Keyed by the config value (cheap to
+`Clone`/`PartialEq`): a saved config change naturally misses the cache and
+rebuilds, no separate invalidation path needed.
+
 **Config storage** (`db::sync_config`) — bucket credentials and this
 device's `device_id` live in the same local-only `settings` KV table every
 other preference uses, under a `remote_sync_*` key prefix
@@ -674,6 +689,16 @@ platform-specific ways:
 All paths compare manifest versions with `semver` and verify sha256
 checksums. The repo is public, so all of these GitHub API/release requests
 go out unauthenticated.
+
+**Check throttling** (`lib/update.ts`'s `checkForUpdateThrottled`,
+backed by `commands::update::get_last_update_check`/
+`set_last_update_check`) — every automatic check (app launch, every
+Settings-page mount — the page is torn down and rebuilt on each visit)
+goes through a 24h cache persisted via `tauri-plugin-store`, not a plain
+`checkForUpdate()`; without it, routine navigation back and forth to
+Settings re-hit the GitHub API on every single visit for an answer that's
+virtually always unchanged. Settings' explicit "Check now" button still
+calls the uncached `checkForUpdate()` directly.
 
 ## Frontend
 

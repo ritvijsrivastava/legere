@@ -608,6 +608,21 @@ CREATE TABLE sync_tombstones (
 CREATE INDEX idx_sync_tombstones_deleted_at ON sync_tombstones(deleted_at);
 ";
 
+// Caches each RSS source's last `ETag`/`Last-Modified` response headers so
+// `sources::rss::sync_rss_source` can send a conditional GET
+// (`If-None-Match`/`If-Modified-Since`) instead of unconditionally
+// re-downloading and re-parsing the full feed body every autosync tick —
+// most feeds don't change between hourly polls, and a `304 Not Modified`
+// response has no body to download at all. Nullable, local-only cache
+// state: never synced (not part of `SyncSourceRow`), and simply absent
+// until the first successful fetch populates it, so an upgrading
+// database just falls back to an unconditional GET once, same as today,
+// until that happens.
+const V18: &str = "
+ALTER TABLE sources ADD COLUMN feed_etag TEXT;
+ALTER TABLE sources ADD COLUMN feed_last_modified TEXT;
+";
+
 pub fn migrations() -> Migrations<'static> {
     Migrations::new(vec![
         M::up(V1),
@@ -627,6 +642,7 @@ pub fn migrations() -> Migrations<'static> {
         M::up(V15),
         M::up(V16),
         M::up(V17),
+        M::up(V18),
     ])
 }
 
@@ -1165,7 +1181,10 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(article_count, 5, "3 (src-old) + 2 (src-new) must be preserved, not dropped");
+        assert_eq!(
+            article_count, 5,
+            "3 (src-old) + 2 (src-new) must be preserved, not dropped"
+        );
     }
 
     #[test]

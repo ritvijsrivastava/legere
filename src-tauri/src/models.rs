@@ -161,6 +161,16 @@ pub struct Source {
     pub article_count: i64,
     pub last_synced_at: Option<String>,
     pub created_at: String,
+    /// This feed's last-seen `ETag`/`Last-Modified` response headers, used
+    /// to send a conditional GET on the next sync instead of always
+    /// re-downloading the full body — see `sources::rss::sync_rss_source`.
+    /// Not exposed to the frontend (no UI cares), but kept on the shared
+    /// `Source` struct rather than a separate query, matching how every
+    /// other source field already works.
+    #[serde(skip)]
+    pub feed_etag: Option<String>,
+    #[serde(skip)]
+    pub feed_last_modified: Option<String>,
 }
 
 /// A lightweight per-source article preview for the Sources page's

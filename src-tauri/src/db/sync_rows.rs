@@ -194,8 +194,7 @@ fn sync_category_from_row(row: &Row) -> rusqlite::Result<SyncCategoryRow> {
 }
 
 pub fn list_categories_for_sync(conn: &Connection) -> rusqlite::Result<Vec<SyncCategoryRow>> {
-    let mut stmt =
-        conn.prepare("SELECT id, name, icon, created_at, updated_at FROM categories")?;
+    let mut stmt = conn.prepare("SELECT id, name, icon, created_at, updated_at FROM categories")?;
     let rows = stmt.query_map([], sync_category_from_row)?;
     rows.collect()
 }
@@ -239,7 +238,9 @@ fn sync_source_from_row(row: &Row) -> rusqlite::Result<SyncSourceRow> {
         // `Option` through the sync wire format is safe in practice —
         // and if it's ever wrong, an empty `conflict_key` just means
         // that source never dedupes against another, not a panic.
-        feed_url: row.get::<_, Option<String>>("feed_url")?.unwrap_or_default(),
+        feed_url: row
+            .get::<_, Option<String>>("feed_url")?
+            .unwrap_or_default(),
         status: row.get("status")?,
         last_error: row.get("last_error")?,
         article_count: row.get("article_count")?,
@@ -361,8 +362,9 @@ pub fn apply_tombstone(
     deleted_at: &str,
 ) -> rusqlite::Result<Option<Option<String>>> {
     let hero_image_path: Option<Option<String>> = match entity_type {
-        "article" => super::queries::delete_article(conn, entity_id)?
-            .map(|files| files.hero_image_path),
+        "article" => {
+            super::queries::delete_article(conn, entity_id)?.map(|files| files.hero_image_path)
+        }
         "category" => {
             super::queries::delete_category(conn, entity_id)?;
             None

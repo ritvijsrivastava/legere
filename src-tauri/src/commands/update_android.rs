@@ -68,7 +68,7 @@ pub async fn android_check_for_update(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Option<UpdateInfo>, AppError> {
-    let client = reqwest::Client::new();
+    let client = state.http_client.clone();
 
     let release: Release = client
         .get(format!(
@@ -167,7 +167,8 @@ pub async fn android_download_and_install(
         }
     }
 
-    let response = reqwest::Client::new()
+    let response = state
+        .http_client
         .get(&update.url)
         .header("Accept", "application/octet-stream")
         .header("User-Agent", USER_AGENT)

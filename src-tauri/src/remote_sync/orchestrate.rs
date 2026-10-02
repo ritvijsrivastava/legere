@@ -5,7 +5,6 @@
 //! separate module/event namespace since the two sync systems are
 //! independent (see `events::emit_remote_sync_started`'s doc comment).
 
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -88,14 +87,7 @@ pub async fn run_remote_sync_once(
 
     events::emit_remote_sync_started(app);
 
-    let outcome = run_once_inner(
-        pool.clone(),
-        state.data_dir.clone(),
-        &config,
-        app.clone(),
-        cancel,
-    )
-    .await;
+    let outcome = run_once_inner_state(state, pool.clone(), &config, app.clone(), cancel).await;
     *state.remote_sync_cancel.lock().await = None;
 
     match outcome {
@@ -173,6 +165,32 @@ pub async fn stop_remote_sync_loop(state: &AppState) {
     }
 }
 
+/// Reuses `state.remote_sync_client_cache`'s `S3Client` (and the
+/// `reqwest::Client`/connection pool underneath it) if it was already built
+/// from this exact `config`, rather than paying a fresh connection setup
+/// (and, over HTTPS, a fresh TLS handshake) on every call — `S3Client::new`
+/// itself is cheap (no I/O), but the `reqwest::Client` it wraps is not,
+/// since a brand-new one starts with an empty connection pool. This
+/// matters most for `ensure_article_images_synced`, called on every
+/// `open_for_reading`, far more often than a sync pass runs. A config
+/// change (any field, including just re-saving the same bucket) naturally
+/// invalidates the cache since it no longer compares equal — no separate
+/// invalidation path needed.
+pub async fn cached_client(
+    state: &AppState,
+    config: &sync_config::RemoteSyncConfig,
+) -> Result<crate::remote_sync::client::S3Client, engine::SyncError> {
+    let mut guard = state.remote_sync_client_cache.lock().await;
+    if let Some((cached_config, client)) = guard.as_ref()
+        && cached_config == config
+    {
+        return Ok(client.clone());
+    }
+    let client = engine::client_from_config(config)?;
+    *guard = Some((config.clone(), client.clone()));
+    Ok(client)
+}
+
 /// The part of a sync pass that actually needs both the DB connection and
 /// the network client together: run on a dedicated blocking thread via
 /// `spawn_blocking`, driven to completion in-place with `block_on` rather
@@ -182,14 +200,15 @@ pub async fn stop_remote_sync_loop(state: &AppState) {
 /// read/write with a network call) is therefore not `Send`. `block_on`
 /// only requires the *closure* to be `Send + 'static`, not the future it
 /// drives, which is exactly what's needed here.
-async fn run_once_inner(
+async fn run_once_inner_state(
+    state: &AppState,
     pool: DbPool,
-    data_dir: PathBuf,
     config: &sync_config::RemoteSyncConfig,
     app: AppHandle,
     cancel: Arc<AtomicBool>,
 ) -> Result<SyncOutcome, RunOnceError> {
-    let client = engine::client_from_config(config)?;
+    let client = cached_client(state, config).await?;
+    let data_dir = state.data_dir.clone();
     tokio::task::spawn_blocking(move || {
         let conn = pool.get()?;
         let on_progress = move |progress: engine::SyncProgress| {
@@ -244,7 +263,7 @@ pub async fn ensure_article_images_synced(state: &AppState, id: &str) {
         }
     };
 
-    let client = match engine::client_from_config(&config) {
+    let client = match cached_client(state, &config).await {
         Ok(client) => client,
         Err(err) => {
             tracing::warn!(%err, "could not build sync client for lazy image fetch");

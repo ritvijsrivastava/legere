@@ -1110,12 +1110,15 @@ fn source_from_row(row: &Row) -> rusqlite::Result<Source> {
         article_count: row.get("article_count")?,
         last_synced_at: row.get("last_synced_at")?,
         created_at: row.get("created_at")?,
+        feed_etag: row.get("feed_etag")?,
+        feed_last_modified: row.get("feed_last_modified")?,
     })
 }
 
 pub fn list_sources(conn: &Connection) -> rusqlite::Result<Vec<Source>> {
     let mut stmt = conn.prepare(
-        "SELECT id, name, type, feed_url, status, last_error, article_count, last_synced_at, created_at
+        "SELECT id, name, type, feed_url, status, last_error, article_count, last_synced_at, created_at,
+                feed_etag, feed_last_modified
          FROM sources ORDER BY created_at DESC",
     )?;
     let rows = stmt.query_map([], source_from_row)?;
@@ -1147,7 +1150,8 @@ pub fn list_recent_source_articles(
 
 pub fn get_source(conn: &Connection, id: &str) -> rusqlite::Result<Option<Source>> {
     conn.query_row(
-        "SELECT id, name, type, feed_url, status, last_error, article_count, last_synced_at, created_at
+        "SELECT id, name, type, feed_url, status, last_error, article_count, last_synced_at, created_at,
+                feed_etag, feed_last_modified
          FROM sources WHERE id = ?1",
         params![id],
         source_from_row,
@@ -1177,6 +1181,8 @@ pub fn insert_rss_source(
         article_count: 0,
         last_synced_at: None,
         created_at,
+        feed_etag: None,
+        feed_last_modified: None,
     })
 }
 
@@ -1235,6 +1241,24 @@ pub fn mark_source_error(conn: &Connection, id: &str, error: &str) -> rusqlite::
     conn.execute(
         "UPDATE sources SET status = 'error', last_error = ?1, updated_at = ?3 WHERE id = ?2",
         params![error, id, Utc::now().to_rfc3339()],
+    )?;
+    Ok(())
+}
+
+/// Caches `source`'s feed's latest `ETag`/`Last-Modified` response headers
+/// (whichever were present — either, both, or neither), so the next sync
+/// can send a conditional GET instead of unconditionally re-downloading the
+/// full feed body. Deliberately does not bump `updated_at`: this is a local
+/// HTTP-caching cache, not a user-visible or synced change to the source.
+pub fn update_source_feed_cache(
+    conn: &Connection,
+    id: &str,
+    etag: Option<&str>,
+    last_modified: Option<&str>,
+) -> rusqlite::Result<()> {
+    conn.execute(
+        "UPDATE sources SET feed_etag = ?1, feed_last_modified = ?2 WHERE id = ?3",
+        params![etag, last_modified, id],
     )?;
     Ok(())
 }

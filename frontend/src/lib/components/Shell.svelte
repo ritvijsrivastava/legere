@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import Logo from '$lib/icons/Logo.svelte';
 	import Library from '$lib/icons/Library.svelte';
@@ -15,7 +16,7 @@
 	import CategoryIcon from '$lib/components/CategoryIcon.svelte';
 	import { goto } from '$app/navigation';
 	import { isTauri } from '$lib/platform';
-	import { checkForUpdate, getLastDismissedVersion, setLastDismissedVersion } from '$lib/update';
+	import { checkForUpdateThrottled, getLastDismissedVersion, setLastDismissedVersion } from '$lib/update';
 	import UpdateToast from '$lib/components/UpdateToast.svelte';
 
 	let { children } = $props();
@@ -50,12 +51,20 @@
 	let updateAvailable = $state<{ version: string; notes?: string | null } | null>(null);
 
 	/** Fire-and-forget: check for an update without blocking or delaying page load.
-	 *  Skipped when landing directly on Settings — that page runs its own check
-	 *  on mount, and duplicating it here would just double the GitHub call. */
+	 *  Uses the throttled (24h, persisted) check since this runs on every app
+	 *  launch — a plain `checkForUpdate()` here would hit GitHub's API on
+	 *  every single launch, for an answer that's virtually always unchanged
+	 *  from the last one.
+	 *
+	 *  Landing directly on Settings isn't special-cased anymore: that page's
+	 *  own on-mount check is now *also* throttled, so both call sites sharing
+	 *  one persisted cache just means whichever one runs first makes the
+	 *  (at most once a day) network call and the other one reads the cache —
+	 *  not two separate GitHub calls. */
 	async function backgroundCheckForUpdate() {
-		if (!isTauri() || isSettings) return;
+		if (!isTauri()) return;
 		try {
-			const result = await checkForUpdate();
+			const result = await checkForUpdateThrottled();
 			if (!result.available) return;
 			const dismissed = await getLastDismissedVersion();
 			if (dismissed === result.version) return;
@@ -73,7 +82,12 @@
 
 	const showUpdatePrompt = $derived(updateAvailable !== null && !isSettings);
 
-	$effect(() => {
+	// Runs exactly once per app load, not on every navigation: deliberately
+	// an `onMount`-shaped one-shot, not an `$effect` that happens to read no
+	// reactive state (a previous version read `isSettings` here, which made
+	// this re-fire — and re-hit the network — on every single navigation
+	// into or out of Settings).
+	onMount(() => {
 		backgroundCheckForUpdate();
 	});
 

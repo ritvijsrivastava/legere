@@ -64,7 +64,13 @@ export function currentVersion(): Promise<string> {
 	return getVersion();
 }
 
-/** Check the latest release against the installed version. */
+/** Check the latest release against the installed version. Always hits the
+ *  network (GitHub's API, or the Tauri updater's own endpoint on desktop) —
+ *  use `checkForUpdateThrottled` everywhere that doesn't need a guaranteed-
+ *  fresh answer (i.e. everywhere except the explicit "Check now" button),
+ *  so routine/repeat checks don't re-hit it for an answer that's throttled
+ *  to once a day. Persists its result so the throttle window survives app
+ *  restarts, not just one session. */
 export async function checkForUpdate(): Promise<UpdateCheckResult> {
 	let command = 'check_for_update';
 	if (isAndroid()) {
@@ -75,7 +81,54 @@ export async function checkForUpdate(): Promise<UpdateCheckResult> {
 		if (kind === 'deb' || kind === 'rpm') command = 'linux_check_for_update';
 	}
 	const info = await invoke<UpdateInfo | null>(command);
-	return info ? { available: true, ...info } : { available: false };
+	const result: UpdateCheckResult = info ? { available: true, ...info } : { available: false };
+	persistLastCheck(result);
+	return result;
+}
+
+/** How long a cached `checkForUpdate()` result is trusted before
+ *  `checkForUpdateThrottled` will hit the network again. */
+const UPDATE_CHECK_TTL_MS = 24 * 60 * 60 * 1000;
+
+interface CachedUpdateCheck {
+	checkedAt: number;
+	result: UpdateCheckResult;
+}
+
+let cachedCheck: CachedUpdateCheck | null | undefined; // undefined = not loaded from the store yet
+
+async function loadCachedCheck(): Promise<CachedUpdateCheck | null> {
+	if (cachedCheck !== undefined) return cachedCheck;
+	try {
+		cachedCheck = (await invoke<CachedUpdateCheck | null>('get_last_update_check')) ?? null;
+	} catch {
+		cachedCheck = null;
+	}
+	return cachedCheck;
+}
+
+function persistLastCheck(result: UpdateCheckResult): void {
+	cachedCheck = { checkedAt: Date.now(), result };
+	// Fire-and-forget: a failed write just means the next check isn't
+	// throttled by a persisted timestamp, not a user-visible failure.
+	invoke('set_last_update_check', { value: cachedCheck }).catch(() => {});
+}
+
+/** Same as `checkForUpdate`, but skips the network call (and returns the
+ *  last cached result) if the last check completed less than
+ *  `UPDATE_CHECK_TTL_MS` ago — on this device, persisted across restarts.
+ *  Use this for anything that runs automatically (on launch, on every
+ *  Settings-page visit); reserve the uncached `checkForUpdate` for an
+ *  explicit, user-initiated "Check now". Returns `{ available: false }`
+ *  (not a throw) if nothing has ever been cached and the first real check
+ *  itself fails — callers already treat a failed check as "nothing to
+ *  show", not an error worth surfacing on an automatic check. */
+export async function checkForUpdateThrottled(): Promise<UpdateCheckResult> {
+	const cached = await loadCachedCheck();
+	if (cached && Date.now() - cached.checkedAt < UPDATE_CHECK_TTL_MS) {
+		return cached.result;
+	}
+	return checkForUpdate();
 }
 
 // A release's notes never change once published, but the Settings page is

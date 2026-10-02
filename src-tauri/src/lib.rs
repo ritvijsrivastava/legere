@@ -29,7 +29,10 @@ use tokio::sync::Mutex;
 use commands::update::update_channel;
 #[cfg(not(target_os = "android"))]
 use commands::update::{check_for_update, install_update};
-use commands::update::{get_last_dismissed_version, get_release_notes, set_last_dismissed_version};
+use commands::update::{
+    get_last_dismissed_version, get_last_update_check, get_release_notes,
+    set_last_dismissed_version, set_last_update_check,
+};
 #[cfg(all(target_os = "android", feature = "apk-self-update"))]
 use commands::update_android::{android_check_for_update, android_download_and_install};
 #[cfg(not(target_os = "android"))]
@@ -168,6 +171,7 @@ pub fn run() {
                 article_import_cancel: Mutex::new(None),
                 remote_sync_cancel: Mutex::new(None),
                 capture_jobs: Default::default(),
+                remote_sync_client_cache: Default::default(),
                 #[cfg(not(target_os = "android"))]
                 pending_update: Default::default(),
                 #[cfg(not(target_os = "android"))]
@@ -285,6 +289,8 @@ pub fn run() {
             commands::system::read_text_file,
             get_last_dismissed_version,
             set_last_dismissed_version,
+            get_last_update_check,
+            set_last_update_check,
             get_release_notes,
             update_channel,
             #[cfg(not(target_os = "android"))]

@@ -524,6 +524,7 @@ mod tests {
             article_import_cancel: Mutex::new(None),
             remote_sync_cancel: Mutex::new(None),
             capture_jobs: Default::default(),
+            remote_sync_client_cache: Default::default(),
             pending_update: Default::default(),
             pending_linux_update: Default::default(),
         }

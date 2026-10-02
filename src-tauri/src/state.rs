@@ -50,6 +50,21 @@ pub struct AppState {
     /// In-flight/failed "add a source" background captures — see
     /// `capture_jobs`'s module docs for why this is in-memory only.
     pub capture_jobs: CaptureJobs,
+    /// The cross-device sync `S3Client` built from the last-used
+    /// `RemoteSyncConfig`, kept alive (and its underlying `reqwest::Client`'s
+    /// connection pool/TLS sessions with it) across calls instead of
+    /// rebuilding one from scratch every scheduled/manual sync pass *and*
+    /// every lazy per-article image pull (`orchestrate::ensure_article_images_synced`
+    /// runs on every `open_for_reading`, which is far more often than a sync
+    /// pass). Keyed by the config itself (cheap to `Clone`/`PartialEq`) so a
+    /// saved config change is picked up automatically on the next use — no
+    /// separate invalidation path needed. See `remote_sync::orchestrate::cached_client`.
+    pub remote_sync_client_cache: Mutex<
+        Option<(
+            crate::db::sync_config::RemoteSyncConfig,
+            crate::remote_sync::client::S3Client,
+        )>,
+    >,
     /// Update found by `check_for_update`, consumed by `install_update`.
     /// tauri-plugin-updater doesn't support mobile, so this only exists on desktop.
     #[cfg(not(target_os = "android"))]

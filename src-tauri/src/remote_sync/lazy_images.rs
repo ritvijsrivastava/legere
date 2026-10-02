@@ -165,11 +165,15 @@ mod tests {
         pull_article_images(&client, data_dir.path(), "art-1", Some("media/art-1.jpg")).await;
 
         assert_eq!(
-            tokio::fs::read(data_dir.path().join("media/art-1.jpg")).await.unwrap(),
+            tokio::fs::read(data_dir.path().join("media/art-1.jpg"))
+                .await
+                .unwrap(),
             b"hero bytes"
         );
         assert_eq!(
-            tokio::fs::read(data_dir.path().join("content/art-1/sub/pic.jpg")).await.unwrap(),
+            tokio::fs::read(data_dir.path().join("content/art-1/sub/pic.jpg"))
+                .await
+                .unwrap(),
             b"pic bytes"
         );
     }
@@ -184,12 +188,16 @@ mod tests {
         let base_url = spawn_mock_s3(seed).await;
         let client = test_client(&base_url);
         let data_dir = tempfile::tempdir().unwrap();
-        tokio::fs::create_dir_all(data_dir.path().join("content/art-1")).await.unwrap();
+        tokio::fs::create_dir_all(data_dir.path().join("content/art-1"))
+            .await
+            .unwrap();
 
         pull_article_images(&client, data_dir.path(), "art-1", Some("media/art-1.jpg")).await;
 
         assert!(
-            !tokio::fs::try_exists(data_dir.path().join("media/art-1.jpg")).await.unwrap(),
+            !tokio::fs::try_exists(data_dir.path().join("media/art-1.jpg"))
+                .await
+                .unwrap(),
             "an already-present content dir must short-circuit before fetching anything"
         );
     }

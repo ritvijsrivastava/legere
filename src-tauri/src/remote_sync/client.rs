@@ -30,7 +30,10 @@ pub enum S3Error {
     /// The provider returned a non-2xx/404/412 status this client doesn't
     /// know how to interpret — carries the status and a snippet of the
     /// body for diagnostics.
-    UnexpectedStatus { status: u16, body: String },
+    UnexpectedStatus {
+        status: u16,
+        body: String,
+    },
 }
 
 impl std::fmt::Display for S3Error {
@@ -39,7 +42,10 @@ impl std::fmt::Display for S3Error {
             Self::InvalidBucketConfig(e) => write!(f, "invalid bucket configuration: {e:?}"),
             Self::Request(e) => write!(f, "request to object store failed: {e}"),
             Self::UnexpectedStatus { status, body } => {
-                write!(f, "object store returned unexpected status {status}: {body}")
+                write!(
+                    f,
+                    "object store returned unexpected status {status}: {body}"
+                )
             }
         }
     }
@@ -206,8 +212,7 @@ impl S3Client {
         let action = actions::DeleteObject::new(&self.bucket, Some(&self.credentials), key);
         let url = action.sign(PRESIGN_TTL);
         let response = self.http.delete(url).send().await?;
-        if !response.status().is_success() && response.status() != reqwest::StatusCode::NOT_FOUND
-        {
+        if !response.status().is_success() && response.status() != reqwest::StatusCode::NOT_FOUND {
             return Err(status_error(response).await);
         }
         Ok(())
@@ -225,7 +230,9 @@ impl S3Client {
             let mut action = actions::ListObjectsV2::new(&self.bucket, Some(&self.credentials));
             action.query_mut().insert("prefix", prefix);
             if let Some(token) = &continuation_token {
-                action.query_mut().insert("continuation-token", token.as_str());
+                action
+                    .query_mut()
+                    .insert("continuation-token", token.as_str());
             }
             let url = action.sign(PRESIGN_TTL);
 
@@ -234,8 +241,12 @@ impl S3Client {
                 return Err(status_error(response).await);
             }
             let text = response.text().await?;
-            let parsed = actions::ListObjectsV2::parse_response(&text)
-                .map_err(|e| S3Error::UnexpectedStatus { status: 200, body: e.to_string() })?;
+            let parsed = actions::ListObjectsV2::parse_response(&text).map_err(|e| {
+                S3Error::UnexpectedStatus {
+                    status: 200,
+                    body: e.to_string(),
+                }
+            })?;
 
             objects.extend(parsed.contents.into_iter().map(|c| ObjectInfo {
                 key: c.key,

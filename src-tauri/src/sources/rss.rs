@@ -28,14 +28,42 @@ const MAX_ENTRIES_PER_SYNC: usize = 30;
 /// captured articles.
 pub async fn sync_rss_source(state: &AppState, source: &Source) -> Result<u32, RssSyncError> {
     let feed_url = source.feed_url.as_deref().unwrap_or_default();
-    let bytes = state
-        .http_client
-        .get(feed_url)
-        .send()
-        .await?
-        .bytes()
-        .await?;
+
+    // Conditional GET: most feeds haven't changed since the last sync
+    // (hourly autosync against a slow-moving blog is the common case), so
+    // sending back whatever `ETag`/`Last-Modified` the last successful
+    // fetch returned lets a well-behaved server answer with a bodyless
+    // `304 Not Modified` instead of the full feed again. Either header
+    // (or both, or neither) may be absent — a server that ignores them
+    // entirely just always returns `200` with a full body, exactly like
+    // before this existed.
+    let mut request = state.http_client.get(feed_url);
+    if let Some(etag) = source.feed_etag.as_deref() {
+        request = request.header(reqwest::header::IF_NONE_MATCH, etag);
+    }
+    if let Some(last_modified) = source.feed_last_modified.as_deref() {
+        request = request.header(reqwest::header::IF_MODIFIED_SINCE, last_modified);
+    }
+    let response = request.send().await?;
+
+    if response.status() == reqwest::StatusCode::NOT_MODIFIED {
+        return Ok(0);
+    }
+
+    let etag = header_str(&response, reqwest::header::ETAG);
+    let last_modified = header_str(&response, reqwest::header::LAST_MODIFIED);
+    let bytes = response.bytes().await?;
     let feed = feed_rs::parser::parse(&bytes[..])?;
+
+    {
+        let conn = state.pool.get()?;
+        queries::update_source_feed_cache(
+            &conn,
+            &source.id,
+            etag.as_deref(),
+            last_modified.as_deref(),
+        )?;
+    }
 
     if let Some(title) = feed
         .title
@@ -87,6 +115,14 @@ pub async fn sync_rss_source(state: &AppState, source: &Source) -> Result<u32, R
     Ok(new_count)
 }
 
+fn header_str(response: &reqwest::Response, name: reqwest::header::HeaderName) -> Option<String> {
+    response
+        .headers()
+        .get(name)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string)
+}
+
 #[cfg(test)]
 mod tests {
     use tokio::sync::Mutex;
@@ -123,6 +159,7 @@ mod tests {
             article_import_cancel: Mutex::new(None),
             remote_sync_cancel: Mutex::new(None),
             capture_jobs: Default::default(),
+            remote_sync_client_cache: Default::default(),
             pending_update: Default::default(),
             pending_linux_update: Default::default(),
         };
@@ -179,6 +216,7 @@ mod tests {
             article_import_cancel: Mutex::new(None),
             remote_sync_cancel: Mutex::new(None),
             capture_jobs: Default::default(),
+            remote_sync_client_cache: Default::default(),
             pending_update: Default::default(),
             pending_linux_update: Default::default(),
         };

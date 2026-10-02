@@ -133,7 +133,10 @@ mod tests {
 
         let merged = merge_article_state(&winner, &loser);
         assert_eq!(merged.tags, vec!["async", "rust", "webdev"]);
-        assert_eq!(merged.reading_progress, 0.7, "further-along progress must survive");
+        assert_eq!(
+            merged.reading_progress, 0.7,
+            "further-along progress must survive"
+        );
         assert!(merged.favorited, "favorited on either side must survive");
     }
 
