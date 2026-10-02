@@ -2,11 +2,14 @@ mod capture;
 mod capture_jobs;
 mod commands;
 mod content_server;
+mod csv_source;
 mod db;
 mod error;
 mod events;
 mod export_paths;
 mod gc;
+#[cfg(target_os = "android")]
+mod import_intent;
 mod mobile_tls;
 mod models;
 mod remote_sync;

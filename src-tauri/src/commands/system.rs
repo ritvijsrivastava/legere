@@ -1,4 +1,6 @@
-use tauri::{AppHandle, State};
+#[cfg(not(target_os = "android"))]
+use tauri::AppHandle;
+use tauri::State;
 
 use crate::error::AppError;
 use crate::state::AppState;

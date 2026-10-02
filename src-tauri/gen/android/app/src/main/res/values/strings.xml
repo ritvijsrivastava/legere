@@ -18,4 +18,17 @@
     <string name="remote_sync_finished_text">"%1$d pulled, %2$d pushed"</string>
     <string name="remote_sync_failed_title">"Sync failed"</string>
     <string name="remote_sync_unknown_error">"Unknown error"</string>
+
+    <!-- Import notification (ImportWorker) -->
+    <string name="import_notification_channel_name">"Importing bookmarks"</string>
+    <string name="import_notification_channel_description">"Progress for a Raindrop.io or article CSV import"</string>
+    <string name="import_raindrop_running_title">"Importing bookmarks\u2026"</string>
+    <string name="import_articles_running_title">"Importing articles\u2026"</string>
+    <string name="import_progress_text">"%1$d of %2$d"</string>
+    <string name="import_raindrop_finished_title">"Bookmarks imported"</string>
+    <string name="import_articles_finished_title">"Articles imported"</string>
+    <string name="import_finished_text">"%1$d saved"</string>
+    <string name="import_cancelled_title">"Import cancelled"</string>
+    <string name="import_failed_title">"Import failed"</string>
+    <string name="import_unknown_error">"Unknown error"</string>
 </resources>
