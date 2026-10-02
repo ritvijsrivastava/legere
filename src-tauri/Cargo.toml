@@ -53,6 +53,7 @@ url = "2.5.8"
 uuid = { version = "1.24.0", features = ["v4"] }
 rusty-s3 = "0.10.2"
 hex = "0.4.3"
+tar = "0.4"
 
 # tauri-plugin-updater doesn't support mobile targets, so it's kept out of the
 # Android build entirely rather than compiled-but-unused.

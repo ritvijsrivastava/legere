@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::client::S3Client;
-use super::engine::{SyncError, blob_key};
+use super::engine::{SyncError, live_blob_keys};
 use super::manifest::Manifest;
 
 const BLOBS_PREFIX: &str = "legere-sync/blobs/";
@@ -41,10 +41,7 @@ pub async fn sweep_orphaned_blobs(
     manifest: &Manifest,
     cancel: &Arc<AtomicBool>,
 ) -> Result<usize, SyncError> {
-    let live_keys: HashSet<String> = manifest
-        .live_entries()
-        .map(|e| blob_key(e.entity_type, &e.id))
-        .collect();
+    let live_keys: HashSet<String> = live_blob_keys(manifest);
 
     let objects = client.list_objects_with_prefix(BLOBS_PREFIX).await?;
     let now = Utc::now();

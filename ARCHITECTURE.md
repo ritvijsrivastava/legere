@@ -379,6 +379,7 @@ syncs, by design — those are per-device choices, not library data.
 legere-sync/
   manifest.json.gz                      # small index: entries + tombstones
   blobs/articles/<id>/meta.json.gz      # full row: metadata + content_html
+  blobs/articles/<id>/content.tar.gz    # hero thumbnail + content/<id>/*, bundled
   blobs/categories/<id>.json.gz
   blobs/sources/<id>.json.gz
 ```
@@ -392,19 +393,32 @@ them.
 
 **Images:** synced too, on an eager-push/lazy-pull split rather than
 eagerly both ways. Pushing an article for the first time
-(`engine::push_articles`'s `is_new` check) uploads its hero thumbnail
-and every file under `content/<id>/` alongside its metadata; a later
-metadata-only push (a tag edit, a favorite toggle) never re-uploads them,
-since an existing id's images are immutable (the one thing that changes
-an article's images, re-capture, always produces a brand-new id).
+(`engine::push_articles`'s `is_new` check) uploads its hero thumbnail and
+every file under `content/<id>/` alongside its metadata, bundled into a
+single gzip-compressed tar archive (`blobs/articles/<id>/content.tar.gz`,
+`engine::build_article_archive`) rather than one bucket object per
+image/font/css file — a real 1,600+-article library was generating tens
+of thousands of object-store requests for what's fundamentally one "this
+article's assets" write per article under the original one-object-per-file
+scheme, so it was replaced with this single-archive scheme. A later
+metadata-only push (a tag edit, a favorite toggle) never re-uploads the
+archive, since an existing id's images are immutable (the one thing that
+changes an article's images, re-capture, always produces a brand-new id).
 Pulling devices don't download images as part of a regular sync pass,
-though: `remote_sync::lazy_images::pull_article_images` fetches them the
-first time an article is actually opened for reading
-(`commands::articles::open_for_reading`), awaited before the reader
-renders, so the first open of a newly-pulled article pays a one-time
-network cost instead of every device eagerly downloading every article's
-images regardless of whether it's ever opened there. A no-op if
-`content/<id>/` already exists locally, however it got there.
+though: `remote_sync::lazy_images::pull_article_images` fetches and
+unpacks that one archive the first time an article is actually opened for
+reading (`commands::articles::open_for_reading`), awaited before the
+reader renders, so the first open of a newly-pulled article pays one GET
+instead of every device eagerly downloading every article's images
+regardless of whether it's ever opened there. A no-op if `content/<id>/`
+already exists locally, however it got there. The archive key is not
+itself a manifest entry (nothing to diff/version in an
+immutable-once-pushed blob), so `bucket_gc::sweep_orphaned_blobs` has to
+be told about it explicitly via `engine::live_blob_keys` — omitting it
+from the live set used to mean every article's images looked orphaned to
+the sweep the moment they crossed `GC_GRACE_PERIOD` and got deleted out
+from under every device that hadn't yet lazily pulled them, a real bug
+fixed alongside the archive-bundling change above, not a hypothetical one.
 
 **The algorithm** (`remote_sync::engine::run_sync`), one pass:
 

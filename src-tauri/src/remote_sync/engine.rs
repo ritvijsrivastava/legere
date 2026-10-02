@@ -856,31 +856,43 @@ async fn push_categories(
     Ok(pushed)
 }
 
+/// The single bucket key an article's images (hero thumbnail plus every
+/// file under `content/<id>/`) are bundled into — see
+/// [`build_article_archive`]'s doc comment for why this is one tar.gz
+/// rather than one object per file. Also what `bucket_gc` treats as live
+/// alongside `blob_key(EntityType::Article, id)`, since it's never
+/// itself a manifest entry (there's nothing to diff/version in an
+/// immutable-once-pushed blob) and would otherwise look orphaned to the
+/// sweep the first time it crosses `GC_GRACE_PERIOD`.
+pub(super) fn article_images_key(id: &str) -> String {
+    format!("legere-sync/blobs/articles/{id}/content.tar.gz")
+}
+
 /// Uploads an article's images — its hero thumbnail (if any) and every
-/// file under `content/<id>/` — to the bucket. Only ever called for an
-/// article this device is pushing for the *first* time (see
-/// `push_articles`'s `is_new` check): a given id's images are immutable
-/// after capture (the one path that changes an article's content,
-/// re-capture, produces a brand-new id — see ARCHITECTURE.md's capture
-/// pipeline), so re-uploading them on every later metadata-only push
-/// (a tag edit, a favorite toggle, ...) would be pure waste. A missing
-/// local file (already evicted, or this row has no images at all) is
-/// skipped, not an error.
+/// file under `content/<id>/` — to the bucket as one gzip-compressed tar
+/// archive (see [`build_article_archive`]), rather than one PUT per file.
+/// Only ever called for an article this device is pushing for the
+/// *first* time (see `push_articles`'s `is_new` check): a given id's
+/// images are immutable after capture (the one path that changes an
+/// article's content, re-capture, produces a brand-new id — see
+/// ARCHITECTURE.md's capture pipeline), so re-uploading them on every
+/// later metadata-only push (a tag edit, a favorite toggle, ...) would be
+/// pure waste. A missing local file (already evicted, or this row has no
+/// images at all) is skipped, not an error; an article with no hero and
+/// no content directory uploads nothing at all.
 async fn upload_article_images(
     client: &S3Client,
     data_dir: &Path,
     id: &str,
     hero_image_path: Option<&str>,
 ) -> Result<(), S3Error> {
-    if let Some(hero) = hero_image_path
-        && let Ok(bytes) = tokio::fs::read(data_dir.join(hero)).await
-    {
-        client
-            .put_object(&format!("legere-sync/blobs/articles/{id}/hero.jpg"), bytes)
-            .await?;
-    }
+    let hero_bytes = match hero_image_path {
+        Some(hero) => tokio::fs::read(data_dir.join(hero)).await.ok(),
+        None => None,
+    };
 
     let content_dir = data_dir.join("content").join(id);
+    let mut content_files = Vec::new();
     for file in collect_files_recursively(&content_dir).await {
         let Ok(relative) = file.strip_prefix(&content_dir) else {
             continue;
@@ -891,15 +903,84 @@ async fn upload_article_images(
         let Ok(bytes) = tokio::fs::read(&file).await else {
             continue;
         };
-        client
-            .put_object(
-                &format!("legere-sync/blobs/articles/{id}/images/{relative_str}"),
-                bytes,
-            )
-            .await?;
+        content_files.push((relative_str.to_string(), bytes));
     }
 
+    if hero_bytes.is_none() && content_files.is_empty() {
+        return Ok(());
+    }
+
+    let archive = build_article_archive(hero_bytes, content_files);
+    client.put_object(&article_images_key(id), archive).await?;
     Ok(())
+}
+
+/// Packs an article's hero thumbnail (entry `"hero.jpg"`) and every
+/// `content/<id>/` file (entry `"content/<relative path>"`) into one
+/// gzip-compressed tar archive — one bucket object, one PUT/GET, instead
+/// of the one-request-per-file scheme this replaced. A real library
+/// (1,600+ articles, a dozen-plus image/font/css files each) was
+/// generating tens of thousands of individual object-store requests for
+/// what's fundamentally one logical "this article's assets" write per
+/// article; bundling cuts that down to one request per article
+/// regardless of how many files it contains.
+pub(super) fn build_article_archive(
+    hero_bytes: Option<Vec<u8>>,
+    content_files: Vec<(String, Vec<u8>)>,
+) -> Vec<u8> {
+    let encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    let mut builder = tar::Builder::new(encoder);
+
+    if let Some(bytes) = &hero_bytes {
+        append_tar_entry(&mut builder, "hero.jpg", bytes);
+    }
+    for (relative, bytes) in &content_files {
+        append_tar_entry(&mut builder, &format!("content/{relative}"), bytes);
+    }
+
+    builder
+        .into_inner()
+        .expect("writing tar entries to an in-memory Vec<u8> should never fail")
+        .finish()
+        .expect("finishing an in-memory gzip stream should never fail")
+}
+
+/// Appends one in-memory file to `builder` under `path`, owning its own
+/// `tar::Header` construction (mode/size/checksum) so neither caller of
+/// this has to repeat it. Writing to an in-memory `GzEncoder<Vec<u8>>>`
+/// cannot fail, so this unwraps rather than threading an `io::Result`
+/// through every call site.
+fn append_tar_entry<W: std::io::Write>(builder: &mut tar::Builder<W>, path: &str, bytes: &[u8]) {
+    let mut header = tar::Header::new_gnu();
+    header.set_size(bytes.len() as u64);
+    header.set_mode(0o644);
+    header.set_cksum();
+    builder
+        .append_data(&mut header, path, bytes)
+        .expect("appending a tar entry to an in-memory buffer should never fail");
+}
+
+/// Every bucket key `bucket_gc::sweep_orphaned_blobs` must treat as live
+/// for `manifest`'s current entries — not just `blob_key`'s per-entity
+/// metadata object, but also [`article_images_key`] for every live
+/// article, since that archive is never itself a manifest entry (it has
+/// no independent version to diff against; it's uploaded once alongside
+/// an article's first push and never touched again). Missing from this
+/// set used to mean every article's images looked orphaned to the sweep
+/// the moment they crossed `GC_GRACE_PERIOD` — a real bug this was added
+/// to fix, not a hypothetical one.
+pub(super) fn live_blob_keys(manifest: &Manifest) -> std::collections::HashSet<String> {
+    manifest
+        .live_entries()
+        .flat_map(|e| {
+            let meta = blob_key(e.entity_type, &e.id);
+            if e.entity_type == EntityType::Article {
+                vec![meta, article_images_key(&e.id)]
+            } else {
+                vec![meta]
+            }
+        })
+        .collect()
 }
 
 /// Every regular file under `dir`, recursively — `content/<id>/` can
@@ -1219,16 +1300,14 @@ mod tests {
         .await
         .unwrap();
 
-        let hero_key = "legere-sync/blobs/articles/art-1/hero.jpg";
-        let image_key = "legere-sync/blobs/articles/art-1/images/sub/image.jpg";
+        let images_key = "legere-sync/blobs/articles/art-1/content.tar.gz";
         let meta_key = "legere-sync/blobs/articles/art-1/meta.json.gz";
         {
             let guard = store.lock().unwrap();
-            assert_eq!(guard.get(hero_key).unwrap().2, 1, "hero must upload once");
             assert_eq!(
-                guard.get(image_key).unwrap().2,
+                guard.get(images_key).unwrap().2,
                 1,
-                "content image must upload once"
+                "hero + content images must upload once, bundled into a single archive"
             );
             assert_eq!(guard.get(meta_key).unwrap().2, 1);
         }
@@ -1254,14 +1333,9 @@ mod tests {
 
         let guard = store.lock().unwrap();
         assert_eq!(
-            guard.get(hero_key).unwrap().2,
+            guard.get(images_key).unwrap().2,
             1,
-            "hero must not be re-uploaded"
-        );
-        assert_eq!(
-            guard.get(image_key).unwrap().2,
-            1,
-            "content image must not be re-uploaded"
+            "image archive must not be re-uploaded"
         );
         assert_eq!(
             guard.get(meta_key).unwrap().2,
@@ -1337,6 +1411,48 @@ mod tests {
             blob_key(EntityType::Source, "abc"),
             "legere-sync/blobs/sources/abc/meta.json.gz"
         );
+    }
+
+    #[test]
+    fn live_blob_keys_includes_the_image_archive_for_live_articles_only() {
+        // Regression test: `article_images_key`'s archive is never a
+        // manifest entry in its own right (see that function's doc
+        // comment), so it used to be entirely absent from `live_keys` —
+        // which meant `bucket_gc::sweep_orphaned_blobs` treated every
+        // article's images as orphaned the moment they crossed
+        // `GC_GRACE_PERIOD`, deleting the bucket's only copy of them.
+        let manifest = Manifest {
+            version: 1,
+            entries: vec![
+                ManifestEntry {
+                    id: "art-1".to_string(),
+                    entity_type: EntityType::Article,
+                    conflict_key: "https://example.com/a".to_string(),
+                    updated_at: "2026-01-01T00:00:00Z".to_string(),
+                    created_at: "2026-01-01T00:00:00Z".to_string(),
+                    content_hash: "deadbeef".to_string(),
+                },
+                ManifestEntry {
+                    id: "src-1".to_string(),
+                    entity_type: EntityType::Source,
+                    conflict_key: "https://example.com/feed.xml".to_string(),
+                    updated_at: "2026-01-01T00:00:00Z".to_string(),
+                    created_at: "2026-01-01T00:00:00Z".to_string(),
+                    content_hash: "deadbeef".to_string(),
+                },
+            ],
+            tombstones: vec![],
+        };
+
+        let keys = live_blob_keys(&manifest);
+        assert!(keys.contains("legere-sync/blobs/articles/art-1/meta.json.gz"));
+        assert!(keys.contains(&article_images_key("art-1")));
+        assert!(keys.contains("legere-sync/blobs/sources/src-1/meta.json.gz"));
+        assert!(
+            !keys.contains(&article_images_key("src-1")),
+            "a non-article entity must never get an image-archive key"
+        );
+        assert_eq!(keys.len(), 3);
     }
 
     /// `(bytes, etag, put_count)` — `put_count` (times this exact key has

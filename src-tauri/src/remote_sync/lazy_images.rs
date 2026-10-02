@@ -7,17 +7,23 @@
 //! it's actually opened for reading — see
 //! `commands::articles::open_for_reading`.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::client::S3Client;
+use super::engine::article_images_key;
 
 /// A no-op if `content/<id>/` already exists locally — the heuristic for
 /// "this device already has this article's images," however they got
 /// there (a real local capture, or an earlier lazy pull). Best-effort
-/// throughout: a missing hero blob or a failed individual image write is
-/// skipped, not an error, since this must never block opening an article
-/// just because the network hiccupped — matches the offline-first
-/// principle everywhere else in the app.
+/// throughout: a missing archive blob, or a failure partway through
+/// unpacking it, is skipped, not an error, since this must never block
+/// opening an article just because the network hiccupped — matches the
+/// offline-first principle everywhere else in the app.
+///
+/// Fetches the one bundled `content.tar.gz` object `upload_article_images`
+/// wrote (see that doc comment, and [`extract_article_archive`]) rather
+/// than listing and fetching each image file individually — a single GET
+/// instead of a list-then-fetch-N-times round trip.
 pub async fn pull_article_images(
     client: &S3Client,
     data_dir: &Path,
@@ -29,37 +35,60 @@ pub async fn pull_article_images(
         return;
     }
 
-    if let Some(hero) = hero_image_path {
-        let hero_path = data_dir.join(hero);
-        let already_have_hero = tokio::fs::try_exists(&hero_path).await.unwrap_or(false);
-        if !already_have_hero {
-            let key = format!("legere-sync/blobs/articles/{id}/hero.jpg");
-            if let Ok(Some((bytes, _))) = client.get_object(&key).await {
-                if let Some(parent) = hero_path.parent() {
-                    let _ = tokio::fs::create_dir_all(parent).await;
-                }
-                let _ = tokio::fs::write(&hero_path, bytes).await;
-            }
-        }
-    }
-
-    let prefix = format!("legere-sync/blobs/articles/{id}/images/");
-    let Ok(objects) = client.list_objects_with_prefix(&prefix).await else {
+    let Ok(Some((bytes, _))) = client.get_object(&article_images_key(id)).await else {
         return;
     };
-    for object in objects {
-        let Some(relative) = object.key.strip_prefix(&prefix) else {
+
+    let data_dir = data_dir.to_path_buf();
+    let id = id.to_string();
+    let hero_image_path = hero_image_path.map(|s| s.to_string());
+    let _ = tokio::task::spawn_blocking(move || {
+        extract_article_archive(&bytes, &data_dir, &id, hero_image_path.as_deref())
+    })
+    .await;
+}
+
+/// Unpacks `bytes` (a `build_article_archive`-shaped gzip tar) onto disk:
+/// its `"hero.jpg"` entry (if any, and only if this article actually has
+/// a `hero_image_path`) to `data_dir.join(hero_image_path)`, and every
+/// `"content/..."` entry to `data_dir/content/<id>/...`. Synchronous
+/// (`std::fs`/`flate2`/`tar` are all blocking) — always run via
+/// `tokio::task::spawn_blocking`, never called directly from async code.
+/// Best-effort per the caller's doc comment: an unreadable archive or a
+/// single bad entry stops extraction early rather than panicking, since
+/// a partially-unpacked article is no worse than the pre-sync state (no
+/// images at all) and `open_for_reading` tolerates both equally.
+fn extract_article_archive(
+    bytes: &[u8],
+    data_dir: &Path,
+    id: &str,
+    hero_image_path: Option<&str>,
+) -> std::io::Result<()> {
+    let decoder = flate2::read::GzDecoder::new(bytes);
+    let mut archive = tar::Archive::new(decoder);
+    for entry in archive.entries()? {
+        let mut entry = entry?;
+        let path = entry.path()?.into_owned();
+        let Some(path_str) = path.to_str() else {
             continue;
         };
-        let Ok(Some((bytes, _))) = client.get_object(&object.key).await else {
+        let dest: PathBuf = if path_str == "hero.jpg" {
+            let Some(hero) = hero_image_path else {
+                continue;
+            };
+            data_dir.join(hero)
+        } else if let Some(relative) = path_str.strip_prefix("content/") {
+            data_dir.join("content").join(id).join(relative)
+        } else {
             continue;
         };
-        let dest = content_dir.join(relative);
         if let Some(parent) = dest.parent() {
-            let _ = tokio::fs::create_dir_all(parent).await;
+            std::fs::create_dir_all(parent)?;
         }
-        let _ = tokio::fs::write(&dest, bytes).await;
+        let mut file = std::fs::File::create(&dest)?;
+        std::io::copy(&mut entry, &mut file)?;
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -68,20 +97,23 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use axum::Router;
-    use axum::extract::{Path as AxumPath, Query, State};
+    use axum::extract::{Path as AxumPath, State};
     use axum::http::StatusCode;
     use axum::response::IntoResponse;
     use axum::routing::get;
 
     use super::*;
     use crate::remote_sync::client::{BucketConfig, S3Client};
+    use crate::remote_sync::engine::build_article_archive;
 
     type Store = Arc<Mutex<HashMap<String, Vec<u8>>>>;
 
     /// A read-only slice of the mock S3 server used elsewhere in this
     /// crate (see `engine.rs`'s own `spawn_mock_s3`), kept separate and
-    /// minimal here (GET only, no conditional-write handling) since
-    /// `lazy_images` never writes to the bucket, only reads from it.
+    /// minimal here (GET only, no conditional-write/listing handling)
+    /// since `lazy_images` never writes to the bucket, and only ever GETs
+    /// one known key per article (the bundled archive) rather than
+    /// listing.
     async fn spawn_mock_s3(seed: HashMap<String, Vec<u8>>) -> String {
         let store: Store = Arc::new(Mutex::new(seed));
 
@@ -95,36 +127,8 @@ mod tests {
             }
         }
 
-        // A minimal hand-rolled `ListObjectsV2` response — just enough XML
-        // for `rusty_s3::actions::ListObjectsV2::parse_response` to accept,
-        // filtered by the `prefix` query param the same way a real bucket
-        // would be. No pagination (`pull_article_images` never lists
-        // enough objects per article to need it).
-        async fn list_objects(
-            State(store): State<Store>,
-            AxumPath(_bucket): AxumPath<String>,
-            Query(params): Query<HashMap<String, String>>,
-        ) -> impl axum::response::IntoResponse {
-            let prefix = params.get("prefix").cloned().unwrap_or_default();
-            let guard = store.lock().unwrap();
-            let contents: String = guard
-                .keys()
-                .filter(|k| k.starts_with(&prefix))
-                .map(|k| {
-                    format!(
-                        "<Contents><Key>{k}</Key><ETag>&quot;x&quot;</ETag><LastModified>2024-01-01T00:00:00.000Z</LastModified><Size>1</Size></Contents>"
-                    )
-                })
-                .collect();
-            let body = format!(
-                "<?xml version=\"1.0\" encoding=\"UTF-8\"?><ListBucketResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">{contents}</ListBucketResult>"
-            );
-            (StatusCode::OK, [("content-type", "application/xml")], body).into_response()
-        }
-
         let app = Router::new()
             .route("/{bucket}/{*key}", get(get_object))
-            .route("/{bucket}/", get(list_objects))
             .with_state(store);
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -149,14 +153,14 @@ mod tests {
 
     #[tokio::test]
     async fn downloads_hero_and_every_content_image_when_missing_locally() {
+        let archive = build_article_archive(
+            Some(b"hero bytes".to_vec()),
+            vec![("sub/pic.jpg".to_string(), b"pic bytes".to_vec())],
+        );
         let mut seed = HashMap::new();
         seed.insert(
-            "legere-sync/blobs/articles/art-1/hero.jpg".to_string(),
-            b"hero bytes".to_vec(),
-        );
-        seed.insert(
-            "legere-sync/blobs/articles/art-1/images/sub/pic.jpg".to_string(),
-            b"pic bytes".to_vec(),
+            "legere-sync/blobs/articles/art-1/content.tar.gz".to_string(),
+            archive,
         );
         let base_url = spawn_mock_s3(seed).await;
         let client = test_client(&base_url);
@@ -180,10 +184,11 @@ mod tests {
 
     #[tokio::test]
     async fn does_nothing_if_the_content_directory_already_exists() {
+        let archive = build_article_archive(Some(b"hero bytes".to_vec()), vec![]);
         let mut seed = HashMap::new();
         seed.insert(
-            "legere-sync/blobs/articles/art-1/hero.jpg".to_string(),
-            b"hero bytes".to_vec(),
+            "legere-sync/blobs/articles/art-1/content.tar.gz".to_string(),
+            archive,
         );
         let base_url = spawn_mock_s3(seed).await;
         let client = test_client(&base_url);
