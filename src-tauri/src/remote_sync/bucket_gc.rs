@@ -31,11 +31,23 @@ const BLOBS_PREFIX: &str = "legere-sync/blobs/";
 /// shorter timescale appropriate to a single sync pass.
 const GC_GRACE_PERIOD: Duration = Duration::hours(1);
 
+/// How many keys go into a single `DeleteObjects` request — matches the
+/// S3 batch-delete API's own hard per-request cap, so a library with more
+/// orphans than this just needs more than one request, never a different
+/// code path.
+const DELETE_BATCH_SIZE: usize = 1000;
+
 /// Deletes every blob under `legere-sync/blobs/` that isn't referenced by
 /// `manifest`'s live entries and hasn't been modified within
-/// `GC_GRACE_PERIOD`. Returns how many were deleted. A failure partway
-/// through (one bad delete) stops the sweep but doesn't fail the sync
-/// pass that triggered it — see this module's caller in `engine.rs`.
+/// `GC_GRACE_PERIOD`, batching up to `DELETE_BATCH_SIZE` keys per
+/// `DeleteObjects` request (`S3Client::delete_objects`) instead of one
+/// `DELETE` per orphan — a real library can accumulate thousands of
+/// stale blobs (old captures' superseded images, aborted pushes, ...),
+/// and deleting them one request at a time was adding exactly the kind
+/// of request-count bloat this whole sync rework exists to avoid.
+/// Returns how many were deleted. A failure partway through (one bad
+/// batch) stops the sweep but doesn't fail the sync pass that triggered
+/// it — see this module's caller in `engine.rs`.
 pub async fn sweep_orphaned_blobs(
     client: &S3Client,
     manifest: &Manifest,
@@ -45,20 +57,22 @@ pub async fn sweep_orphaned_blobs(
 
     let objects = client.list_objects_with_prefix(BLOBS_PREFIX).await?;
     let now = Utc::now();
-    let mut deleted = 0;
+    let orphan_keys: Vec<String> = objects
+        .into_iter()
+        .filter(|object| {
+            !live_keys.contains(&object.key)
+                && is_older_than_grace_period(&object.last_modified, now)
+        })
+        .map(|object| object.key)
+        .collect();
 
-    for object in objects {
+    let mut deleted = 0;
+    for chunk in orphan_keys.chunks(DELETE_BATCH_SIZE) {
         if cancel.load(Ordering::Relaxed) {
             return Err(SyncError::Cancelled);
         }
-        if live_keys.contains(&object.key) {
-            continue;
-        }
-        if !is_older_than_grace_period(&object.last_modified, now) {
-            continue;
-        }
-        client.delete_object(&object.key).await?;
-        deleted += 1;
+        client.delete_objects(chunk).await?;
+        deleted += chunk.len();
     }
 
     Ok(deleted)
@@ -96,5 +110,180 @@ mod tests {
     fn unparseable_timestamp_is_treated_as_too_recent_to_touch() {
         let now = Utc::now();
         assert!(!is_older_than_grace_period("not-a-timestamp", now));
+    }
+
+    mod sweep {
+        //! End-to-end coverage of `sweep_orphaned_blobs` itself (not just
+        //! its pure helpers above) against an in-process mock S3 server:
+        //! proves an old, unreferenced blob is deleted, a live one
+        //! (including an article's image-archive key — the thing
+        //! `live_blob_keys` was added to fix, see `engine.rs`'s own
+        //! regression test) survives, and a too-recent orphan survives
+        //! its grace period. Also the one place the batched
+        //! `S3Client::delete_objects` path (`DeleteObjects`/`POST ?delete=1`)
+        //! gets exercised against a real HTTP round trip, since
+        //! `engine.rs`'s own mock server never seeds old-enough blobs to
+        //! trigger an actual delete.
+
+        use std::collections::HashMap;
+        use std::sync::Mutex;
+
+        use axum::Router;
+        use axum::body::Bytes;
+        use axum::extract::{Path as AxumPath, Query, State};
+        use axum::http::StatusCode;
+        use axum::response::IntoResponse;
+        use axum::routing::get;
+
+        use super::*;
+        use crate::remote_sync::client::{BucketConfig, S3Client};
+        use crate::remote_sync::engine::article_images_key;
+        use crate::remote_sync::manifest::{EntityType, ManifestEntry};
+
+        type Store = Arc<Mutex<HashMap<String, String>>>;
+
+        async fn spawn_mock_s3(seed: HashMap<String, String>) -> (String, Store) {
+            let store: Store = Arc::new(Mutex::new(seed));
+
+            async fn list_objects(
+                State(store): State<Store>,
+                AxumPath(_bucket): AxumPath<String>,
+                Query(params): Query<HashMap<String, String>>,
+            ) -> impl IntoResponse {
+                let prefix = params.get("prefix").cloned().unwrap_or_default();
+                let guard = store.lock().unwrap();
+                let contents: String = guard
+                    .iter()
+                    .filter(|(k, _)| k.starts_with(&prefix))
+                    .map(|(k, last_modified)| {
+                        format!(
+                            "<Contents><Key>{k}</Key><ETag>&quot;x&quot;</ETag><LastModified>{last_modified}</LastModified><Size>1</Size></Contents>"
+                        )
+                    })
+                    .collect();
+                let body = format!(
+                    "<?xml version=\"1.0\" encoding=\"UTF-8\"?><ListBucketResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">{contents}</ListBucketResult>"
+                );
+                (StatusCode::OK, [("content-type", "application/xml")], body)
+            }
+
+            async fn delete_objects(
+                State(store): State<Store>,
+                AxumPath(_bucket): AxumPath<String>,
+                body: Bytes,
+            ) -> impl IntoResponse {
+                // A hand-rolled extraction of every `<Key>...</Key>` in the
+                // `DeleteObjects` XML request body — good enough for this
+                // mock, no need to pull in a full XML parser just to read
+                // back what `rusty_s3::actions::DeleteObjects::body_with_md5`
+                // itself just generated.
+                let text = String::from_utf8_lossy(&body);
+                let mut guard = store.lock().unwrap();
+                for segment in text.split("<Key>").skip(1) {
+                    if let Some(end) = segment.find("</Key>") {
+                        guard.remove(&segment[..end]);
+                    }
+                }
+                (
+                    StatusCode::OK,
+                    [("content-type", "application/xml")],
+                    "<DeleteResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"></DeleteResult>",
+                )
+            }
+
+            let app = Router::new()
+                .route("/{bucket}/", get(list_objects).post(delete_objects))
+                .with_state(store.clone());
+
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            tokio::spawn(async move {
+                axum::serve(listener, app).await.unwrap();
+            });
+            (format!("http://localhost:{}", addr.port()), store)
+        }
+
+        fn test_client(base_url: &str) -> S3Client {
+            S3Client::new(&BucketConfig {
+                endpoint: base_url.parse().unwrap(),
+                bucket_name: "test-bucket".to_string(),
+                region: "auto".to_string(),
+                use_path_style: true,
+                access_key: "key".to_string(),
+                secret_key: "secret".to_string(),
+            })
+            .unwrap()
+        }
+
+        fn article_entry(id: &str) -> ManifestEntry {
+            ManifestEntry {
+                id: id.to_string(),
+                entity_type: EntityType::Article,
+                conflict_key: format!("https://example.com/{id}"),
+                updated_at: "2026-01-01T00:00:00Z".to_string(),
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+                content_hash: "deadbeef".to_string(),
+            }
+        }
+
+        #[tokio::test]
+        async fn deletes_old_orphans_but_keeps_live_keys_and_too_recent_ones() {
+            let now = Utc::now();
+            let old = (now - Duration::hours(2)).to_rfc3339();
+            let recent = now.to_rfc3339();
+
+            let mut seed = HashMap::new();
+            // Live article: both its meta blob and image archive must
+            // survive, regardless of age.
+            seed.insert(
+                "legere-sync/blobs/articles/art-live/meta.json.gz".to_string(),
+                old.clone(),
+            );
+            seed.insert(article_images_key("art-live"), old.clone());
+            // A real orphan: old enough, not referenced by any live entry.
+            seed.insert(
+                "legere-sync/blobs/articles/art-gone/meta.json.gz".to_string(),
+                old.clone(),
+            );
+            // Looks orphaned too, but too recent — another device may
+            // have just uploaded it and not yet written its own manifest.
+            seed.insert(
+                "legere-sync/blobs/articles/art-brand-new/meta.json.gz".to_string(),
+                recent,
+            );
+
+            let (base_url, store) = spawn_mock_s3(seed).await;
+            let client = test_client(&base_url);
+            let manifest = Manifest {
+                version: 1,
+                entries: vec![article_entry("art-live")],
+                tombstones: vec![],
+            };
+            let cancel = Arc::new(AtomicBool::new(false));
+
+            let deleted = sweep_orphaned_blobs(&client, &manifest, &cancel)
+                .await
+                .unwrap();
+
+            assert_eq!(deleted, 1, "only the one true orphan must be deleted");
+            let guard = store.lock().unwrap();
+            assert!(
+                guard.contains_key("legere-sync/blobs/articles/art-live/meta.json.gz"),
+                "a live article's metadata must survive"
+            );
+            assert!(
+                guard.contains_key(&article_images_key("art-live")),
+                "a live article's image archive must survive — the bug this module's \
+                 `live_blob_keys` fixes"
+            );
+            assert!(
+                !guard.contains_key("legere-sync/blobs/articles/art-gone/meta.json.gz"),
+                "a real, aged orphan must be deleted"
+            );
+            assert!(
+                guard.contains_key("legere-sync/blobs/articles/art-brand-new/meta.json.gz"),
+                "an orphan-looking blob inside its grace period must survive"
+            );
+        }
     }
 }

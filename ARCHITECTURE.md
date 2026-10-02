@@ -592,7 +592,11 @@ references and that are at least an hour old (a grace period, not
 immediate, since a blob another device just uploaded but hasn't yet
 registered in its own manifest write would otherwise look identically
 orphaned and get deleted out from under it) at the end of every
-successful pass; a sweep failure is logged, not treated as the sync
+successful pass, deleting up to 1,000 orphans per `DeleteObjects` batch
+request (`S3Client::delete_objects`) rather than one `DELETE` per orphan —
+a library that's accumulated thousands of stale blobs used to mean
+thousands of individual delete requests, undoing exactly the request-count
+savings the rest of this section describes; a sweep failure is logged, not treated as the sync
 itself failing.
 
 ## Storage and schema

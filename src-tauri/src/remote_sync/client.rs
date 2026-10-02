@@ -218,6 +218,42 @@ impl S3Client {
         Ok(())
     }
 
+    /// Deletes every key in `keys` using the S3 `DeleteObjects` batch API
+    /// — one `POST` per up to 1000 keys (the API's own hard per-request
+    /// cap) rather than one `DELETE` per key. Backs `bucket_gc`'s orphan
+    /// sweep, which can delete thousands of objects in one pass on a
+    /// large library; batching turns that into single-digit requests
+    /// instead of thousands. Deleting an already-missing key is not an
+    /// error (matches [`Self::delete_object`]'s tolerance), and
+    /// per-key errors reported inside an otherwise-2xx batch response are
+    /// not surfaced here either — the caller (`bucket_gc`) treats GC as
+    /// best-effort overall, same as every individual delete already did.
+    pub async fn delete_objects(&self, keys: &[String]) -> Result<(), S3Error> {
+        const MAX_KEYS_PER_REQUEST: usize = 1000;
+        for chunk in keys.chunks(MAX_KEYS_PER_REQUEST) {
+            let objects: Vec<actions::ObjectIdentifier> = chunk
+                .iter()
+                .cloned()
+                .map(actions::ObjectIdentifier::new)
+                .collect();
+            let action =
+                actions::DeleteObjects::new(&self.bucket, Some(&self.credentials), objects.iter());
+            let url = action.sign(PRESIGN_TTL);
+            let (body, content_md5) = action.body_with_md5();
+            let response = self
+                .http
+                .post(url)
+                .header("Content-MD5", content_md5)
+                .body(body)
+                .send()
+                .await?;
+            if !response.status().is_success() {
+                return Err(status_error(response).await);
+            }
+        }
+        Ok(())
+    }
+
     /// Lists every object key under `prefix`, paginating through as many
     /// `ListObjectsV2` pages as the bucket returns. Backs
     /// `remote_sync::gc`'s orphaned-blob sweep, the only caller that
