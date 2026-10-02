@@ -10,20 +10,24 @@
 use std::path::{Path, PathBuf};
 
 use super::client::S3Client;
-use super::engine::article_images_key;
+use super::engine::{article_images_key, shared_image_key};
 
 /// A no-op if `content/<id>/` already exists locally — the heuristic for
 /// "this device already has this article's images," however they got
 /// there (a real local capture, or an earlier lazy pull). Best-effort
-/// throughout: a missing archive blob, or a failure partway through
-/// unpacking it, is skipped, not an error, since this must never block
-/// opening an article just because the network hiccupped — matches the
-/// offline-first principle everywhere else in the app.
+/// throughout: a missing archive blob, a missing shared blob behind a
+/// pointer entry, or a failure partway through unpacking, is skipped,
+/// not an error, since this must never block opening an article just
+/// because the network hiccupped — matches the offline-first principle
+/// everywhere else in the app.
 ///
-/// Fetches the one bundled `content.tar.gz` object `upload_article_images`
-/// wrote (see that doc comment, and [`extract_article_archive`]) rather
-/// than listing and fetching each image file individually — a single GET
-/// instead of a list-then-fetch-N-times round trip.
+/// Fetches the one bundled `content.tar.gz` object
+/// `engine::prepare_article_images` wrote (see that doc comment, and
+/// [`extract_article_archive`]) rather than listing and fetching each
+/// image file individually — a single GET instead of a
+/// list-then-fetch-N-times round trip, plus one more GET per
+/// cross-article-deduplicated image this particular article references
+/// (`engine::ArchiveEntryBody::Pointer`), typically none at all.
 pub async fn pull_article_images(
     client: &S3Client,
     data_dir: &Path,
@@ -39,19 +43,38 @@ pub async fn pull_article_images(
         return;
     };
 
-    let data_dir = data_dir.to_path_buf();
-    let id = id.to_string();
-    let hero_image_path = hero_image_path.map(|s| s.to_string());
-    let _ = tokio::task::spawn_blocking(move || {
-        extract_article_archive(&bytes, &data_dir, &id, hero_image_path.as_deref())
+    let data_dir_owned = data_dir.to_path_buf();
+    let id_owned = id.to_string();
+    let hero_owned = hero_image_path.map(|s| s.to_string());
+    let Ok(Ok(pending_pointers)) = tokio::task::spawn_blocking(move || {
+        extract_article_archive(&bytes, &data_dir_owned, &id_owned, hero_owned.as_deref())
     })
-    .await;
+    .await
+    else {
+        return;
+    };
+
+    for (dest, content_hash) in pending_pointers {
+        let Ok(Some((bytes, _))) = client.get_object(&shared_image_key(&content_hash)).await else {
+            continue;
+        };
+        if let Some(parent) = dest.parent() {
+            let _ = tokio::fs::create_dir_all(parent).await;
+        }
+        let _ = tokio::fs::write(&dest, bytes).await;
+    }
 }
 
-/// Unpacks `bytes` (a `build_article_archive`-shaped gzip tar) onto disk:
-/// its `"hero.jpg"` entry (if any, and only if this article actually has
-/// a `hero_image_path`) to `data_dir.join(hero_image_path)`, and every
-/// `"content/..."` entry to `data_dir/content/<id>/...`. Synchronous
+/// Unpacks `bytes` (an `engine::build_archive`-shaped gzip tar) onto
+/// disk: its `"hero.jpg"` entry (if any, and only if this article
+/// actually has a `hero_image_path`) to `data_dir.join(hero_image_path)`,
+/// and every `"content/..."` entry to `data_dir/content/<id>/...`. An
+/// entry whose path ends in `.ref` (`engine::ArchiveEntryBody::Pointer`)
+/// is a cross-article-deduplicated image: its body is just the hex
+/// content hash, not the bytes, so instead of writing it directly this
+/// returns `(destination path, hash)` for the async caller to resolve
+/// against [`shared_image_key`] — a separate step since fetching that
+/// blob needs the network client, and this function is synchronous
 /// (`std::fs`/`flate2`/`tar` are all blocking) — always run via
 /// `tokio::task::spawn_blocking`, never called directly from async code.
 /// Best-effort per the caller's doc comment: an unreadable archive or a
@@ -63,14 +86,19 @@ fn extract_article_archive(
     data_dir: &Path,
     id: &str,
     hero_image_path: Option<&str>,
-) -> std::io::Result<()> {
+) -> std::io::Result<Vec<(PathBuf, String)>> {
     let decoder = flate2::read::GzDecoder::new(bytes);
     let mut archive = tar::Archive::new(decoder);
+    let mut pending_pointers = Vec::new();
     for entry in archive.entries()? {
         let mut entry = entry?;
         let path = entry.path()?.into_owned();
         let Some(path_str) = path.to_str() else {
             continue;
+        };
+        let (path_str, is_pointer) = match path_str.strip_suffix(".ref") {
+            Some(stripped) => (stripped, true),
+            None => (path_str, false),
         };
         let dest: PathBuf = if path_str == "hero.jpg" {
             let Some(hero) = hero_image_path else {
@@ -82,13 +110,21 @@ fn extract_article_archive(
         } else {
             continue;
         };
+
+        if is_pointer {
+            let mut content_hash = String::new();
+            std::io::Read::read_to_string(&mut entry, &mut content_hash)?;
+            pending_pointers.push((dest, content_hash));
+            continue;
+        }
+
         if let Some(parent) = dest.parent() {
             std::fs::create_dir_all(parent)?;
         }
         let mut file = std::fs::File::create(&dest)?;
         std::io::copy(&mut entry, &mut file)?;
     }
-    Ok(())
+    Ok(pending_pointers)
 }
 
 #[cfg(test)]

@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::client::S3Client;
-use super::engine::{SyncError, live_blob_keys};
+use super::engine::{SHARED_IMAGES_PREFIX, SyncError, live_blob_keys};
 use super::manifest::Manifest;
 
 const BLOBS_PREFIX: &str = "legere-sync/blobs/";
@@ -45,6 +45,14 @@ const DELETE_BATCH_SIZE: usize = 1000;
 /// stale blobs (old captures' superseded images, aborted pushes, ...),
 /// and deleting them one request at a time was adding exactly the kind
 /// of request-count bloat this whole sync rework exists to avoid.
+/// Everything under [`SHARED_IMAGES_PREFIX`] is skipped entirely, never
+/// even considered: nothing tracks which articles' archives still
+/// reference a given shared blob by pointer (see
+/// `engine::ArchiveEntryBody::Pointer`), so there is no safe way to tell
+/// a truly-unreferenced one apart from one several other articles still
+/// point at — treating all of them as permanently live is the simple,
+/// safe default; the set is expected to stay small (one entry per
+/// *distinct* deduplicated asset, not per article that reuses it).
 /// Returns how many were deleted. A failure partway through (one bad
 /// batch) stops the sweep but doesn't fail the sync pass that triggered
 /// it — see this module's caller in `engine.rs`.
@@ -60,7 +68,8 @@ pub async fn sweep_orphaned_blobs(
     let orphan_keys: Vec<String> = objects
         .into_iter()
         .filter(|object| {
-            !live_keys.contains(&object.key)
+            !object.key.starts_with(SHARED_IMAGES_PREFIX)
+                && !live_keys.contains(&object.key)
                 && is_older_than_grace_period(&object.last_modified, now)
         })
         .map(|object| object.key)

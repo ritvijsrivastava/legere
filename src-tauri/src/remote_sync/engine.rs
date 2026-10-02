@@ -26,6 +26,7 @@ use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 
 use crate::db::sync_config::RemoteSyncConfig;
+use crate::db::sync_image_blobs;
 use crate::db::sync_rows::{self, LocalTombstone, SyncArticleRow, SyncCategoryRow, SyncSourceRow};
 
 use super::client::{BucketConfig, PutOutcome, S3Client, S3Error};
@@ -879,24 +880,94 @@ pub(super) fn article_images_key(id: &str) -> String {
     format!("legere-sync/blobs/articles/{id}/content.tar.gz")
 }
 
-/// Uploads an article's images — its hero thumbnail (if any) and every
-/// file under `content/<id>/` — to the bucket as one gzip-compressed tar
-/// archive (see [`build_article_archive`]), rather than one PUT per file.
-/// Only ever called for an article this device is pushing for the
-/// *first* time (see `push_articles`'s `is_new` check): a given id's
-/// images are immutable after capture (the one path that changes an
-/// article's content, re-capture, produces a brand-new id — see
-/// ARCHITECTURE.md's capture pipeline), so re-uploading them on every
-/// later metadata-only push (a tag edit, a favorite toggle, ...) would be
-/// pure waste. A missing local file (already evicted, or this row has no
-/// images at all) is skipped, not an error; an article with no hero and
-/// no content directory uploads nothing at all.
-async fn upload_article_images(
-    client: &S3Client,
+/// Where a cross-article-deduplicated image's bytes live once promoted —
+/// content-addressed, so every article whose own copy shares the exact
+/// same bytes points at this one key instead of re-embedding them. See
+/// `db::sync_image_blobs`'s doc comment for the promotion rule, and
+/// `bucket_gc`'s sweep for why objects under this prefix are never
+/// garbage-collected (nothing tracks which articles still reference one).
+pub(super) const SHARED_IMAGES_PREFIX: &str = "legere-sync/blobs/shared-images/";
+
+pub(super) fn shared_image_key(content_hash: &str) -> String {
+    format!("{SHARED_IMAGES_PREFIX}{content_hash}")
+}
+
+/// What `prepare_article_images` decided to do with one article's images
+/// — built sequentially (it needs `&Connection` for dedup bookkeeping,
+/// which the concurrent upload phase that follows can't hold, see
+/// `push_articles`), then handed off to `push_concurrently` for the
+/// actual, network-only PUTs.
+#[derive(Debug, Default)]
+struct ArticleImagePrep {
+    /// This article's own bundled archive, if it has any images at all
+    /// (`None` for an article with no hero and no content directory).
+    archive_bytes: Option<Vec<u8>>,
+    /// Shared, content-addressed blobs this article's prep newly
+    /// promoted — almost always empty; see
+    /// `db::sync_image_blobs::HashSighting::JustPromoted`. Each must be
+    /// uploaded (once) alongside this article's own archive.
+    shared_blobs: Vec<(String, Vec<u8>)>,
+}
+
+/// One entry pending inside an article's archive: either the file's
+/// actual bytes (first sighting of this content, anywhere), or a pointer
+/// at a shared blob by content hash (second-or-later sighting).
+enum ArchiveEntryBody {
+    Literal(Vec<u8>),
+    Pointer { content_hash: String },
+}
+
+/// Hashes `bytes`, records the sighting via
+/// `db::sync_image_blobs::record_sighting`, and decides how `path`
+/// should be represented in the article archive being built — appending
+/// either a literal entry or a pointer to `entries`, and, the one time a
+/// hash crosses from first to second sighting, queuing the shared blob
+/// upload in `shared_blobs`.
+fn stage_archive_entry(
+    conn: &Connection,
+    path: String,
+    bytes: Vec<u8>,
+    entries: &mut Vec<(String, ArchiveEntryBody)>,
+    shared_blobs: &mut Vec<(String, Vec<u8>)>,
+) -> rusqlite::Result<()> {
+    let hash = content_hash(&bytes);
+    match sync_image_blobs::record_sighting(conn, &hash)? {
+        sync_image_blobs::HashSighting::First => {
+            entries.push((path, ArchiveEntryBody::Literal(bytes)));
+        }
+        sync_image_blobs::HashSighting::JustPromoted => {
+            shared_blobs.push((shared_image_key(&hash), bytes));
+            entries.push((path, ArchiveEntryBody::Pointer { content_hash: hash }));
+        }
+        sync_image_blobs::HashSighting::AlreadyPromoted => {
+            entries.push((path, ArchiveEntryBody::Pointer { content_hash: hash }));
+        }
+    }
+    Ok(())
+}
+
+/// Reads an article's images off disk — its hero thumbnail (if any) and
+/// every file under `content/<id>/` — and decides, per file, whether to
+/// embed it literally or point at a shared blob (see
+/// `stage_archive_entry`), packing the result into one gzip-compressed
+/// tar archive (`ArticleImagePrep::archive_bytes`). Only ever called for
+/// an article this device is pushing for the *first* time (see
+/// `push_articles`'s `is_new` check): a given id's images are immutable
+/// after capture (the one path that changes an article's content,
+/// re-capture, produces a brand-new id — see ARCHITECTURE.md's capture
+/// pipeline), so re-running this on every later metadata-only push (a
+/// tag edit, a favorite toggle, ...) would be pure waste. A missing
+/// local file (already evicted, or this row has no images at all) is
+/// skipped, not an error; an article with no hero and no content
+/// directory produces no archive at all. Sequential and
+/// `&Connection`-bound by design — see `ArticleImagePrep`'s doc comment —
+/// never called from inside a concurrently-spawned upload task.
+async fn prepare_article_images(
+    conn: &Connection,
     data_dir: &Path,
     id: &str,
     hero_image_path: Option<&str>,
-) -> Result<(), S3Error> {
+) -> Result<ArticleImagePrep, SyncError> {
     let hero_bytes = match hero_image_path {
         Some(hero) => tokio::fs::read(data_dir.join(hero)).await.ok(),
         None => None,
@@ -918,35 +989,59 @@ async fn upload_article_images(
     }
 
     if hero_bytes.is_none() && content_files.is_empty() {
-        return Ok(());
+        return Ok(ArticleImagePrep::default());
     }
 
-    let archive = build_article_archive(hero_bytes, content_files);
-    client.put_object(&article_images_key(id), archive).await?;
-    Ok(())
+    let mut entries = Vec::new();
+    let mut shared_blobs = Vec::new();
+    if let Some(bytes) = hero_bytes {
+        stage_archive_entry(
+            conn,
+            "hero.jpg".to_string(),
+            bytes,
+            &mut entries,
+            &mut shared_blobs,
+        )?;
+    }
+    for (relative, bytes) in content_files {
+        stage_archive_entry(
+            conn,
+            format!("content/{relative}"),
+            bytes,
+            &mut entries,
+            &mut shared_blobs,
+        )?;
+    }
+
+    Ok(ArticleImagePrep {
+        archive_bytes: Some(build_archive(entries)),
+        shared_blobs,
+    })
 }
 
-/// Packs an article's hero thumbnail (entry `"hero.jpg"`) and every
-/// `content/<id>/` file (entry `"content/<relative path>"`) into one
-/// gzip-compressed tar archive — one bucket object, one PUT/GET, instead
-/// of the one-request-per-file scheme this replaced. A real library
-/// (1,600+ articles, a dozen-plus image/font/css files each) was
-/// generating tens of thousands of individual object-store requests for
-/// what's fundamentally one logical "this article's assets" write per
-/// article; bundling cuts that down to one request per article
-/// regardless of how many files it contains.
-pub(super) fn build_article_archive(
-    hero_bytes: Option<Vec<u8>>,
-    content_files: Vec<(String, Vec<u8>)>,
-) -> Vec<u8> {
+/// Packs `entries` into one gzip-compressed tar archive — one bucket
+/// object, one PUT/GET, instead of the one-request-per-file scheme this
+/// replaced. A real library (1,600+ articles, a dozen-plus image/font/css
+/// files each) was generating tens of thousands of individual
+/// object-store requests for what's fundamentally one logical "this
+/// article's assets" write per article; bundling cuts that down to one
+/// request per article regardless of how many files it contains. An
+/// [`ArchiveEntryBody::Pointer`] entry is written as `<path>.ref`
+/// containing just the hex content hash, not the bytes themselves — see
+/// `lazy_images::extract_article_archive` for the matching read side.
+fn build_archive(entries: Vec<(String, ArchiveEntryBody)>) -> Vec<u8> {
     let encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
     let mut builder = tar::Builder::new(encoder);
 
-    if let Some(bytes) = &hero_bytes {
-        append_tar_entry(&mut builder, "hero.jpg", bytes);
-    }
-    for (relative, bytes) in &content_files {
-        append_tar_entry(&mut builder, &format!("content/{relative}"), bytes);
+    for (path, body) in &entries {
+        match body {
+            ArchiveEntryBody::Literal(bytes) => append_tar_entry(&mut builder, path, bytes),
+            ArchiveEntryBody::Pointer { content_hash } => append_tar_entry(
+                &mut builder,
+                &format!("{path}.ref"),
+                content_hash.as_bytes(),
+            ),
+        }
     }
 
     builder
@@ -954,6 +1049,29 @@ pub(super) fn build_article_archive(
         .expect("writing tar entries to an in-memory Vec<u8> should never fail")
         .finish()
         .expect("finishing an in-memory gzip stream should never fail")
+}
+
+/// Convenience for building an archive with every file embedded
+/// literally and no dedup decisions — what tests use to seed a mock
+/// bucket. Production pushes always go through `prepare_article_images`/
+/// `build_archive` directly instead, since dedup needs `&Connection`
+/// access this function doesn't have.
+#[cfg(test)]
+pub(super) fn build_article_archive(
+    hero_bytes: Option<Vec<u8>>,
+    content_files: Vec<(String, Vec<u8>)>,
+) -> Vec<u8> {
+    let mut entries = Vec::new();
+    if let Some(bytes) = hero_bytes {
+        entries.push(("hero.jpg".to_string(), ArchiveEntryBody::Literal(bytes)));
+    }
+    for (relative, bytes) in content_files {
+        entries.push((
+            format!("content/{relative}"),
+            ArchiveEntryBody::Literal(bytes),
+        ));
+    }
+    build_archive(entries)
 }
 
 /// Appends one in-memory file to `builder` under `path`, owning its own
@@ -1042,39 +1160,54 @@ async fn push_articles(
         })
         .collect();
 
-    let data_dir = data_dir.to_path_buf();
+    // Image dedup bookkeeping (`prepare_article_images`) needs
+    // `&Connection`, which the concurrent upload phase below can't hold
+    // (`rusqlite::Connection` isn't `Sync`, so a `tokio::task::JoinSet`-
+    // spawned future can't capture it) — so every new article's images
+    // are read, hashed, and dedup-decided sequentially here, up front.
+    // This is all local disk + DB work, no network, so sequential is
+    // cheap; only the actual PUTs below need to run concurrently.
+    let mut prepared: Vec<(SyncArticleRow, ArticleImagePrep)> = Vec::with_capacity(to_push.len());
+    for (row, is_new) in to_push {
+        if cancel.load(Ordering::Relaxed) {
+            return Err(SyncError::Cancelled);
+        }
+        let prep = if is_new {
+            prepare_article_images(conn, data_dir, &row.id, row.hero_image_path.as_deref()).await?
+        } else {
+            ArticleImagePrep::default()
+        };
+        prepared.push((row, prep));
+    }
+
     let new_entries = push_concurrently(
         client,
-        to_push,
+        prepared,
         SyncPhase::PushArticles,
         cancel,
         on_progress,
-        move |client, (row, is_new)| {
-            let data_dir = data_dir.clone();
-            async move {
-                if is_new {
-                    upload_article_images(
-                        &client,
-                        &data_dir,
-                        &row.id,
-                        row.hero_image_path.as_deref(),
-                    )
-                    .await?;
-                }
-                let bytes = gz_json(&row);
-                let hash = content_hash(&bytes);
-                client
-                    .put_object(&blob_key(EntityType::Article, &row.id), bytes)
-                    .await?;
-                Ok(ManifestEntry {
-                    id: row.id.clone(),
-                    entity_type: EntityType::Article,
-                    conflict_key: row.link.clone(),
-                    updated_at: row.updated_at.clone(),
-                    created_at: row.fetched_at.clone(),
-                    content_hash: hash,
-                })
+        move |client, (row, prep)| async move {
+            for (key, bytes) in prep.shared_blobs {
+                client.put_object(&key, bytes).await?;
             }
+            if let Some(archive) = prep.archive_bytes {
+                client
+                    .put_object(&article_images_key(&row.id), archive)
+                    .await?;
+            }
+            let bytes = gz_json(&row);
+            let hash = content_hash(&bytes);
+            client
+                .put_object(&blob_key(EntityType::Article, &row.id), bytes)
+                .await?;
+            Ok(ManifestEntry {
+                id: row.id.clone(),
+                entity_type: EntityType::Article,
+                conflict_key: row.link.clone(),
+                updated_at: row.updated_at.clone(),
+                created_at: row.fetched_at.clone(),
+                content_hash: hash,
+            })
         },
     )
     .await?;
@@ -1352,6 +1485,89 @@ mod tests {
             guard.get(meta_key).unwrap().2,
             2,
             "metadata must still be pushed again"
+        );
+    }
+
+    #[tokio::test]
+    async fn two_articles_sharing_an_identical_image_upload_the_shared_bytes_only_once() {
+        let (base_url, store) = spawn_mock_s3().await;
+        let client = test_client(&base_url);
+        let data_dir = tempfile::tempdir().unwrap();
+
+        let device = migrated_conn();
+        // Two articles, each with its own content directory, each
+        // containing a file with byte-for-byte identical content (a
+        // shared site logo being the realistic case) under different
+        // relative paths — dedup is keyed on content, not on path.
+        std::fs::create_dir_all(data_dir.path().join("content/art-1")).unwrap();
+        std::fs::write(
+            data_dir.path().join("content/art-1/logo.png"),
+            b"shared logo bytes",
+        )
+        .unwrap();
+        std::fs::create_dir_all(data_dir.path().join("content/art-2")).unwrap();
+        std::fs::write(
+            data_dir.path().join("content/art-2/site-logo.png"),
+            b"shared logo bytes",
+        )
+        .unwrap();
+
+        crate::db::queries::insert_captured_article(
+            &device,
+            "art-1",
+            None,
+            "direct",
+            &sample_output("https://example.com/1", "One"),
+            &[],
+        )
+        .unwrap();
+        crate::db::queries::insert_captured_article(
+            &device,
+            "art-2",
+            None,
+            "direct",
+            &sample_output("https://example.com/2", "Two"),
+            &[],
+        )
+        .unwrap();
+
+        run_sync(
+            &device,
+            &client,
+            data_dir.path(),
+            Utc::now(),
+            &no_cancel(),
+            |_| {},
+        )
+        .await
+        .unwrap();
+
+        let hash = content_hash(b"shared logo bytes");
+        {
+            let guard = store.lock().unwrap();
+            assert_eq!(
+                guard.get(&shared_image_key(&hash)).unwrap().2,
+                1,
+                "the shared blob must be uploaded exactly once, not once per article that uses it"
+            );
+        }
+
+        // Functional round trip: a second device pulling both articles'
+        // images must end up with the correct bytes at each article's own
+        // path, regardless of which one embedded the file literally and
+        // which one only holds a pointer at the shared blob.
+        let pull_dir = tempfile::tempdir().unwrap();
+        super::super::lazy_images::pull_article_images(&client, pull_dir.path(), "art-1", None)
+            .await;
+        super::super::lazy_images::pull_article_images(&client, pull_dir.path(), "art-2", None)
+            .await;
+        assert_eq!(
+            std::fs::read(pull_dir.path().join("content/art-1/logo.png")).unwrap(),
+            b"shared logo bytes"
+        );
+        assert_eq!(
+            std::fs::read(pull_dir.path().join("content/art-2/site-logo.png")).unwrap(),
+            b"shared logo bytes"
         );
     }
 

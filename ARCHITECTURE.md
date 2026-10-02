@@ -380,6 +380,7 @@ legere-sync/
   manifest.json.gz                      # small index: entries + tombstones
   blobs/articles/<id>/meta.json.gz      # full row: metadata + content_html
   blobs/articles/<id>/content.tar.gz    # hero thumbnail + content/<id>/*, bundled
+  blobs/shared-images/<sha256>          # cross-article-deduplicated image bytes
   blobs/categories/<id>.json.gz
   blobs/sources/<id>.json.gz
 ```
@@ -419,6 +420,48 @@ from the live set used to mean every article's images looked orphaned to
 the sweep the moment they crossed `GC_GRACE_PERIOD` and got deleted out
 from under every device that hadn't yet lazily pulled them, a real bug
 fixed alongside the archive-bundling change above, not a hypothetical one.
+
+**Cross-article image dedup** (`db::sync_image_blobs`,
+`engine::prepare_article_images`/`stage_archive_entry`): a site's logo, a
+syndicated wire photo, or any other image byte-for-byte identical across
+more than one article doesn't get embedded in every single one of those
+articles' own archives — it's promoted to a standalone, content-addressed
+blob (`blobs/shared-images/<sha256>`) that every article referencing it
+points at instead, via a tiny `<path>.ref` archive entry
+(`engine::ArchiveEntryBody::Pointer`) holding just the hash rather than
+the bytes. The rule is local and stateless across devices, decided purely
+from this device's own history: the *first* article this device ever
+pushes containing a given image's bytes embeds it literally, exactly like
+before dedup existed, and records that content hash as "seen once" in the
+local `sync_image_blobs` table (never synced — this is purely local
+bookkeeping for *this device's next push*, same category as
+`sources.feed_etag`). Only the *second* article to reuse that same hash
+triggers the one-time promotion: the shared blob gets uploaded once, and
+from then on every article (including that second one) references it by
+pointer instead of re-embedding. An already-pushed article's own archive
+is never rewritten retroactively to adopt a pointer once its embedded
+image later turns out to be shared elsewhere — matches every other
+already-pushed article's immutability (see above) — so a given image's
+bytes may legitimately exist both embedded in one earlier article's
+archive and once more as the shared blob; this is an accepted, bounded
+amount of duplication, not a bug. Deciding this needs `&Connection`
+(reading/writing the local ledger), which the concurrent per-article
+upload phase can't hold (`rusqlite::Connection` isn't `Sync`, so a
+`tokio::task::JoinSet`-spawned future can't capture it) — so
+`push_articles` reads, hashes, and dedup-decides every new article's
+images sequentially, up front (cheap: local disk + DB only, no network),
+building each article's final archive bytes before handing them off to
+the existing concurrent PUT phase, which never touches `Connection` at
+all. Pulling a pointer entry (`lazy_images::pull_article_images`) costs
+one extra GET per distinct shared image an article actually references —
+typically zero, since most images are never reused. `bucket_gc`'s sweep
+never considers anything under `blobs/shared-images/` for deletion at
+all: no article's archive is ever inspected to see which shared blobs it
+still points at, so there's no safe way to tell a truly-unreferenced
+shared blob apart from one several other articles still need — treating
+the whole prefix as permanently live is the simple, safe default, and the
+set is expected to stay small (one entry per *distinct* deduplicated
+asset, not per article that reuses it).
 
 **The algorithm** (`remote_sync::engine::run_sync`), one pass:
 
@@ -604,7 +647,7 @@ itself failing.
 - **Pool** (`db::pool.rs`) — r2d2 over rusqlite, 4 connections. Init order
   matters: `busy_timeout` first (so WAL initialization on a fresh file waits
   instead of erroring), then `journal_mode = WAL`, then `foreign_keys = ON`.
-- **Migrations** (`db::schema.rs`) — `rusqlite_migration`, currently V15.
+- **Migrations** (`db::schema.rs`) — `rusqlite_migration`, currently V19.
   SQLite can't alter CHECK constraints, so schema-changing migrations use a
   recreate-repopulate-swap dance; foreign keys are toggled off around the
   whole migration (the pragma is a no-op inside a transaction). Each

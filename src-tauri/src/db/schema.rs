@@ -623,6 +623,30 @@ ALTER TABLE sources ADD COLUMN feed_etag TEXT;
 ALTER TABLE sources ADD COLUMN feed_last_modified TEXT;
 ";
 
+// Local-only ledger backing `remote_sync::engine`'s cross-article image
+// dedup. The first article to use a given image's bytes embeds them
+// literally inside its own `content.tar.gz` (see ARCHITECTURE.md's Sync
+// section); only once the exact same content hash reappears in a
+// *second* article does it get promoted to a shared, content-addressed
+// blob (`blobs/shared-images/<hash>`) that every later article
+// referencing it points at instead of re-embedding, so the common case
+// (an image unique to one article) never pays any extra request, and a
+// genuinely repeated asset (a site logo, a syndicated wire photo, ...)
+// is only ever uploaded twice total — once embedded in whichever
+// article happened to push it first (never rewritten, matching every
+// other already-pushed article's immutability), once as the shared blob
+// — no matter how many more articles reuse it after that. `promoted`
+// is a boolean, not a count: nothing after the second sighting needs to
+// know exactly how many times a hash has been reused, only whether it
+// already has a shared blob to point at. Never synced, same category as
+// `sources.feed_etag`/`feed_last_modified` above.
+const V19: &str = "
+CREATE TABLE sync_image_blobs (
+    content_hash TEXT PRIMARY KEY,
+    promoted     INTEGER NOT NULL DEFAULT 0
+);
+";
+
 pub fn migrations() -> Migrations<'static> {
     Migrations::new(vec![
         M::up(V1),
@@ -643,6 +667,7 @@ pub fn migrations() -> Migrations<'static> {
         M::up(V16),
         M::up(V17),
         M::up(V18),
+        M::up(V19),
     ])
 }
 
