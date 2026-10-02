@@ -16,8 +16,9 @@ below.
 
 ## Features
 
-- **Feeds and direct links** — RSS/Atom sources with a 15-minute autosync
-  loop, or one-shot direct-link capture; the "Add a source" dialog sniffs
+- **Feeds and direct links** — RSS/Atom sources with an autosync loop
+  (every 6, 12, or 24 hours, default 12 — configurable in Settings), or
+  one-shot direct-link capture; the "Add a source" dialog sniffs
   which one a pasted URL is automatically and captures it in the
   background, so the dialog closes immediately instead of blocking on the
   fetch/extract pipeline. A failed capture shows up in the activity panel
@@ -51,8 +52,8 @@ below.
   S3-compatible bucket (Cloudflare R2, AWS S3, Backblaze B2, Minio, ...)
   and sync articles, categories, and sources across the devices you set
   it up on yourself; Legere never runs a server or sees your data. Runs
-  hourly, plus a manual "Sync now" button. See ARCHITECTURE.md's
-  "Cross-device sync" section.
+  every 1–24 hours (default 6 — configurable in Settings), plus a manual
+  "Sync now" button. See ARCHITECTURE.md's "Cross-device sync" section.
 
 ## Documentation
 

@@ -1264,10 +1264,26 @@ pub fn get_settings(conn: &Connection) -> rusqlite::Result<Settings> {
                     settings.import_concurrency = concurrency.clamp(5, 10);
                 }
             }
+            "autosync_interval_hours" => {
+                if let Ok(hours) = value.parse::<i64>() {
+                    settings.autosync_interval_hours = snap_autosync_interval_hours(hours);
+                }
+            }
             _ => {}
         }
     }
     Ok(settings)
+}
+
+/// Snaps an arbitrary stored/requested value to the nearest of the three
+/// allowed RSS autosync intervals (6/12/24 hours) -- used by both
+/// `get_settings` (tolerating a stale/hand-edited DB value) and
+/// `update_settings` (tolerating whatever the frontend sends).
+fn snap_autosync_interval_hours(hours: i64) -> i64 {
+    [6, 12, 24]
+        .into_iter()
+        .min_by_key(|allowed| (allowed - hours).abs())
+        .expect("allowed list is non-empty")
 }
 
 pub fn update_settings(conn: &Connection, settings: &Settings) -> rusqlite::Result<()> {
@@ -1310,6 +1326,11 @@ pub fn update_settings(conn: &Connection, settings: &Settings) -> rusqlite::Resu
         "INSERT INTO settings (key, value) VALUES ('import_concurrency', ?1)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value",
         params![settings.import_concurrency.clamp(5, 10).to_string()],
+    )?;
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES ('autosync_interval_hours', ?1)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![snap_autosync_interval_hours(settings.autosync_interval_hours).to_string()],
     )?;
     Ok(())
 }
@@ -1362,6 +1383,35 @@ mod tests {
         settings.import_concurrency = 8;
         update_settings(&conn, &settings).unwrap();
         assert_eq!(get_settings(&conn).unwrap().import_concurrency, 8);
+    }
+
+    #[test]
+    fn get_settings_defaults_autosync_interval_hours_to_twelve() {
+        let conn = migrated_conn();
+        assert_eq!(get_settings(&conn).unwrap().autosync_interval_hours, 12);
+    }
+
+    #[test]
+    fn update_settings_snaps_autosync_interval_hours_to_nearest_allowed_value() {
+        let conn = migrated_conn();
+        let mut settings = Settings {
+            autosync_interval_hours: 1,
+            ..Settings::default()
+        };
+        update_settings(&conn, &settings).unwrap();
+        assert_eq!(get_settings(&conn).unwrap().autosync_interval_hours, 6);
+
+        settings.autosync_interval_hours = 10;
+        update_settings(&conn, &settings).unwrap();
+        assert_eq!(get_settings(&conn).unwrap().autosync_interval_hours, 12);
+
+        settings.autosync_interval_hours = 100;
+        update_settings(&conn, &settings).unwrap();
+        assert_eq!(get_settings(&conn).unwrap().autosync_interval_hours, 24);
+
+        settings.autosync_interval_hours = 24;
+        update_settings(&conn, &settings).unwrap();
+        assert_eq!(get_settings(&conn).unwrap().autosync_interval_hours, 24);
     }
 
     #[test]

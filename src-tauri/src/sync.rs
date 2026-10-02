@@ -81,17 +81,37 @@ pub async fn sync_all_sources(app: &AppHandle, state: &AppState) -> u32 {
     total_new
 }
 
-/// Spawns the foreground autosync loop: syncs immediately, then every
-/// `interval`. Stopping it is just aborting the returned handle (see
-/// `commands::settings::update_settings`).
+/// Spawns the foreground autosync loop, syncing every `interval`.
+/// Stopping it is just aborting the returned handle (see
+/// `commands::settings::update_settings`) — never mid-fetch of any single
+/// source for long enough to matter: each source's own fetch is a single
+/// bounded HTTP call, not a multi-step transaction like cross-device
+/// sync's, so a hard abort here has no stuck-guard failure mode the way
+/// `remote_sync::orchestrate::stop_remote_sync_loop` has to guard
+/// against.
 ///
-/// Uses `tauri::async_runtime::spawn` rather than `tokio::spawn` directly —
-/// this is called from `Builder::setup`, which runs before any `tokio`
+/// `run_immediately` controls whether the very first tick fires right
+/// away (appropriate at app startup and when autosync is freshly turned
+/// on) or is skipped so the first sync only happens after a full
+/// `interval` has elapsed (appropriate when this is just a fresh loop
+/// replacing an already-running one because some unrelated setting was
+/// saved, or `autosync_interval_hours` itself changed — neither is a
+/// reason to force an extra sync of every source right now).
+///
+/// Uses `tauri::async_runtime::spawn` rather than `tokio::spawn` directly
+/// — this is called from `Builder::setup`, which runs before any `tokio`
 /// reactor is entered on that thread; only Tauri's own runtime handle is
 /// guaranteed available there.
-pub fn spawn_autosync(app: AppHandle, interval: Duration) -> tauri::async_runtime::JoinHandle<()> {
+pub fn spawn_autosync(
+    app: AppHandle,
+    interval: Duration,
+    run_immediately: bool,
+) -> tauri::async_runtime::JoinHandle<()> {
     tauri::async_runtime::spawn(async move {
         let mut ticker = tokio::time::interval(interval);
+        if !run_immediately {
+            ticker.tick().await;
+        }
         loop {
             ticker.tick().await;
             let state = app.state::<AppState>();

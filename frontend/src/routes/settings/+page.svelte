@@ -117,6 +117,23 @@
 		}
 	}
 
+	async function setRemoteSyncIntervalHours(hours: number) {
+		if (!remoteSyncStore.config) return;
+		try {
+			await remoteSyncStore.save({
+				...remoteSyncStore.config,
+				sync_interval_hours: Math.max(1, Math.min(24, Math.round(hours)))
+			});
+		} catch (e) {
+			uiStore.showToast(errorMessage(e));
+		}
+	}
+	function stepRemoteSyncIntervalHours(delta: number) {
+		const current = remoteSyncStore.config?.sync_interval_hours;
+		if (current === undefined) return;
+		setRemoteSyncIntervalHours(current + delta);
+	}
+
 	function syncNow() {
 		// Errors surface via the global `remote-sync:error` toast (see
 		// `lib/events.ts`) - catching here only prevents an unhandled
@@ -218,6 +235,10 @@
 	function setAutosync(enabled: boolean) {
 		settingsStore.update({ autosync: enabled });
 	}
+	function setAutosyncIntervalHours(hours: 6 | 12 | 24) {
+		settingsStore.update({ autosync_interval_hours: hours });
+	}
+	const autosyncIntervalOptions: (6 | 12 | 24)[] = [6, 12, 24];
 	function setAppTheme(theme: AppTheme) {
 		settingsStore.update({ app_theme: theme });
 	}
@@ -370,6 +391,27 @@
 				</label>
 			</div>
 		</div>
+
+		{#if settingsStore.current.autosync}
+			<div class="row">
+				<div class="row-copy">
+					<span class="row-label">Fetch frequency</span>
+				</div>
+				<div class="seg seg-compact">
+					{#each autosyncIntervalOptions as hours (hours)}
+						<label class="seg-opt">
+							<input
+								type="radio"
+								name="autosync-interval"
+								checked={settingsStore.current.autosync_interval_hours === hours}
+								onchange={() => setAutosyncIntervalHours(hours)}
+							/>
+							<span>{hours}h</span>
+						</label>
+					{/each}
+				</div>
+			</div>
+		{/if}
 
 		{#if !tauri}
 			<div class="card-divider"></div>
@@ -554,6 +596,30 @@
 					</label>
 				</div>
 			</div>
+
+			<div class="row">
+				<span class="row-label">Sync frequency</span>
+				<div class="stepper">
+					<button
+						class="btn btn-icon btn-secondary"
+						onclick={() => stepRemoteSyncIntervalHours(-1)}
+						disabled={remoteSyncStore.config.sync_interval_hours <= 1}
+						aria-label="Decrease sync frequency"
+					>
+						–
+					</button>
+					<span class="stepper-value tabular-nums">{remoteSyncStore.config.sync_interval_hours}h</span>
+					<button
+						class="btn btn-icon btn-secondary"
+						onclick={() => stepRemoteSyncIntervalHours(1)}
+						disabled={remoteSyncStore.config.sync_interval_hours >= 24}
+						aria-label="Increase sync frequency"
+					>
+						+
+					</button>
+				</div>
+			</div>
+			<p class="text-muted section-desc">Lower checks for changes more often; higher is gentler on your bucket.</p>
 
 			<div class="row">
 				<span class="row-label">Last synced</span>

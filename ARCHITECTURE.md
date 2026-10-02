@@ -324,10 +324,20 @@ share sheet -> ShareActivity (invisible trampoline, never inflates a layout)
 
 ## RSS autosync and lifecycle
 
-- **Autosync** (`sync.rs`) — a foreground interval task (15 minutes) spawned
-  at startup when enabled; toggling the setting spawns/aborts it. No
-  WorkManager on Android — a resumed app syncs only if ≥5 minutes have
-  passed since the last foreground sync (`RunEvent::Resumed` handler).
+- **Autosync** (`sync.rs`) — a foreground interval task spawned at startup
+  when enabled, on the user-configured `settings.autosync_interval_hours`
+  (6/12/24, default 12 — a Settings-screen segmented control; the stored
+  value is snapped to the nearest of the three by `db::queries::get_settings`
+  /`update_settings`, never trusted as free-form). Saving *any* setting
+  always re-spawns this loop so a changed interval always takes effect
+  (`commands::settings::update_settings`) — but `spawn_autosync`'s
+  `run_immediately` flag means that respawn only forces a sync of every
+  source *right now* when the save is what actually turns autosync on;
+  editing the interval (or any other setting) while it's already on just
+  reschedules the existing cadence, it never fires an extra sync as a
+  side effect of an unrelated settings save. No WorkManager on Android —
+  a resumed app syncs only if ≥5 minutes have passed since the last
+  foreground sync (`RunEvent::Resumed` handler).
 - **Events** (`events.rs` → `frontend/src/lib/events.ts`) — the backend
   emits `sync:started/finished`, `articles:changed`, `source:changed`,
   `category:changed`, `import:*`, and `capture:changed`/`capture:succeeded`
@@ -345,8 +355,11 @@ Opt-in, off by default, configured from Settings. The user supplies their
 own S3-compatible bucket (Cloudflare R2, AWS S3, Backblaze B2, Minio, ...);
 Legere never runs a server or sees the data — this is the payoff of Design
 principle 2's "sync-friendly schema," not an exception to "no server."
-Independent from RSS autosync above: separate schedule (hourly vs. 15
-minutes), separate event namespace (`remote-sync:*` vs. `sync:*`), separate
+Independent from RSS autosync above: separate schedule (default 6 hours,
+user-configurable 1–24 via a Settings-screen slider — `RemoteSyncConfig
+::sync_interval_hours`, clamped by `db::sync_config::get_remote_sync_config`
+/`save_remote_sync_config`, vs. RSS autosync's fixed 6/12/24 choices above),
+separate event namespace (`remote-sync:*` vs. `sync:*`), separate
 settings storage, can be toggled independently.
 
 **What syncs and what doesn't** — `articles` (including `content_html`,
@@ -471,11 +484,25 @@ personal devices, a bucket the user already trusts with their own
 credentials); revisit if that trust assumption ever needs to change.
 
 **Scheduling and events** (`remote_sync::orchestrate`) — mirrors
-`sync.rs`'s shape for RSS autosync: `spawn_remote_sync_autosync` runs the
-first sync immediately, then hourly, alongside (not instead of) RSS's own
-15-minute loop. `run_remote_sync_once` is the single entry point both the
-scheduler and the manual "Sync now" button
-(`commands::remote_sync::remote_sync_now`) call; it emits
+`sync.rs`'s shape for RSS autosync: `spawn_remote_sync_autosync` runs on
+`RemoteSyncConfig::sync_interval_hours` (default 6, user-configurable
+1–24), alongside (not instead of) RSS's own autosync loop above.
+`commands::remote_sync::save_remote_sync_config` always replaces this
+loop on every save (so a changed interval always takes effect), but its
+`run_immediately` flag means that replacement only forces a sync *right
+now* when the save is what actually turns sync on — editing the interval
+or any other config field while sync is already enabled just reschedules
+the existing cadence, never an extra pass as a side effect. Replacing the
+loop never hard-`abort()`s a pass that happens to be mid-flight at save
+time either: `stop_remote_sync_loop` cooperatively cancels it first (the
+same flag `cancel_running_sync`/the "Cancel" button use) and waits for it
+to actually finish its own cleanup before touching the loop's
+`JoinHandle` — a plain abort mid-pass used to skip that cleanup
+(`state.remote_sync_cancel` never cleared back to `None`), which
+permanently wedged every later sync attempt, scheduled or manual, into a
+silent no-op for the rest of the app session. `run_remote_sync_once` is
+the single entry point both the scheduler and the manual "Sync now"
+button (`commands::remote_sync::remote_sync_now`) call; it emits
 `remote-sync:started/finished/error` and records
 `remote_sync_last_synced_at`/`remote_sync_last_error` via
 `db::sync_config` either way. Every DB+network interleaving
@@ -491,8 +518,12 @@ Android suspends/kills the process otherwise, same limitation
 `RSS autosync and lifecycle` above already has. `RemoteSyncWorker.kt`
 (`gen/android`, see README's "manual patches" list) is what makes sync
 actually run on a schedule on Android: a `WorkManager` `PeriodicWorkRequest`
-enqueued once from `MainActivity.onCreate`, calling
-`NativeSync.runRemoteSyncOnce` →
+(re)enqueued with `UPDATE` policy on every `MainActivity.onCreate`, at the
+interval `NativeSync.getRemoteSyncIntervalHours` reads from
+`RemoteSyncConfig::sync_interval_hours` (default 6 if unset/unreadable) —
+meaning a changed setting takes effect on the *next app launch*, not
+instantly, since there's no live Rust → WorkManager reschedule path.
+`doWork` itself calls `NativeSync.runRemoteSyncOnce` →
 `Java_com_ritvijsrivastava_legere_NativeSync_runRemoteSyncOnce`
 (`remote_sync_intent.rs`) on its own background thread. That JNI entrypoint
 mirrors `share_intent.rs`'s exact running-app-or-standalone-fallback shape:
@@ -503,8 +534,8 @@ alive in the process at all. The periodic job is scheduled unconditionally
 on every app launch regardless of whether sync is actually configured/
 enabled; `run_sync`'s own config check just no-ops each time it isn't,
 which is simpler than reaching from Rust back into WorkManager to
-schedule/cancel every time the setting changes, at the cost of an hourly
-no-op wakeup while sync is off. Posts one low-priority notification per
+schedule/cancel every time the setting changes, at the cost of a no-op
+wakeup (on the configured cadence) while sync is off. Posts one low-priority notification per
 run (`RemoteSyncWorker`'s own channel, separate from `ShareWorker`'s) with
 an indeterminate spinner while running — not a determinate percentage,
 since that would need a JNI callback from mid-`run_sync` back into Kotlin,

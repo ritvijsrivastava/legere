@@ -5,14 +5,17 @@
 //! `share_intent.rs`'s running-app-or-standalone-fallback shape (see that
 //! module's docs for the fuller rationale behind the split).
 //!
-//! Desktop has no equivalent: its hourly loop
+//! Desktop has no equivalent: its own autosync loop
 //! (`remote_sync::orchestrate::spawn_remote_sync_autosync`) just runs
 //! inside the always-alive desktop process for as long as it's open.
 //! Android has no such guarantee — the OS suspends/kills the process in
 //! the background — so this is the mechanism that actually makes
 //! cross-device sync fire on a schedule on Android at all; the same
-//! hourly loop is spawned there too (`lib.rs`'s `setup`), but only ever
-//! actually ticks while the app happens to be in the foreground.
+//! loop is spawned there too (`lib.rs`'s `setup`), but only ever actually
+//! ticks while the app happens to be in the foreground. Both run on the
+//! same user-configured interval (`RemoteSyncConfig::sync_interval_hours`)
+//! — see `getRemoteSyncIntervalHours` below for how the Android
+//! `WorkManager` side picks that value up.
 
 use std::path::PathBuf;
 
@@ -43,15 +46,33 @@ struct RemoteSyncResult {
 
 impl RemoteSyncResult {
     fn skipped() -> Self {
-        Self { ok: true, skipped: Some(true), pulled: None, pushed: None, error: None }
+        Self {
+            ok: true,
+            skipped: Some(true),
+            pulled: None,
+            pushed: None,
+            error: None,
+        }
     }
 
     fn ok(pulled: usize, pushed: usize) -> Self {
-        Self { ok: true, skipped: None, pulled: Some(pulled), pushed: Some(pushed), error: None }
+        Self {
+            ok: true,
+            skipped: None,
+            pulled: Some(pulled),
+            pushed: Some(pushed),
+            error: None,
+        }
     }
 
     fn err(error: impl ToString) -> Self {
-        Self { ok: false, skipped: None, pulled: None, pushed: None, error: Some(error.to_string()) }
+        Self {
+            ok: false,
+            skipped: None,
+            pulled: None,
+            pushed: None,
+            error: Some(error.to_string()),
+        }
     }
 
     fn to_json(&self) -> String {
@@ -202,7 +223,9 @@ fn run_standalone_sync(data_dir: PathBuf) -> RemoteSyncResult {
             Ok(Ok(outcome)) => {
                 let pool = pool.clone();
                 let _ = tokio::task::spawn_blocking(move || {
-                    pool.get().ok().map(|conn| db::sync_config::record_sync_success(&conn))
+                    pool.get()
+                        .ok()
+                        .map(|conn| db::sync_config::record_sync_success(&conn))
                 })
                 .await;
                 RemoteSyncResult::ok(outcome.pulled, outcome.pushed)
@@ -221,4 +244,42 @@ fn run_standalone_sync(data_dir: PathBuf) -> RemoteSyncResult {
             Err(join_error) => RemoteSyncResult::err(join_error),
         }
     })
+}
+
+/// Called from `NativeSync.getRemoteSyncIntervalHours` on `MainActivity`
+/// launch, to (re)schedule `RemoteSyncWorker`'s periodic `WorkManager`
+/// job at the user's currently configured cadence (`RemoteSyncConfig
+/// ::sync_interval_hours`) rather than a hardcoded one -- see
+/// `RemoteSyncWorker.schedulePeriodic`'s doc comment for why this only
+/// takes effect on the next app launch rather than instantly when the
+/// setting changes. Synchronous (no `tokio` runtime needed: reading
+/// config is plain `rusqlite`) and defaults to 6 on any failure
+/// (missing/unreadable DB, not yet configured, ...) -- never throws.
+#[unsafe(no_mangle)]
+#[allow(non_snake_case)]
+pub extern "system" fn Java_com_ritvijsrivastava_legere_NativeSync_getRemoteSyncIntervalHours<
+    'local,
+>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    _context: JObject<'local>,
+    data_dir: JString<'local>,
+) -> jni::sys::jint {
+    const DEFAULT_HOURS: i32 = 6;
+
+    let data_dir = env
+        .with_env(|env| -> jni::errors::Result<String> { data_dir.try_to_string(env) })
+        .resolve::<LogErrorAndDefault>();
+    if data_dir.is_empty() {
+        return DEFAULT_HOURS;
+    }
+
+    let db_path = PathBuf::from(data_dir).join("legere.db");
+    db::build_pool(&db_path)
+        .ok()
+        .and_then(|pool| pool.get().ok())
+        .and_then(|conn| db::sync_config::get_remote_sync_config(&conn).ok())
+        .flatten()
+        .map(|config| config.sync_interval_hours as i32)
+        .unwrap_or(DEFAULT_HOURS)
 }

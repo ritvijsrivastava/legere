@@ -27,12 +27,38 @@ pub struct RemoteSyncConfig {
     /// device's own writes for diagnostics (`devices/<device_id>.json` in
     /// the bucket layout), not used in any conflict-resolution decision.
     pub device_id: String,
-    /// Set once by `remote_sync::client::S3Client::probe_conditional_write_support`
-    /// at setup time. Sync must refuse to run against a bucket where this
-    /// is `false` — see that function's doc comment for why an
-    /// unsupported provider is rejected outright rather than degraded to
-    /// a weaker fallback.
+    /// Purely informational, reflecting whatever the Settings screen's
+    /// "Test connection" button (`commands::remote_sync::test_remote_sync_connection`,
+    /// which runs `S3Client::probe_conditional_write_support`) last found
+    /// for the bucket fields it was tested against — not re-verified by
+    /// `save_remote_sync_config` on every save (that used to run the same
+    /// four-request probe on *every* save regardless of relevance, making
+    /// e.g. a plain `sync_interval_hours` change visibly take several
+    /// seconds). Trusted as given from the frontend here, unlike
+    /// `device_id` below — `RemoteSyncDialog`'s `draftConfig` is what
+    /// keeps it honest, resetting to `false` the moment any
+    /// bucket-identifying field is edited after a successful test so a
+    /// stale `true` can't survive unverified. See
+    /// `S3Client::probe_conditional_write_support`'s doc comment for why
+    /// an unsupported provider is rejected outright rather than degraded
+    /// to a weaker fallback — this field just records the result, it
+    /// isn't itself enforced before a sync pass is allowed to run.
     pub conditional_writes_verified: bool,
+    /// How often the background sync loop runs, in hours. Clamped to
+    /// 1-24 wherever it's read or written (`get_remote_sync_config`/
+    /// `save_remote_sync_config`) rather than trusted as free-form input
+    /// -- unlike RSS autosync's fixed 6/12/24 choices, a free range is
+    /// fine here since there's no shared-resource cost to a finer value,
+    /// just the user's own bucket request volume.
+    pub sync_interval_hours: i64,
+}
+
+/// Default/fallback for `sync_interval_hours` when unset -- matches
+/// `RemoteSyncConfig`'s implicit default before this field existed.
+const DEFAULT_SYNC_INTERVAL_HOURS: i64 = 6;
+
+fn clamp_sync_interval_hours(hours: i64) -> i64 {
+    hours.clamp(1, 24)
 }
 
 fn get_setting(conn: &Connection, key: &str) -> rusqlite::Result<Option<String>> {
@@ -85,6 +111,10 @@ pub fn get_remote_sync_config(conn: &Connection) -> rusqlite::Result<Option<Remo
         conditional_writes_verified: get_setting(conn, "remote_sync_conditional_writes_verified")?
             .as_deref()
             == Some("true"),
+        sync_interval_hours: get_setting(conn, "remote_sync_interval_hours")?
+            .and_then(|value| value.parse::<i64>().ok())
+            .map(clamp_sync_interval_hours)
+            .unwrap_or(DEFAULT_SYNC_INTERVAL_HOURS),
     }))
 }
 
@@ -93,24 +123,44 @@ pub fn get_remote_sync_config(conn: &Connection) -> rusqlite::Result<Option<Remo
 /// not merely overridden on first save, since trusting client input for
 /// this field is exactly the bug this function used to have (a
 /// not-yet-configured frontend has no real id to send yet).
-pub fn save_remote_sync_config(conn: &Connection, config: &RemoteSyncConfig) -> rusqlite::Result<()> {
+pub fn save_remote_sync_config(
+    conn: &Connection,
+    config: &RemoteSyncConfig,
+) -> rusqlite::Result<()> {
     ensure_device_id(conn)?;
 
-    set_setting(conn, "remote_sync_enabled", if config.enabled { "true" } else { "false" })?;
+    set_setting(
+        conn,
+        "remote_sync_enabled",
+        if config.enabled { "true" } else { "false" },
+    )?;
     set_setting(conn, "remote_sync_endpoint", &config.endpoint)?;
     set_setting(conn, "remote_sync_bucket_name", &config.bucket_name)?;
     set_setting(conn, "remote_sync_region", &config.region)?;
     set_setting(
         conn,
         "remote_sync_use_path_style",
-        if config.use_path_style { "true" } else { "false" },
+        if config.use_path_style {
+            "true"
+        } else {
+            "false"
+        },
     )?;
     set_setting(conn, "remote_sync_access_key", &config.access_key)?;
     set_setting(conn, "remote_sync_secret_key", &config.secret_key)?;
     set_setting(
         conn,
         "remote_sync_conditional_writes_verified",
-        if config.conditional_writes_verified { "true" } else { "false" },
+        if config.conditional_writes_verified {
+            "true"
+        } else {
+            "false"
+        },
+    )?;
+    set_setting(
+        conn,
+        "remote_sync_interval_hours",
+        &clamp_sync_interval_hours(config.sync_interval_hours).to_string(),
     )?;
     Ok(())
 }
@@ -133,7 +183,10 @@ pub fn get_remote_sync_status(conn: &Connection) -> rusqlite::Result<RemoteSyncS
 
 pub fn record_sync_success(conn: &Connection) -> rusqlite::Result<()> {
     set_setting(conn, "remote_sync_last_synced_at", &Utc::now().to_rfc3339())?;
-    conn.execute("DELETE FROM settings WHERE key = 'remote_sync_last_error'", [])?;
+    conn.execute(
+        "DELETE FROM settings WHERE key = 'remote_sync_last_error'",
+        [],
+    )?;
     Ok(())
 }
 
@@ -163,6 +216,7 @@ mod tests {
             secret_key: "secret".to_string(),
             device_id: "will-be-ignored".to_string(),
             conditional_writes_verified: true,
+            sync_interval_hours: 6,
         }
     }
 
@@ -182,6 +236,53 @@ mod tests {
         assert!(loaded.enabled);
         assert!(loaded.conditional_writes_verified);
         assert!(!loaded.device_id.is_empty());
+        assert_eq!(loaded.sync_interval_hours, 6);
+    }
+
+    #[test]
+    fn get_remote_sync_config_defaults_sync_interval_hours_to_six_when_unset() {
+        let conn = migrated_conn();
+        // `save_remote_sync_config` always writes this key, so simulate a
+        // pre-existing device by saving everything else first, then
+        // deleting just the interval row.
+        save_remote_sync_config(&conn, &sample_config()).unwrap();
+        conn.execute(
+            "DELETE FROM settings WHERE key = 'remote_sync_interval_hours'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            get_remote_sync_config(&conn)
+                .unwrap()
+                .unwrap()
+                .sync_interval_hours,
+            6
+        );
+    }
+
+    #[test]
+    fn save_remote_sync_config_clamps_sync_interval_hours_to_one_and_twenty_four() {
+        let conn = migrated_conn();
+        let mut config = sample_config();
+        config.sync_interval_hours = 0;
+        save_remote_sync_config(&conn, &config).unwrap();
+        assert_eq!(
+            get_remote_sync_config(&conn)
+                .unwrap()
+                .unwrap()
+                .sync_interval_hours,
+            1
+        );
+
+        config.sync_interval_hours = 48;
+        save_remote_sync_config(&conn, &config).unwrap();
+        assert_eq!(
+            get_remote_sync_config(&conn)
+                .unwrap()
+                .unwrap()
+                .sync_interval_hours,
+            24
+        );
     }
 
     #[test]
@@ -212,8 +313,15 @@ mod tests {
         save_remote_sync_config(&conn, &config).unwrap();
 
         let saved_id = get_remote_sync_config(&conn).unwrap().unwrap().device_id;
-        assert!(!saved_id.is_empty(), "an empty client-supplied device_id must never be persisted");
-        assert_eq!(saved_id.len(), 36, "a real UUID, not whatever the client happened to send");
+        assert!(
+            !saved_id.is_empty(),
+            "an empty client-supplied device_id must never be persisted"
+        );
+        assert_eq!(
+            saved_id.len(),
+            36,
+            "a real UUID, not whatever the client happened to send"
+        );
     }
 
     #[test]

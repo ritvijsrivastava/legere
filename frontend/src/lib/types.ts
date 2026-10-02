@@ -120,6 +120,9 @@ export interface Settings {
 	/** How many Raindrop CSV import rows capture concurrently. Clamped to
 	 *  5–10 by the backend regardless of what's sent here. */
 	import_concurrency: number;
+	/** How often RSS sources auto-fetch, in hours. Snapped to the nearest
+	 *  of 6/12/24 by the backend regardless of what's sent here. */
+	autosync_interval_hours: number;
 }
 
 export interface SyncResult {
@@ -147,6 +150,9 @@ export interface RemoteSyncConfig {
 	 *  conditional writes required for safe multi-device manifest
 	 *  updates. */
 	conditional_writes_verified: boolean;
+	/** How often the background cross-device sync loop runs, in hours.
+	 *  Clamped to 1-24 by the backend regardless of what's sent here. */
+	sync_interval_hours: number;
 }
 
 export interface RemoteSyncStatus {

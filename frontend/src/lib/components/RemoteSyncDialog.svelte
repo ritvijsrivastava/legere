@@ -43,10 +43,36 @@
 		inputEl?.focus();
 	});
 
-	/** `device_id`/`conditional_writes_verified` are always backend-owned
-	 *  (see `db::sync_config::save_remote_sync_config`'s doc comment) —
-	 *  whatever's sent here for either is ignored server-side, so the
-	 *  placeholder values are never actually persisted. */
+	/** Invalidates whatever the last "Test connection" result was the
+	 *  moment any bucket-identifying field changes — `save` now trusts
+	 *  `testState === 'ok'` directly instead of the backend re-probing the
+	 *  bucket on every save (see `draftConfig` below), so a stale 'ok'
+	 *  surviving an edit would wrongly mark unverified credentials as
+	 *  verified. Also fires (harmlessly, already 'idle') from the
+	 *  open-effect above assigning these same fields on open/reset. */
+	$effect(() => {
+		endpoint;
+		bucketName;
+		region;
+		usePathStyle;
+		accessKey;
+		secretKey;
+		testState = 'idle';
+		testError = '';
+	});
+
+	/** `device_id` is always backend-owned (see
+	 *  `db::sync_config::save_remote_sync_config`'s doc comment) — whatever's
+	 *  sent here is ignored server-side, so the placeholder value is never
+	 *  actually persisted. `conditional_writes_verified` is the opposite:
+	 *  trusted as given (see that same field's doc comment in
+	 *  `db::sync_config::RemoteSyncConfig`) — true only when the "Test
+	 *  connection" button already confirmed it for exactly these field
+	 *  values (the effect above resets `testState` the instant any of them
+	 *  change). `sync_interval_hours` isn't edited from this dialog (see
+	 *  the Settings screen's "Cross-device sync" stepper instead); carried
+	 *  over from `initial` when editing, or the backend's own default when
+	 *  there's no existing value yet. */
 	function draftConfig(): RemoteSyncConfig {
 		return {
 			enabled: true,
@@ -57,7 +83,8 @@
 			access_key: accessKey.trim(),
 			secret_key: secretKey,
 			device_id: initial?.device_id ?? '',
-			conditional_writes_verified: false
+			conditional_writes_verified: testState === 'ok',
+			sync_interval_hours: initial?.sync_interval_hours ?? 6
 		};
 	}
 

@@ -20,14 +20,15 @@ import java.util.concurrent.TimeUnit
 import org.json.JSONObject
 
 /**
- * Runs one cross-device sync pass on `WorkManager`'s own hourly schedule
- * (see [schedulePeriodic]) — the actual mechanism that makes sync happen
- * in the background on Android at all, unlike desktop, where
+ * Runs one cross-device sync pass on `WorkManager`'s own periodic
+ * schedule (see [schedulePeriodic] for the configured interval) — the
+ * actual mechanism that makes sync happen in the background on Android
+ * at all, unlike desktop, where
  * `remote_sync::orchestrate::spawn_remote_sync_autosync`'s in-process
  * loop is enough on its own because the process just stays alive. Not
  * promoted to a foreground service (unlike [ShareWorker]'s one-time,
  * user-initiated job): `PeriodicWorkRequest` can't be expedited at all,
- * and a routine hourly background sync doesn't need the same
+ * and a routine background sync doesn't need the same
  * immediate-execution guarantee a user-triggered share does — it's fine
  * running as ordinary deferrable background work.
  *
@@ -158,22 +159,36 @@ class RemoteSyncWorker(appContext: Context, params: WorkerParameters) : Worker(a
         private const val UNIQUE_WORK_NAME = "remote_sync_periodic"
 
         /**
-         * Schedules the periodic sync job if it isn't already scheduled
-         * (`KEEP` — repeat calls, e.g. every app launch, are cheap
-         * no-ops once it exists). Called unconditionally from
+         * (Re)schedules the periodic sync job at the user's currently
+         * configured cadence (`RemoteSyncConfig::sync_interval_hours`,
+         * default 6, range 1–24 — see `NativeSync.getRemoteSyncIntervalHours`),
+         * replacing whatever interval was scheduled before (`UPDATE` —
+         * repeat calls, e.g. every app launch, are cheap no-ops once the
+         * interval hasn't changed). Called unconditionally from
          * `MainActivity.onCreate`, regardless of whether sync is
          * currently configured/enabled: [doWork] itself checks that on
          * the Rust side every time it fires and no-ops if not, which is
          * simpler than reaching back into WorkManager from Rust to
          * schedule/cancel every time the setting changes — the accepted
-         * cost is an hourly no-op wakeup while sync is off, not a
-         * correctness issue.
+         * cost is a no-op wakeup on the configured cadence while sync is
+         * off, not a correctness issue.
+         *
+         * A change to the interval made in Settings only takes effect on
+         * the next app launch (this is the only place it's read) — there
+         * is no live reschedule while the app is open, since that would
+         * need a reverse Rust → JNI call into WorkManager this app
+         * doesn't have, and a background cadence doesn't need
+         * instant effect the way a user-facing setting would.
          */
         fun schedulePeriodic(context: Context) {
-            val request = PeriodicWorkRequestBuilder<RemoteSyncWorker>(1, TimeUnit.HOURS).build()
+            // Must match Tauri's own `app_local_data_dir()` resolution —
+            // see `ShareWorker`'s identical comment on this exact path.
+            val dataDir = File(context.dataDir, "legere").absolutePath
+            val hours = NativeSync.getRemoteSyncIntervalHours(context, dataDir).coerceIn(1, 24)
+            val request = PeriodicWorkRequestBuilder<RemoteSyncWorker>(hours.toLong(), TimeUnit.HOURS).build()
             WorkManager.getInstance(context).enqueueUniquePeriodicWork(
                 UNIQUE_WORK_NAME,
-                ExistingPeriodicWorkPolicy.KEEP,
+                ExistingPeriodicWorkPolicy.UPDATE,
                 request,
             )
         }

@@ -9,7 +9,8 @@ const DEFAULT_SETTINGS: Settings = {
 	reader_measure: 'default',
 	reader_leading: 'default',
 	app_theme: 'dark',
-	import_concurrency: 5
+	import_concurrency: 5,
+	autosync_interval_hours: 12
 };
 
 class SettingsStore {

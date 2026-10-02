@@ -30,4 +30,14 @@ object NativeSync {
      */
     @JvmStatic
     external fun runRemoteSyncOnce(context: Context, dataDir: String): String
+
+    /**
+     * Reads the user's configured cross-device sync interval (hours),
+     * defaulting to 6 if sync has never been configured or the DB can't
+     * be read. Backs [RemoteSyncWorker.schedulePeriodic]'s periodic
+     * `WorkManager` job cadence — see that function's doc comment for
+     * why this is only re-read on app launch, not live.
+     */
+    @JvmStatic
+    external fun getRemoteSyncIntervalHours(context: Context, dataDir: String): Int
 }

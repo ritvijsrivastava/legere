@@ -194,6 +194,12 @@ pub struct Settings {
     /// free-form input — low enough to not hammer every site in an export
     /// at once, high enough to matter for a multi-thousand-row one.
     pub import_concurrency: i64,
+    /// How often RSS sources auto-fetch, in hours. Snapped to one of
+    /// 6/12/24 wherever it's read or written (`queries::get_settings`/
+    /// `update_settings`) — a fixed small set of choices rather than a
+    /// free-form range, unlike cross-device sync's interval below, since
+    /// there's no bucket-cost reason to need finer control here.
+    pub autosync_interval_hours: i64,
 }
 
 impl Default for Settings {
@@ -207,6 +213,7 @@ impl Default for Settings {
             reader_leading: "default".into(),
             app_theme: "dark".into(),
             import_concurrency: 5,
+            autosync_interval_hours: 12,
         }
     }
 }

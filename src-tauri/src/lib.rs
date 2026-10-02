@@ -51,9 +51,6 @@ use state::AppState;
 pub(crate) static GLOBAL_APP_HANDLE: std::sync::OnceLock<tauri::AppHandle> =
     std::sync::OnceLock::new();
 
-const AUTOSYNC_INTERVAL: Duration = Duration::from_secs(15 * 60);
-/// Cross-device sync's own schedule, independent of RSS autosync above.
-const REMOTE_SYNC_INTERVAL: Duration = Duration::from_secs(60 * 60);
 /// There's no background autosync on Android (no WorkManager integration
 /// in the MVP — see `state::AppState::last_foreground_sync`), so a
 /// resumed app only gets a fresh sync if it's been a while.
@@ -136,15 +133,28 @@ pub fn run() {
                 db::schema::migrate(&mut conn)?;
             }
 
-            let autosync_enabled = {
+            // Both intervals are read from `settings` at startup, not
+            // hardcoded -- `commands::settings::update_settings` and
+            // `commands::remote_sync::save_remote_sync_config` respawn
+            // these loops with a fresh value whenever the user changes
+            // either setting while the app is running.
+            let (autosync_enabled, autosync_interval) = {
                 let conn = pool.get()?;
-                db::queries::get_settings(&conn)?.autosync
+                let settings = db::queries::get_settings(&conn)?;
+                (
+                    settings.autosync,
+                    Duration::from_secs(settings.autosync_interval_hours as u64 * 60 * 60),
+                )
             };
-            let remote_sync_enabled = {
+            let (remote_sync_enabled, remote_sync_interval) = {
                 let conn = pool.get()?;
-                db::sync_config::get_remote_sync_config(&conn)?
-                    .map(|c| c.enabled)
-                    .unwrap_or(false)
+                match db::sync_config::get_remote_sync_config(&conn)? {
+                    Some(config) => (
+                        config.enabled,
+                        Duration::from_secs(config.sync_interval_hours as u64 * 60 * 60),
+                    ),
+                    None => (false, Duration::from_secs(6 * 60 * 60)),
+                }
             };
 
             let state = AppState {
@@ -171,7 +181,7 @@ pub fn run() {
             let _ = GLOBAL_APP_HANDLE.set(app.handle().clone());
 
             if autosync_enabled {
-                let handle = sync::spawn_autosync(app.handle().clone(), AUTOSYNC_INTERVAL);
+                let handle = sync::spawn_autosync(app.handle().clone(), autosync_interval, true);
                 let app_state = app.state::<AppState>();
                 tauri::async_runtime::block_on(async {
                     *app_state.autosync_handle.lock().await = Some(handle);
@@ -189,9 +199,13 @@ pub fn run() {
             }
 
             if remote_sync_enabled {
+                // `true`: a fresh app start should sync right away rather
+                // than waiting out a full interval, same as RSS autosync
+                // just above.
                 let handle = remote_sync::orchestrate::spawn_remote_sync_autosync(
                     app.handle().clone(),
-                    REMOTE_SYNC_INTERVAL,
+                    remote_sync_interval,
+                    true,
                 );
                 let app_state = app.state::<AppState>();
                 tauri::async_runtime::block_on(async {

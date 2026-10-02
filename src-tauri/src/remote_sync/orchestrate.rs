@@ -88,7 +88,14 @@ pub async fn run_remote_sync_once(
 
     events::emit_remote_sync_started(app);
 
-    let outcome = run_once_inner(pool.clone(), state.data_dir.clone(), &config, app.clone(), cancel).await;
+    let outcome = run_once_inner(
+        pool.clone(),
+        state.data_dir.clone(),
+        &config,
+        app.clone(),
+        cancel,
+    )
+    .await;
     *state.remote_sync_cancel.lock().await = None;
 
     match outcome {
@@ -135,6 +142,34 @@ pub async fn run_remote_sync_once(
 pub async fn cancel_running_sync(state: &AppState) {
     if let Some(flag) = state.remote_sync_cancel.lock().await.as_ref() {
         flag.store(true, Ordering::Relaxed);
+    }
+}
+
+/// Stops the currently-running background sync loop (if any), safely —
+/// used wherever the loop needs to be torn down and possibly replaced
+/// with a fresh one (`commands::remote_sync::save_remote_sync_config`,
+/// on every config save, not just on/off toggles).
+///
+/// Does *not* just `JoinHandle::abort()` the loop outright: that's a
+/// hard kill at whatever `.await` point the task happens to be at, which
+/// — if a pass was mid-flight — skips `run_remote_sync_once`'s own
+/// cleanup (`*state.remote_sync_cancel.lock().await = None`) entirely.
+/// That leaves the cancel guard stuck `Some` forever, which then makes
+/// every future sync attempt (scheduled or manual) silently refuse to
+/// start, permanently, for the rest of the app session — this was a real
+/// bug, not a hypothetical one. Instead: cooperatively cancel
+/// (`cancel_running_sync`) so an in-flight pass exits at its own next
+/// checkpoint and runs its normal cleanup, wait for that to actually
+/// happen (polling `remote_sync_cancel` back to `None`), and only then
+/// abort the now-idle loop task (safe: it's parked at `ticker.tick()`,
+/// holding nothing).
+pub async fn stop_remote_sync_loop(state: &AppState) {
+    cancel_running_sync(state).await;
+    while state.remote_sync_cancel.lock().await.is_some() {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    if let Some(handle) = state.remote_sync_handle.lock().await.take() {
+        handle.abort();
     }
 }
 
@@ -226,18 +261,32 @@ pub async fn ensure_article_images_synced(state: &AppState, id: &str) {
     .await;
 }
 
-/// Spawns the foreground hourly cross-device sync loop, mirroring
-/// `sync::spawn_autosync`'s shape (immediate run, then every `interval`).
-/// A disabled/unconfigured device just no-ops every tick via
+/// Spawns the foreground cross-device sync loop, mirroring
+/// `sync::spawn_autosync`'s shape. `run_immediately` controls whether the
+/// very first tick fires right away (`tokio::time::interval`'s default —
+/// appropriate at app startup and when sync is freshly turned on) or is
+/// skipped so the first sync only happens after a full `interval` has
+/// elapsed (appropriate when this is just a fresh loop replacing an
+/// already-running one, e.g. `sync_interval_hours` changed, or other
+/// config fields were edited while sync was already enabled — neither of
+/// those is a reason to force an extra sync pass right now). A
+/// disabled/unconfigured device just no-ops every tick via
 /// `run_remote_sync_once` rather than this loop checking first — cheaper
 /// to keep one code path than to duplicate the "is sync on?" check here
 /// too.
 pub fn spawn_remote_sync_autosync(
     app: AppHandle,
     interval: Duration,
+    run_immediately: bool,
 ) -> tauri::async_runtime::JoinHandle<()> {
     tauri::async_runtime::spawn(async move {
         let mut ticker = tokio::time::interval(interval);
+        if !run_immediately {
+            // Consumes `tokio::time::interval`'s always-immediate first
+            // tick so the loop instead waits a full `interval` before its
+            // first sync.
+            ticker.tick().await;
+        }
         loop {
             ticker.tick().await;
             let state = app.state::<AppState>();
