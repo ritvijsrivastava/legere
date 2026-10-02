@@ -97,11 +97,12 @@ fn rewrite_reference(
 
 /// The reader always renders content at one fixed column width — there is
 /// no responsive layout that benefits from a page's full set of `srcset`
-/// breakpoints. `1600` targets a crisp render on a ~800px logical reading
+/// breakpoints. `1200` targets a crisp render on a ~600px logical reading
 /// column at 2x pixel density; picked once here rather than per-caller so
 /// [`select_srcset_entry`]'s two callers (discovery and rewriting) can
-/// never disagree about which candidate "the localized one" means.
-const SRCSET_TARGET_WIDTH: u32 = 1600;
+/// never disagree about which candidate "the localized one" means. Must
+/// match `capture::image_optimize::MAX_WIDTH`.
+const SRCSET_TARGET_WIDTH: u32 = 1200;
 
 /// Assumed CSS width behind a pixel-density (`"2x"`) descriptor, which has
 /// no width of its own — `srcset` mixes `w` and `x` descriptors in the wild
@@ -260,7 +261,7 @@ mod tests {
             local("https://example.com/b.png"),
         );
 
-        // "2x" (=1600 effective) meets the 1600px target and is smaller
+        // "2x" (=1600 effective) meets the 1200px target and is smaller
         // than "3x" (=2400 effective), so it should be the one selected,
         // fetched, and kept — "a.png" (1x = 800) never gets an entry in
         // `url_map` here, proving it was never fetched at all.

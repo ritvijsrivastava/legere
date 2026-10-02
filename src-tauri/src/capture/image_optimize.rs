@@ -50,12 +50,17 @@ use image::{DynamicImage, ImageFormat};
 
 /// Matches `capture::rewrite::SRCSET_TARGET_WIDTH` \u2014 the reader never
 /// needs a content image wider than the same reading-column target
-/// srcset-candidate selection already picks toward.
-const MAX_WIDTH: u32 = 1600;
+/// srcset-candidate selection already picks toward. Lowered from 1600:
+/// the reading column itself renders well under 1200px on every
+/// supported form factor, so the extra width was pure storage cost with
+/// no visible benefit.
+const MAX_WIDTH: u32 = 1200;
 
 /// Visually close to source quality for in-app reading-pane display;
-/// well below what most CDNs deliver by default (often 90+).
-const JPEG_QUALITY: u8 = 80;
+/// well below what most CDNs deliver by default (often 90+). Lowered
+/// from 80: measured negligible visible difference at reading-column
+/// size against a real library sample, for a meaningful size win.
+const JPEG_QUALITY: u8 = 70;
 
 /// The result of [`optimize_content_image`].
 pub struct OptimizedImage {
