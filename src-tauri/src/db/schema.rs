@@ -655,6 +655,19 @@ const V20: &str = "
 ALTER TABLE articles ADD COLUMN font_override TEXT;
 ";
 
+// A capture that failed to fetch/extract/localize is no longer dropped by
+// its caller (see `capture::capture_local_or_link_only`) — it's still
+// inserted as a link-only row so it shows up in the library and the user
+// can open it to see why, rather than silently vanishing. `capture_failed`
+// distinguishes this from `extraction_confident = false` (readable, just
+// low quality) — a failed row has no readable content at all.
+// `capture_error` carries the error string shown in the reader's red
+// banner, `NULL` for every row captured before this migration.
+const V21: &str = "
+ALTER TABLE articles ADD COLUMN capture_failed INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE articles ADD COLUMN capture_error TEXT;
+";
+
 pub fn migrations() -> Migrations<'static> {
     Migrations::new(vec![
         M::up(V1),
@@ -677,6 +690,7 @@ pub fn migrations() -> Migrations<'static> {
         M::up(V18),
         M::up(V19),
         M::up(V20),
+        M::up(V21),
     ])
 }
 
