@@ -117,11 +117,31 @@ impl std::error::Error for SsrfBlocked {}
 
 /// A [`reqwest::ClientBuilder`] with [`GuardedResolver`] installed —
 /// callers still need [`literal_ip_is_blocked`] for the literal-IP case
-/// this alone doesn't cover. The single entry point every HTTP client the
-/// capture pipeline builds for fetching page/asset content should start
-/// from.
+/// this alone doesn't cover on the *first* request. The single entry point
+/// every HTTP client the capture pipeline builds for fetching page/asset
+/// content should start from.
+///
+/// Also installs a redirect policy that re-runs [`literal_ip_is_blocked`]
+/// on every hop: a hostname redirect target is still safe (it goes through
+/// [`GuardedResolver`] like any other request this client makes), but a
+/// redirect straight to a literal IP — `Location: http://169.254.169.254/`
+/// — would otherwise reach the connector exactly the way a literal-IP
+/// *initial* URL does, bypassing the resolver entirely. A malicious or
+/// compromised origin can fully control its own `Location` header, so this
+/// has to be checked per hop, not just once up front.
 pub fn ssrf_guarded_client_builder() -> reqwest::ClientBuilder {
-    reqwest::Client::builder().dns_resolver(std::sync::Arc::new(GuardedResolver))
+    reqwest::Client::builder()
+        .dns_resolver(std::sync::Arc::new(GuardedResolver))
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            if literal_ip_is_blocked(attempt.url()) {
+                let blocked_url = attempt.url().to_string();
+                return attempt.error(SsrfBlocked(blocked_url));
+            }
+            // Defers to the default policy for everything else, including
+            // its 10-hop loop/length cap — this closure only adds the
+            // per-hop literal-IP check on top.
+            reqwest::redirect::Policy::default().redirect(attempt)
+        }))
 }
 
 #[cfg(test)]
@@ -172,6 +192,44 @@ mod tests {
     fn unwraps_ipv4_mapped_ipv6_before_checking() {
         let mapped = std::net::Ipv6Addr::new(0, 0, 0, 0, 0, 0xffff, 0x7f00, 0x0001);
         assert!(is_blocked_ip(IpAddr::V6(mapped)));
+    }
+
+    /// End-to-end: a real HTTP server standing in for a malicious/
+    /// compromised origin that 302s to a literal loopback IP — the exact
+    /// gap a per-hop check (as opposed to only checking the client's
+    /// initial request URL) exists to close.
+    #[tokio::test]
+    async fn redirect_policy_blocks_literal_ip_hop() {
+        use axum::Router;
+        use axum::response::Redirect;
+        use axum::routing::get;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind ephemeral port");
+        let addr = listener.local_addr().expect("local addr");
+        let app = Router::new().route(
+            "/start",
+            get(|| async { Redirect::temporary("http://127.0.0.1:9/evil") }),
+        );
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve");
+        });
+
+        let client = ssrf_guarded_client_builder()
+            .build()
+            .expect("client should build");
+        let result = client.get(format!("http://{addr}/start")).send().await;
+
+        let err = result.expect_err("redirect to a literal loopback IP must be refused");
+        use std::error::Error as _;
+        assert!(
+            err.to_string().contains("refusing to fetch")
+                || err
+                    .source()
+                    .is_some_and(|s| s.to_string().contains("refusing to fetch")),
+            "expected an SsrfBlocked error, got: {err}"
+        );
     }
 
     #[test]
