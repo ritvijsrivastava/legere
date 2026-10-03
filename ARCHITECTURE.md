@@ -79,7 +79,7 @@ plugins/           tauri-plugin-apk-installer (Android self-update, optional fea
 Storage lives at `{app_local_data_dir}/legere/`:
 
 ```
-legere.db          SQLite (WAL, foreign keys ON, busy_timeout 5s, pool of 4)
+legere.db          SQLite (WAL, synchronous=NORMAL, foreign keys ON, busy_timeout 5s, pool of 4)
 content/<id>/      per-article localized images (never evicted)
 media/<id>.jpg     resized hero thumbnails for library cards
 ```
@@ -744,7 +744,11 @@ itself failing.
 
 - **Pool** (`db::pool.rs`) — r2d2 over rusqlite, 4 connections. Init order
   matters: `busy_timeout` first (so WAL initialization on a fresh file waits
-  instead of erroring), then `journal_mode = WAL`, then `foreign_keys = ON`.
+  instead of erroring), then `journal_mode = WAL`, then `synchronous =
+  NORMAL` (the documented-safe pairing with WAL — durable against an app
+  crash, risks losing only the most recent commits, never corruption, on a
+  full OS crash/power loss — and meaningfully cheaper than the default
+  `FULL` during a capture/import/sync burst), then `foreign_keys = ON`.
 - **Migrations** (`db::schema.rs`) — `rusqlite_migration`, currently V21.
   SQLite can't alter CHECK constraints, so schema-changing migrations use a
   recreate-repopulate-swap dance; foreign keys are toggled off around the
