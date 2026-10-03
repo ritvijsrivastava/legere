@@ -278,6 +278,8 @@ pub fn run() {
             commands::remote_sync::save_remote_sync_config,
             commands::remote_sync::remote_sync_now,
             commands::remote_sync::cancel_remote_sync,
+            commands::remote_sync::generate_sync_qr,
+            commands::remote_sync::decrypt_sync_qr,
             commands::import::import_raindrop_csv,
             commands::import::preview_raindrop_csv,
             commands::import::cancel_raindrop_import,

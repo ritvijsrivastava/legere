@@ -12,6 +12,8 @@
 	import FileText from '$lib/icons/FileText.svelte';
 	import ExportResultCard from '$lib/components/ExportResultCard.svelte';
 	import RemoteSyncDialog from '$lib/components/RemoteSyncDialog.svelte';
+	import ShareSyncQrDialog from '$lib/components/ShareSyncQrDialog.svelte';
+	import ScanSyncQrDialog from '$lib/components/ScanSyncQrDialog.svelte';
 	import { remoteSyncStore } from '$lib/stores/remoteSync.svelte';
 	import type {
 		AppTheme,
@@ -21,7 +23,7 @@
 		ReaderMeasure,
 		RemoteSyncConfig
 	} from '$lib/types';
-	import { isTauri } from '$lib/platform';
+	import { isTauri, isAndroid } from '$lib/platform';
 	import { errorMessage } from '$lib/api';
 	import * as api from '$lib/api';
 	import {
@@ -104,6 +106,11 @@
 	});
 
 	let syncDialogOpen = $state(false);
+	/** Desktop-only: QR code for linking a second device, see
+	 *  `ShareSyncQrDialog`. */
+	let shareSyncQrOpen = $state(false);
+	/** Mobile-only: scans the above, see `ScanSyncQrDialog`. */
+	let scanSyncQrOpen = $state(false);
 
 	function formatLastSynced(iso: string | null): string {
 		if (!iso) return 'Never';
@@ -159,6 +166,11 @@
 	function onRemoteSyncSaved(config: RemoteSyncConfig) {
 		remoteSyncStore.config = config;
 		syncDialogOpen = false;
+	}
+
+	function onRemoteSyncLinked(config: RemoteSyncConfig) {
+		remoteSyncStore.config = config;
+		scanSyncQrOpen = false;
 	}
 
 	async function loadChangelog() {
@@ -599,7 +611,14 @@
 				storage (Cloudflare R2, AWS S3, Backblaze B2, Minio, ...). Legere never runs a server or
 				sees your credentials.
 			</p>
-			<button class="btn btn-primary" onclick={() => (syncDialogOpen = true)}>Set up sync</button>
+			<div class="row">
+				<button class="btn btn-primary" onclick={() => (syncDialogOpen = true)}>Set up sync</button>
+				{#if isAndroid()}
+					<button class="btn btn-secondary" onclick={() => (scanSyncQrOpen = true)}>
+						Scan from another device
+					</button>
+				{/if}
+			</div>
 		{:else}
 			<div class="row">
 				<div class="row-copy">
@@ -687,6 +706,15 @@
 				>
 					Edit configuration
 				</button>
+				{#if !isAndroid()}
+					<button
+						class="btn btn-secondary"
+						onclick={() => (shareSyncQrOpen = true)}
+						disabled={remoteSyncStore.busy}
+					>
+						Share with another device
+					</button>
+				{/if}
 				{#if remoteSyncStore.busy}
 					<button class="btn btn-danger" onclick={() => remoteSyncStore.cancel()}>Cancel</button>
 				{:else}
@@ -841,6 +869,12 @@
 	initial={remoteSyncStore.config}
 	onclose={() => (syncDialogOpen = false)}
 	onSaved={onRemoteSyncSaved}
+/>
+<ShareSyncQrDialog open={shareSyncQrOpen} onclose={() => (shareSyncQrOpen = false)} />
+<ScanSyncQrDialog
+	open={scanSyncQrOpen}
+	onclose={() => (scanSyncQrOpen = false)}
+	onLinked={onRemoteSyncLinked}
 />
 
 <style>

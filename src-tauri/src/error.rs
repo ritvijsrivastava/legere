@@ -72,6 +72,12 @@ impl From<crate::remote_sync::client::S3Error> for AppError {
     }
 }
 
+impl From<crate::remote_sync::link::LinkError> for AppError {
+    fn from(e: crate::remote_sync::link::LinkError) -> Self {
+        AppError::Internal(e.to_string())
+    }
+}
+
 impl From<crate::remote_sync::engine::SyncError> for AppError {
     fn from(e: crate::remote_sync::engine::SyncError) -> Self {
         use crate::remote_sync::engine::SyncError;

@@ -2,6 +2,9 @@ import { invoke, Channel } from '@tauri-apps/api/core';
 import { getVersion } from '@tauri-apps/api/app';
 import { platform } from '@tauri-apps/plugin-os';
 import { relaunch } from '@tauri-apps/plugin-process';
+import { isAndroid } from '$lib/platform';
+
+export { isAndroid };
 
 /** Raw update/release metadata returned by the backend. */
 export interface UpdateInfo {
@@ -17,10 +20,6 @@ export type InstallProgress =
 	| { event: 'progress'; data: { chunkLength: number } }
 	| { event: 'finished' }
 	| { event: 'installing' };
-
-export function isAndroid(): boolean {
-	return platform() === 'android';
-}
 
 /** Which update mechanism this build ships, mirrored 1:1 from the backend's
  *  `target_os`/Cargo-feature combination (see `update_channel` in

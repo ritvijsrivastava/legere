@@ -11,6 +11,7 @@ import type {
 	ImportPreview,
 	NamedCount,
 	ReadingOverrides,
+	DeviceLinkCode,
 	RemoteSyncConfig,
 	RemoteSyncOutcome,
 	RemoteSyncStatus,
@@ -320,6 +321,20 @@ export function remoteSyncNow(): Promise<RemoteSyncOutcome | null> {
  *  any — a no-op otherwise. */
 export function cancelRemoteSync(): Promise<void> {
 	return invoke<void>('cancel_remote_sync');
+}
+
+/** Desktop-only: encrypts this device's current sync config behind a
+ *  fresh passphrase and renders it as a QR code for another device to
+ *  scan. Rejects if sync isn't configured on this device yet. */
+export function generateSyncQr(): Promise<DeviceLinkCode> {
+	return invoke<DeviceLinkCode>('generate_sync_qr');
+}
+
+/** Mobile-only: decrypts a scanned QR code's text back into a config,
+ *  without saving or testing it — the caller feeds the result through
+ *  the normal test-connection/save flow. */
+export function decryptSyncQr(qrText: string, passphrase: string): Promise<RemoteSyncConfig> {
+	return invoke<RemoteSyncConfig>('decrypt_sync_qr', { qrText, passphrase });
 }
 
 /** Desktop only: bypasses the "an import is still running" quit guard

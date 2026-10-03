@@ -4,15 +4,29 @@
 
 use std::time::Duration;
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64;
+use serde::Serialize;
 use tauri::{AppHandle, State};
 
 use crate::db::sync_config::{self, RemoteSyncConfig, RemoteSyncStatus};
 use crate::error::AppError;
 use crate::remote_sync::engine::{self, SyncOutcome};
+use crate::remote_sync::link;
 use crate::remote_sync::orchestrate::{
     cancel_running_sync, run_remote_sync_once, spawn_remote_sync_autosync, stop_remote_sync_loop,
 };
 use crate::state::AppState;
+
+/// What the desktop's "Share setup with another device" action hands the
+/// frontend: a PNG (base64, ready for an `<img src="data:...">`) and the
+/// freshly generated six-digit passphrase to display alongside it. See
+/// `remote_sync::link` for the encryption this wraps.
+#[derive(Debug, Serialize)]
+pub struct DeviceLinkCode {
+    pub image_base64: String,
+    pub passphrase: String,
+}
 
 /// `None` if sync has never been configured on this device.
 #[tauri::command]
@@ -124,4 +138,53 @@ pub async fn remote_sync_now(
     state: State<'_, AppState>,
 ) -> Result<Option<SyncOutcome>, AppError> {
     run_remote_sync_once(&app, &state).await
+}
+
+/// Desktop's "Share setup with another device" action — encrypts this
+/// device's current sync config (if any) behind a freshly generated
+/// passphrase and renders it as a QR code for a mobile device to scan
+/// (`decrypt_sync_qr`). Generated fresh on every call rather than cached,
+/// so each QR/passphrase pair is used once: the Settings screen discards
+/// both the moment its share dialog closes or is reopened.
+#[tauri::command]
+pub async fn generate_sync_qr(state: State<'_, AppState>) -> Result<DeviceLinkCode, AppError> {
+    let pool = state.pool.clone();
+    let config = tokio::task::spawn_blocking(move || {
+        let conn = pool.get()?;
+        Ok::<_, AppError>(sync_config::get_remote_sync_config(&conn)?)
+    })
+    .await??
+    .ok_or_else(|| AppError::not_found("sync configuration"))?;
+
+    let passphrase = link::generate_passphrase();
+    let envelope = link::encrypt(&config, &passphrase)?;
+    let qr_text = BASE64.encode(envelope);
+    let png = link::render_qr_png(&qr_text)?;
+
+    Ok(DeviceLinkCode {
+        image_base64: BASE64.encode(png),
+        passphrase,
+    })
+}
+
+/// The mobile "Scan from another device" action's decode step — turns a
+/// scanned QR code's text (see `generate_sync_qr`'s `qr_text`) and the
+/// passphrase the user read off the other device's screen back into a
+/// `RemoteSyncConfig`. Deliberately doesn't save or test the connection
+/// itself: the frontend feeds the result straight into the same
+/// `test_remote_sync_connection`/`save_remote_sync_config` flow the
+/// manual setup form already uses (`RemoteSyncDialog`), rather than this
+/// command duplicating that review step — `device_id` is blank and
+/// `conditional_writes_verified` is `false` on the returned config either
+/// way (see `remote_sync::link`'s module doc), so neither flow can skip
+/// re-verifying this device's own path to the bucket.
+#[tauri::command]
+pub async fn decrypt_sync_qr(
+    qr_text: String,
+    passphrase: String,
+) -> Result<RemoteSyncConfig, AppError> {
+    let envelope = BASE64
+        .decode(qr_text)
+        .map_err(|_| AppError::Internal("not a Legere device-link QR code".into()))?;
+    Ok(link::decrypt(&envelope, &passphrase)?)
 }

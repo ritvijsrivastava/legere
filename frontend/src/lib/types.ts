@@ -175,6 +175,15 @@ export interface RemoteSyncStatus {
 	last_error: string | null;
 }
 
+/** Desktop's "Share setup with another device" QR code (PNG, base64,
+ *  ready for an <img> src) and the freshly generated six-digit
+ *  passphrase shown alongside it. Single-use: regenerated every time the
+ *  share dialog opens. */
+export interface DeviceLinkCode {
+	image_base64: string;
+	passphrase: string;
+}
+
 /** Result of one cross-device sync pass, returned by both the manual
  *  "Sync now" button and the hourly background loop. */
 export interface RemoteSyncOutcome {

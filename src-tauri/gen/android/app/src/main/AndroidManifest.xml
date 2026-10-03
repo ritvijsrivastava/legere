@@ -13,6 +13,14 @@
          general one. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- "Scan from another device" in cross-device sync setup (device-link
+         QR codes, see remote_sync::link) — requested at runtime from the
+         scan dialog, same pattern as POST_NOTIFICATIONS above. Declared
+         `required="false"` since the manual setup form works without a
+         camera at all; Legere just can't offer the QR shortcut then. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
 
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />

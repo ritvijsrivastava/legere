@@ -58,6 +58,10 @@ pub enum LinkError {
     Malformed,
     #[error("incorrect passphrase or corrupted QR code")]
     DecryptFailed,
+    #[error("failed to render link QR code: {0}")]
+    QrEncode(#[from] qrcode::types::QrError),
+    #[error("failed to render link QR code image: {0}")]
+    ImageEncode(#[from] image::ImageError),
 }
 
 /// The subset of `RemoteSyncConfig` carried across devices. See module
@@ -195,6 +199,28 @@ pub fn decrypt(envelope_bytes: &[u8], passphrase: &str) -> Result<RemoteSyncConf
     Ok(payload.into_config())
 }
 
+/// Renders `message` (the base64 text produced by Base64-encoding
+/// [`encrypt`]'s output -- see `commands::remote_sync::generate_sync_qr`)
+/// as a PNG QR code. Takes text rather than raw bytes so the scanning
+/// side can treat the QR purely as a text code (what every JS QR-decode
+/// library is built around) without any risk of a byte-mode decoder's
+/// string conversion mangling non-ASCII bytes -- base64's output alphabet
+/// is pure ASCII, so that round-trip is lossless.
+pub fn render_qr_png(message: &str) -> Result<Vec<u8>, LinkError> {
+    let code = qrcode::QrCode::with_error_correction_level(message.as_bytes(), qrcode::EcLevel::M)?;
+    let image = code
+        .render::<image::Luma<u8>>()
+        .max_dimensions(640, 640)
+        .build();
+
+    let mut png_bytes = Vec::new();
+    image::DynamicImage::ImageLuma8(image).write_to(
+        &mut std::io::Cursor::new(&mut png_bytes),
+        image::ImageFormat::Png,
+    )?;
+    Ok(png_bytes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -274,5 +300,17 @@ mod tests {
             assert_eq!(p.len(), 6);
             assert!(p.chars().all(|c| c.is_ascii_digit()));
         }
+    }
+
+    #[test]
+    fn renders_a_decodable_qr_png() {
+        let config = sample_config();
+        let passphrase = generate_passphrase();
+        let envelope = encrypt(&config, &passphrase).unwrap();
+        let text = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &envelope);
+
+        let png = render_qr_png(&text).unwrap();
+        // A real PNG signature, not an empty/garbage buffer.
+        assert_eq!(&png[..8], &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
     }
 }
