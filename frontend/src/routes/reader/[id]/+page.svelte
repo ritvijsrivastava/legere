@@ -23,6 +23,7 @@
 	import FolderMove from '$lib/icons/FolderMove.svelte';
 	import Share from '$lib/icons/Share.svelte';
 	import Star from '$lib/icons/Star.svelte';
+	import TriangleAlert from '$lib/icons/TriangleAlert.svelte';
 	import { formatCompactRelativeTime, formatReadTime } from '$lib/format';
 
 	const SAVE_PROGRESS_DEBOUNCE_MS = 750;
@@ -352,13 +353,36 @@
 				/>
 			</div>
 
-			<div
-				class="reader-body"
-				style:font-size="{fontSize}px"
-				style:line-height={LEADING_VALUE[leading]}
-			>
-				{@html resolvedContentHtml}
-			</div>
+			{#if article.capture_failed}
+				<div class="capture-error" role="alert">
+					<TriangleAlert size={16} />
+					<div class="capture-error-body">
+						<p class="capture-error-title">Couldn't save a readable copy of this article</p>
+						<p class="capture-error-message">{article.capture_error ?? 'Unknown error'}</p>
+						<a
+							class="capture-error-link"
+							href={article.link}
+							target="_blank"
+							rel="noopener noreferrer"
+							onclick={(event) => {
+								event.preventDefault();
+								void openOriginal();
+							}}
+						>
+							<ExternalLink size={12} />
+							Open the original link instead
+						</a>
+					</div>
+				</div>
+			{:else}
+				<div
+					class="reader-body"
+					style:font-size="{fontSize}px"
+					style:line-height={LEADING_VALUE[leading]}
+				>
+					{@html resolvedContentHtml}
+				</div>
+			{/if}
 		</div>
 	{/if}
 </div>
@@ -478,6 +502,49 @@
 	}
 	.reader-body {
 		font-size: 19px;
+	}
+	.capture-error {
+		display: flex;
+		align-items: flex-start;
+		gap: 12px;
+		padding: 16px;
+		border-radius: var(--radius-lg);
+		background: color-mix(in srgb, var(--color-danger) 10%, var(--color-surface-raised));
+		box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-danger) 35%, transparent);
+		color: var(--color-danger);
+	}
+	.capture-error :global(svg) {
+		flex-shrink: 0;
+		margin-top: 2px;
+	}
+	.capture-error-body {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+		min-width: 0;
+	}
+	.capture-error-title {
+		margin: 0;
+		font-weight: 600;
+		font-size: 15px;
+		color: var(--color-text);
+	}
+	.capture-error-message {
+		margin: 0;
+		font-size: 13px;
+		word-break: break-word;
+	}
+	.capture-error-link {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		margin-top: 4px;
+		font-size: 13px;
+		font-weight: 600;
+		width: fit-content;
+	}
+	.capture-error-link:hover {
+		text-decoration: underline;
 	}
 
 	/* The rest of the app follows a 20px 16px / 32px mobile padding rhythm

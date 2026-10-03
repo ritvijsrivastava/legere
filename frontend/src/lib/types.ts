@@ -52,6 +52,14 @@ export interface ArticleDetail extends ArticleSummary {
 	/** `false` when captured via the naive extraction fallback; the readable
 	 *  view may be lower quality for such an article. */
 	extraction_confident: boolean;
+	/** `true` when capture never produced a readable view at all (dead link,
+	 *  blocked host, non-2xx, etc.) — distinct from `extraction_confident ===
+	 *  false`, which still has real (if lower quality) content.
+	 *  `content_html`/`excerpt` are empty in this case; the reader shows
+	 *  `capture_error` instead with a link out to `link`. */
+	capture_failed: boolean;
+	/** The capture error message, `null` unless `capture_failed` is `true`. */
+	capture_error: string | null;
 	/** This article's reading-appearance overrides — each field `null`
 	 *  where it instead follows the matching global `Settings` value. */
 	overrides: ReadingOverrides;
