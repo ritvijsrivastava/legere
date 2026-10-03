@@ -67,7 +67,9 @@ below.
   and sync articles, categories, and sources across the devices you set
   it up on yourself; Legere never runs a server or sees your data. Runs
   every 1–24 hours (default 6 — configurable in Settings), plus a manual
-  "Sync now" button. See ARCHITECTURE.md's "Cross-device sync" section.
+  "Sync now" button. A device that's already set up can share that setup
+  with another via a scannable QR code instead of retyping credentials.
+  See ARCHITECTURE.md's "Cross-device sync" section.
 
 ## Documentation
 

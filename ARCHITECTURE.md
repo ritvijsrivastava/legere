@@ -624,6 +624,35 @@ plaintext JSON/gzip. Accepted for v1 given the target use case (2–3
 personal devices, a bucket the user already trusts with their own
 credentials); revisit if that trust assumption ever needs to change.
 
+**Device-link QR setup** (`remote_sync::link`, `commands::remote_sync::
+generate_sync_qr`/`decrypt_sync_qr`) — a separate encryption decision from
+the bucket-contents one directly above: a one-time, short-lived QR code
+that copies an *already-configured* device's bucket credentials to a
+second device, so the manual setup form doesn't have to be retyped on
+every device. Desktop-only to generate (`ShareSyncQrDialog`), Android-only
+to scan (`ScanSyncQrDialog`, via `getUserMedia` + `jsqr` — no native
+camera plugin; Android's `CAMERA` permission is requested at runtime
+through wry's existing generated `RustWebChromeClient.onPermissionRequest`,
+not a custom Kotlin path). The payload: `RemoteSyncConfig` minus
+`device_id` and `conditional_writes_verified`, which stay per-device by
+construction (`LinkPayload`/`into_config`) — the receiving device
+generates/keeps its own id and always re-probes the bucket itself
+(`test_remote_sync_connection`) before `decrypt_sync_qr`'s result is
+saved, exactly like the manual form's own test-then-save flow, rather
+than trusting the sending device's last verification. Encrypted with
+AES-256-GCM, keyed by Argon2id (deliberately cheaper-tuned than a
+long-term password hash — see the module doc) over a freshly generated
+Signal-style six-digit passphrase (`generate_passphrase`), never a
+user-typed one, since the code is meant to be read off one screen and
+typed into another once, not remembered. Wire format is a versioned
+`postcard`-encoded envelope (salt, nonce, ciphertext), base64-encoded
+purely so the QR can be decoded as ASCII text by any JS QR reader without
+a byte-mode decoder's string conversion risking mangling raw bytes — the
+binary envelope itself never crosses the scan step as bytes. Both the QR
+and passphrase are single-use by convention (regenerated on every dialog
+open/close), not enforced server-side — there's no server to enforce it
+on.
+
 **Scheduling and events** (`remote_sync::orchestrate`) — mirrors
 `sync.rs`'s shape for RSS autosync: `spawn_remote_sync_autosync` runs on
 `RemoteSyncConfig::sync_interval_hours` (default 6, user-configurable
