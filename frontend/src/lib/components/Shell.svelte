@@ -24,16 +24,17 @@
 	let isMobile = $state(typeof window !== 'undefined' ? window.innerWidth < 768 : false);
 	let isReader = $derived(page.url.pathname.startsWith('/reader/'));
 	let isSettings = $derived(page.url.pathname === '/settings');
-	// The Sources page already has its own prominent "Add source" button in
-	// its own header — the floating FAB would just be a second identical
-	// affordance on the one screen that's *entirely about* sources. Settings
-	// isn't about adding anything at all, so the FAB is excluded there too
-	// (see the `isSettings` check below).
-	let isSources = $derived(page.url.pathname === '/sources');
+	// The FAB is a "jump into the library and add a source" affordance, so it
+	// only makes sense on the Library page itself. Categories, tags, and
+	// favorites are filtered *views* of the library, not places to add a
+	// source from, and Sources already has its own prominent "Add source"
+	// button in its own header — a second identical affordance there would be
+	// redundant. Settings isn't about adding anything at all either.
+	let isLibrary = $derived(page.url.pathname === '/');
 	// The mobile activity dock (a thin bar docked above `.bottom-bar`, see
 	// its own styles below) — hidden on the reader like the rest of the
-	// chrome, but *not* gated on `isSources` the way the FAB is: this isn't
-	// a second "add" affordance, it's a status readout, so it stays useful
+	// chrome, but *not* gated to the Library page the way the FAB is: this
+	// isn't a second "add" affordance, it's a status readout, so it stays useful
 	// on the one page that's actually about sources too.
 	let showActivityDock = $derived(
 		isMobile && !isReader && captureJobsStore.jobs.length > 0
@@ -258,7 +259,7 @@
 		{@render children()}
 	</div>
 
-	{#if isMobile && !isReader && !isSources && !isSettings}
+	{#if isMobile && isLibrary}
 		<button
 			class="fab"
 			class:fab-raised={showActivityDock}
