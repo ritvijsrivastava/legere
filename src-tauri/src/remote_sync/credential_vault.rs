@@ -45,7 +45,7 @@ use rand::rngs::OsRng;
 use thiserror::Error;
 
 #[cfg(target_os = "android")]
-mod android;
+pub(crate) mod android;
 #[cfg(target_os = "linux")]
 mod linux;
 

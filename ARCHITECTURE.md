@@ -635,20 +635,22 @@ one implementation per target:
   transparently via PAM at login; a bare window manager without that PAM
   hook may show a one-time OS-native unlock prompt, or have no Secret
   Service provider running at all.
-- **Android** -- not yet implemented (`AndroidKeySource` is currently a
-  placeholder that always reports "unavailable", so Android falls back to
-  plaintext storage exactly like Linux does with no Secret Service
-  running). The planned design mirrors Linux in spirit but skips the
-  "store a random key in the OS store" indirection: the Android
-  Keystore's own AES key would encrypt credentials directly (no separate
-  stored key needed -- unlike Secret Service, Keystore's primitive
-  already *is* a non-exportable, hardware-backed key), reached through a
-  small Kotlin bridge on `MainActivity` and the same
-  cached-`JavaVM`-and-Activity JNI pattern `import_intent.rs` established
-  -- not this crate's own Android backend, which depends on `ndk-context`
-  global state that `mobile_tls.rs`'s doc comment already documents, from
-  direct experience, as never populated in Tauri's Activity+WebView
-  Android runtime.
+- **Android** -- the Android Keystore's own AES key (non-exportable,
+  hardware-backed) *wraps* a random 32-byte DEK that Rust itself owns:
+  unlike Secret Service, Keystore's primitive can never hand its raw key
+  bytes back to Rust by design, so the DEK indirection is unavoidable
+  here even though Keystore already *is* a key store. The wrapped bytes
+  live in their own file under the app data dir (Keystore-encrypted, so
+  the file itself needs no further protection), and the wrap/unwrap
+  calls go through a small Kotlin bridge on `MainActivity`
+  (`wrapSyncCredentialKey`/`unwrapSyncCredentialKey`) via the same
+  cached-`JavaVM`-and-Activity JNI pattern `import_intent.rs`
+  established -- not this crate's own Android backend, which depends on
+  `ndk-context` global state that `mobile_tls.rs`'s doc comment already
+  documents, from direct experience, as never populated in Tauri's
+  Activity+WebView Android runtime. Verified end-to-end on an emulator:
+  save produces ciphertext in `legere.db` (no plaintext keys); a full
+  process kill + restart still decrypts from the Keystore-held key.
 
 Never fails outright: if no platform key store is reachable right now,
 `access_key`/`secret_key` are stored as plain strings, exactly like every

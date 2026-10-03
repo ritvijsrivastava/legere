@@ -4,13 +4,38 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
 import android.view.textclassifier.TextClassifier
 import android.webkit.WebView
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import java.security.KeyStore
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.spec.GCMParameterSpec
 
 class MainActivity : TauriActivity() {
+  companion object {
+    private const val ANDROID_KEYSTORE_PROVIDER = "AndroidKeyStore"
+    // Scoped to this one use (wrapping the cross-device sync credential
+    // DEK) rather than shared with any other feature that might someday
+    // want its own Keystore key -- a leaked/rotated alias for one
+    // purpose then can't affect another.
+    private const val SYNC_CREDENTIAL_KEYSTORE_ALIAS = "legere_remote_sync_credential_key"
+    private const val AES_GCM_TRANSFORMATION = "AES/GCM/NoPadding"
+    // Matches `remote_sync::credential_vault`'s own `NONCE_LEN`/tag
+    // length on the Rust side (AES-GCM's standard 96-bit nonce, 128-bit
+    // tag) -- the two never interoperate directly (Rust never sees this
+    // layer's plaintext DEK bytes until *after* a successful unwrap), but
+    // keeping the envelope shape identical avoids two different
+    // IV/tag-length conventions in the same feature for no reason.
+    private const val GCM_IV_LENGTH_BYTES = 12
+    private const val GCM_TAG_LENGTH_BITS = 128
+  }
+
   // Hands the JVM/Context to rustls-platform-verifier before any TLS
   // handshake can occur — see mobile_tls.rs for why this can't be done
   // from Rust's own startup path on Android. liblegere_lib.so is already
@@ -25,6 +50,14 @@ class MainActivity : TauriActivity() {
   // this codebase. Re-called every `onCreate`, same as `initTls()`, so a
   // recreated Activity never leaves a stale reference cached.
   private external fun cacheImportActivity()
+
+  // Hands Rust a GlobalRef to this Activity so `remote_sync::credential_vault::android`
+  // can later call `wrapSyncCredentialKey`/`unwrapSyncCredentialKey` below —
+  // same reverse-direction need and the same per-module re-caching
+  // convention as `cacheImportActivity` above (see that property's own
+  // comment); a separate cache rather than sharing one, since the two
+  // are otherwise unrelated concerns.
+  private external fun cacheCredentialVaultActivity()
 
   private var pendingImport: PendingImport? = null
 
@@ -44,6 +77,7 @@ class MainActivity : TauriActivity() {
     super.onCreate(savedInstanceState)
     initTls()
     cacheImportActivity()
+    cacheCredentialVaultActivity()
     // See RemoteSyncWorker.schedulePeriodic's doc comment for why this
     // runs unconditionally rather than only when sync is enabled.
     RemoteSyncWorker.schedulePeriodic(applicationContext)
@@ -79,6 +113,80 @@ class MainActivity : TauriActivity() {
    *  rather than first checking whether a job is actually running. */
   fun cancelImportWork() {
     ImportWorker.cancel(applicationContext)
+  }
+
+  /**
+   * Wraps (encrypts) [key] -- the 32-byte random DEK
+   * `remote_sync::credential_vault::android::AndroidKeySource` generates
+   * on first use -- with an Android Keystore-backed AES-256-GCM key
+   * (generated here on first call, non-exportable: it never leaves the
+   * Keystore, only a `Cipher` handle backed by it does). The *wrapped*
+   * bytes (IV prepended to ciphertext) are what Rust persists to disk;
+   * the Keystore key itself is this method's only route to ever
+   * reading them back, via [unwrapSyncCredentialKey]. Returns null on
+   * any failure (Keystore unavailable, ...) rather than throwing --
+   * Rust has no exception-safe way to let a Kotlin exception cross the
+   * JNI boundary, same convention as [copyContentUriToFile] above.
+   */
+  fun wrapSyncCredentialKey(key: ByteArray): ByteArray? {
+    return try {
+      val cipher = Cipher.getInstance(AES_GCM_TRANSFORMATION)
+      cipher.init(Cipher.ENCRYPT_MODE, getOrCreateSyncCredentialKeystoreKey())
+      cipher.iv + cipher.doFinal(key)
+    } catch (e: Exception) {
+      null
+    }
+  }
+
+  /**
+   * Reverses [wrapSyncCredentialKey]: unwraps [wrapped] (IV prepended to
+   * ciphertext) back into the raw DEK bytes, using the same Keystore key.
+   * Returns null on any failure (wrong/rotated Keystore key, corrupted
+   * data, Keystore unavailable, truncated input), same convention as
+   * [wrapSyncCredentialKey].
+   */
+  fun unwrapSyncCredentialKey(wrapped: ByteArray): ByteArray? {
+    if (wrapped.size <= GCM_IV_LENGTH_BYTES) return null
+    return try {
+      val iv = wrapped.copyOfRange(0, GCM_IV_LENGTH_BYTES)
+      val ciphertext = wrapped.copyOfRange(GCM_IV_LENGTH_BYTES, wrapped.size)
+      val cipher = Cipher.getInstance(AES_GCM_TRANSFORMATION)
+      cipher.init(
+        Cipher.DECRYPT_MODE,
+        getOrCreateSyncCredentialKeystoreKey(),
+        GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv)
+      )
+      cipher.doFinal(ciphertext)
+    } catch (e: Exception) {
+      null
+    }
+  }
+
+  /**
+   * This device's Keystore-backed AES-256-GCM key for wrapping the
+   * cross-device sync credential DEK -- generated once (first call ever
+   * on this device) and reused from then on; `KeyStore.getKey` returns
+   * the same logical key across process restarts since it's the OS, not
+   * this process, that owns its lifetime.
+   */
+  private fun getOrCreateSyncCredentialKeystoreKey(): SecretKey {
+    val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE_PROVIDER)
+    keyStore.load(null)
+    (keyStore.getKey(SYNC_CREDENTIAL_KEYSTORE_ALIAS, null) as? SecretKey)?.let { return it }
+
+    val keyGenerator =
+      KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE_PROVIDER)
+    val spec =
+      KeyGenParameterSpec.Builder(
+          SYNC_CREDENTIAL_KEYSTORE_ALIAS,
+          KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+        )
+        .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+        .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+        .setKeySize(256)
+        .build()
+    keyGenerator.init(spec)
+    return keyGenerator.generateKey()
   }
 
   /**

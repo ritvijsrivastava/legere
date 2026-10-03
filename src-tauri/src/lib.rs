@@ -133,6 +133,15 @@ pub fn run() {
             let data_dir = app.path().app_local_data_dir()?.join("legere");
             std::fs::create_dir_all(&data_dir)?;
 
+            // Gives `credential_vault::android` a place to keep its
+            // wrapped-DEK file (see that module's doc comment) -- set once,
+            // here, rather than threaded through `AppState` like most other
+            // data-dir consumers, since `db::sync_config` (the only caller
+            // of `credential_vault::encrypt`/`decrypt`) only ever has a
+            // `rusqlite::Connection` in scope, not `AppState` itself.
+            #[cfg(target_os = "android")]
+            remote_sync::credential_vault::android::init(data_dir.clone());
+
             let pool = db::build_pool(&data_dir.join("legere.db"))?;
             {
                 let mut conn = pool.get()?;
