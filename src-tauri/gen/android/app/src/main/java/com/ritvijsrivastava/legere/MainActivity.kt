@@ -80,7 +80,13 @@ class MainActivity : TauriActivity() {
     cacheCredentialVaultActivity()
     // See RemoteSyncWorker.schedulePeriodic's doc comment for why this
     // runs unconditionally rather than only when sync is enabled.
-    RemoteSyncWorker.schedulePeriodic(applicationContext)
+    // Off the UI thread: it reads the sync interval from SQLite via JNI,
+    // and a UI thread stuck there past wry's 10s main-pipe timeout makes
+    // tauri abort with "Could not find the webview runtime".
+    val appContext = applicationContext
+    Thread({
+      RemoteSyncWorker.schedulePeriodic(appContext)
+    }, "schedule-remote-sync").start()
   }
 
   /**

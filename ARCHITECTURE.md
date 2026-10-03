@@ -762,7 +762,8 @@ Android suspends/kills the process otherwise, same limitation
 `RSS autosync and lifecycle` above already has. `RemoteSyncWorker.kt`
 (`gen/android`, see README's "manual patches" list) is what makes sync
 actually run on a schedule on Android: a `WorkManager` `PeriodicWorkRequest`
-(re)enqueued with `UPDATE` policy on every `MainActivity.onCreate`, at the
+(re)enqueued with `UPDATE` policy on every `MainActivity.onCreate` (from a
+background thread — see "Android startup must not block the UI thread"), at the
 interval `NativeSync.getRemoteSyncIntervalHours` reads from
 `RemoteSyncConfig::sync_interval_hours` (default 6 if unset/unreadable) —
 meaning a changed setting takes effect on the *next app launch*, not
@@ -1026,34 +1027,46 @@ application code, and the workaround stays as cheap hardening.
   (see "Share intent (Android)" above) are also hand-maintained files
   outside `generated/`, not template output.
 
-### wry's Android `main_pipe` channel-send patch
+### Android startup must not block the UI thread
 
-`wry` (tauri's webview backend) proxies calls from the Rust side to the
-Android UI thread through a single `main_pipe`: a channel carrying
-`WebViewMessage`s, each with a `Sender` the UI thread replies on. Through
-at least wry 0.55.1-0.57.0, every reply site in
-`wry::android::main_pipe::MainPipe::recv` (`GetWebViewVersion`, `GetUrl`,
-`CanGoForward`, `CanGoBack`, `GetCookies`, etc.) calls
-`tx.send(result).unwrap()`. The caller side (`platform_webview_version`
-and friends, in `wry::android::mod.rs`) waits on the matching `Receiver`
-with a 10s `recv_timeout` and drops it on timeout. If the Android UI
-thread is still busy past that 10s (e.g. a loaded/throttled device, other
-apps mid-crash-dialog, cold start contention) and replies *after* the
-receiver's already gone, `tx.send(...)` returns `Err` and that `.unwrap()`
-panics on the UI thread, which Android turns into an `abort()` of the
-whole process — this presented as the app being permanently stuck on its
-splash screen (it was actually crash-looping: each relaunch raced the same
-timeout again). Not a Legere bug; a reply-after-timeout race baked into
-upstream wry's Android IPC.
+`MainActivity.onCreate` runs on the Android UI thread, and that thread is
+also the only one that can answer wry's `main_pipe`: tauri's runtime init
+calls `wry::webview_version()` (via `tauri-runtime-wry`), which sends a
+`GetWebViewVersion` message to the UI thread and waits on a 10s
+`recv_timeout`. If the UI thread is busy past that, `webview_version()`
+returns an error, tauri concludes the webview runtime is missing, and
+`setup` panics with `Could not find the webview runtime` — the process
+aborts, which looked like a permanent splash screen (it was crash-looping).
 
-Fixed by vendoring wry (`vendor/wry-0.57.0-patched`, wired in via
-`[patch.crates-io]` in the workspace root `Cargo.toml`) with those seven
-`tx.send(...).unwrap()` call sites changed to `let _ = tx.send(...)`: a
-send failing because the receiver timed out and dropped is an expected,
-harmless race, not a condition worth crashing the process over. Remove
-this patch once upstream ships the same fix in a release tauri's
-`tauri-runtime-wry` depends on (check `main_pipe.rs` in whatever `wry`
-version that pulls in).
+The cause was Legere's own `onCreate`: `RemoteSyncWorker.schedulePeriodic`
+called `NativeSync.getRemoteSyncIntervalHours`, which built a 4-connection
+r2d2 pool (`db::build_pool`) on the UI thread. On a fresh install the
+`legere/` data dir doesn't exist yet (`setup()` is what creates it, and
+`setup()` can't run until the UI thread answers), so the pool couldn't open
+`legere.db` and r2d2 retried with backoff for its 30s connection timeout.
+Since `setup()` never completed, every relaunch hit the same wall. Measured
+on a clean emulator install: `onCreate` blocked 30,055 ms, then aborted.
+
+Fixed in two places, both required:
+
+- `getRemoteSyncIntervalHours` (`remote_sync_intent.rs`) returns the default
+  immediately if `legere.db` doesn't exist, and otherwise reads the config
+  over a single connection with a 1s busy timeout instead of building a
+  pool.
+- `MainActivity.onCreate` runs `schedulePeriodic` on a background thread
+  (`schedule-remote-sync`), so no database I/O can ever stall the UI thread.
+
+Rule going forward: nothing in `MainActivity.onCreate` (or any other UI
+thread entrypoint) may do blocking I/O, open a pool, or wait on a lock.
+Fresh-install cold start is the case to test, since it's the one where the
+data dir and database don't exist yet.
+
+History: this was first misdiagnosed as an upstream wry bug (`main_pipe.rs`
+`tx.send(...).unwrap()` panicking on a reply after the 10s timeout) and
+worked around with a vendored, patched wry under `[patch.crates-io]`. The
+patch never fixed the crash — a UI thread blocked that long aborts via
+tauri's panic regardless — and no upstream wry issue exists for it. The
+patch and `vendor/` were removed; stock wry 0.57.0 from crates.io is used.
 
 ### Android Gradle toolchain version pins
 
@@ -1081,9 +1094,8 @@ latest available, for two independent reasons that happen to compound:
   third-party Tauri plugin crates pulled from the Cargo registry cache
   (`tauri`'s own `mobile/android`, `tauri-plugin-dialog`,
   `tauri-plugin-opener`) still use the old DSL in their bundled
-  `android/build.gradle.kts` and aren't ours to patch the way the wry fix
-  above is. Their builds still warn ("Java compiler version 21 has
-  deprecated support for compiling with source/target version 8") but no
+  `android/build.gradle.kts` and aren't ours to patch. Their builds still
+  warn ("Java compiler version 21 has deprecated support for compiling with source/target version 8") but no
   longer hard-error as long as Kotlin stays below 2.2.
 - **Gradle itself is on the latest 8.x (`8.14.5`), matched to AGP 8.13.2's
   supported range** - not Gradle 9.x, which AGP 8.x doesn't support.

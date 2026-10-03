@@ -162,7 +162,7 @@ what `tauri android init` produces:
    `RemoteSyncWorker.kt` (same hand-written shape as the share-intent
    files above, reusing the same `androidx.work` dependency and
    notification permissions), the `RemoteSyncWorker.schedulePeriodic`
-   call in `MainActivity.onCreate`, and the `remote_sync_*` strings in
+   call in `MainActivity.onCreate` (run on a background thread), and the `remote_sync_*` strings in
    `res/values/strings.xml`. See ARCHITECTURE.md's "Cross-device sync"
    section.
 6. **The Gradle/AGP/Kotlin/Java toolchain versions** —

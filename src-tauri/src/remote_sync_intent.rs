@@ -274,11 +274,22 @@ pub extern "system" fn Java_com_ritvijsrivastava_legere_NativeSync_getRemoteSync
         return DEFAULT_HOURS;
     }
 
+    // Called from `MainActivity.onCreate`'s background thread, but must
+    // still stay cheap: no pool (r2d2's `build()` blocks up to its 30s
+    // connection timeout retrying an unopenable file, e.g. on a fresh
+    // install before `setup()` has created the data dir) -- a missing DB
+    // just means "not configured yet", so skip straight to the default.
     let db_path = PathBuf::from(data_dir).join("legere.db");
-    db::build_pool(&db_path)
+    if !db_path.exists() {
+        return DEFAULT_HOURS;
+    }
+    rusqlite::Connection::open(&db_path)
         .ok()
-        .and_then(|pool| pool.get().ok())
-        .and_then(|conn| db::sync_config::get_remote_sync_config(&conn).ok())
+        .and_then(|conn| {
+            conn.busy_timeout(std::time::Duration::from_millis(1000))
+                .ok()?;
+            db::sync_config::get_remote_sync_config(&conn).ok()
+        })
         .flatten()
         .map(|config| config.sync_interval_hours as i32)
         .unwrap_or(DEFAULT_HOURS)
