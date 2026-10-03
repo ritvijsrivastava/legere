@@ -27,6 +27,7 @@
 	let testError = $state('');
 	let saving = $state(false);
 	let saveError = $state('');
+	let retryingEncryption = $state(false);
 	let inputEl = $state<HTMLInputElement>();
 
 	$effect(() => {
@@ -82,6 +83,9 @@
 			use_path_style: usePathStyle,
 			access_key: accessKey.trim(),
 			secret_key: secretKey,
+			// Backend-computed, like `device_id` below -- whatever's sent here is
+			// ignored server-side on save.
+			credentials_encrypted: initial?.credentials_encrypted ?? false,
 			device_id: initial?.device_id ?? '',
 			conditional_writes_verified: testState === 'ok',
 			sync_interval_hours: initial?.sync_interval_hours ?? 6
@@ -127,6 +131,16 @@
 	function close() {
 		if (saving) return;
 		onclose();
+	}
+
+	async function retryEncryption() {
+		if (retryingEncryption) return;
+		retryingEncryption = true;
+		try {
+			await remoteSyncStore.retryCredentialEncryption();
+		} finally {
+			retryingEncryption = false;
+		}
 	}
 </script>
 
@@ -239,6 +253,18 @@
 				<div class="dialog-body dialog-body-error">{saveError}</div>
 			{/if}
 
+			{#if initial && !initial.credentials_encrypted}
+				<div class="credential-storage-warning">
+					<span
+						>Stored unencrypted on this device -- no system keyring/Keystore was available
+						when this was last saved.</span
+					>
+					<button class="btn btn-secondary" onclick={retryEncryption} disabled={retryingEncryption}>
+						{retryingEncryption ? 'Retrying...' : 'Retry'}
+					</button>
+				</div>
+			{/if}
+
 			<div class="dialog-actions">
 				<button class="btn btn-secondary" onclick={close} disabled={saving}>Cancel</button>
 				<button class="btn btn-primary" onclick={save} disabled={!isComplete() || saving}>
@@ -269,5 +295,12 @@
 	.test-ok {
 		font-size: 13px;
 		color: var(--color-accent);
+	}
+	.credential-storage-warning {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		font-size: 13px;
+		color: var(--color-muted);
 	}
 </style>

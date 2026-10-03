@@ -619,7 +619,51 @@ frontend on save, even on the very first save before one exists — a real
 bug this shipped with briefly (a not-yet-configured frontend has no real
 id to send yet) before being caught by a test and fixed.
 
-**Encryption:** none. Content and credentials sit in the bucket as
+**Local at-rest encryption** (`remote_sync::credential_vault`) -- a
+separate concern from the bucket-contents encryption question directly
+below: `access_key`/`secret_key` are encrypted (AES-256-GCM) before they
+ever reach the `settings` table, keyed by a secret that never itself
+touches `legere.db`, so a copy of the database file alone -- what
+commodity infostealer malware actually goes after, bulk-scraping known
+SQLite paths for credentials -- isn't enough to recover them. The key
+itself is platform-specific and obtained through a `KeySource` trait with
+one implementation per target:
+- **Linux** -- a random 32-byte key stored in the desktop Secret Service
+  (gnome-keyring, KWallet's `ksecrets` module, ...) via the `keyring`
+  crate's auto-selecting `v1` API. Reachability depends on the desktop
+  session, not just the OS: a full GNOME/KDE login session unlocks it
+  transparently via PAM at login; a bare window manager without that PAM
+  hook may show a one-time OS-native unlock prompt, or have no Secret
+  Service provider running at all.
+- **Android** -- not yet implemented (`AndroidKeySource` is currently a
+  placeholder that always reports "unavailable", so Android falls back to
+  plaintext storage exactly like Linux does with no Secret Service
+  running). The planned design mirrors Linux in spirit but skips the
+  "store a random key in the OS store" indirection: the Android
+  Keystore's own AES key would encrypt credentials directly (no separate
+  stored key needed -- unlike Secret Service, Keystore's primitive
+  already *is* a non-exportable, hardware-backed key), reached through a
+  small Kotlin bridge on `MainActivity` and the same
+  cached-`JavaVM`-and-Activity JNI pattern `import_intent.rs` established
+  -- not this crate's own Android backend, which depends on `ndk-context`
+  global state that `mobile_tls.rs`'s doc comment already documents, from
+  direct experience, as never populated in Tauri's Activity+WebView
+  Android runtime.
+
+Never fails outright: if no platform key store is reachable right now,
+`access_key`/`secret_key` are stored as plain strings, exactly like every
+row saved before this module existed. A tagged-envelope prefix
+(`legere-enc-v1:...`) on the stored value is what lets a read tell the two
+apart, so there's no explicit migration step -- a plaintext row is
+opportunistically re-encrypted the next time the user saves the Settings
+dialog, not forced at startup (which would mean an unexpected OS unlock
+prompt with no visible trigger, possibly from a backgrounded autosync
+tick). `RemoteSyncConfig::credentials_encrypted` reflects which state a
+given read found; the Settings dialog shows an inline warning plus a
+manual "Retry" action (`retry_credential_encryption`) when it's `false`.
+
+**Bucket-contents encryption:** none. Content and credentials sit in the
+bucket itself (separate from the local at-rest question directly above) as
 plaintext JSON/gzip. Accepted for v1 given the target use case (2–3
 personal devices, a bucket the user already trusts with their own
 credentials); revisit if that trust assumption ever needs to change.

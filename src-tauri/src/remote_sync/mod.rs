@@ -14,6 +14,7 @@
 pub mod bucket_gc;
 pub mod client;
 pub mod conflict;
+pub mod credential_vault;
 pub mod engine;
 pub mod lazy_images;
 pub mod link;

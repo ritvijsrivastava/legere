@@ -11,6 +11,8 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::remote_sync::credential_vault;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RemoteSyncConfig {
     pub enabled: bool,
@@ -23,6 +25,16 @@ pub struct RemoteSyncConfig {
     pub use_path_style: bool,
     pub access_key: String,
     pub secret_key: String,
+    /// Whether `access_key`/`secret_key` are currently encrypted at rest
+    /// (`remote_sync::credential_vault`) rather than stored as plaintext
+    /// -- read-only, like `device_id` below: whatever the caller's
+    /// `config.credentials_encrypted` says on a save is ignored, since
+    /// this reflects what actually happened on *this* save (did a
+    /// platform key store turn out to be reachable or not), not
+    /// something a caller gets to assert. Drives the Settings screen's
+    /// "stored unencrypted" warning and its manual retry action
+    /// ([`retry_credential_encryption`]).
+    pub credentials_encrypted: bool,
     /// Generated once on first save and never changed — identifies this
     /// device's own writes for diagnostics (`devices/<device_id>.json` in
     /// the bucket layout), not used in any conflict-resolution decision.
@@ -99,14 +111,20 @@ pub fn get_remote_sync_config(conn: &Connection) -> rusqlite::Result<Option<Remo
     };
     let device_id = ensure_device_id(conn)?;
 
+    let stored_access_key = get_setting(conn, "remote_sync_access_key")?.unwrap_or_default();
+    let stored_secret_key = get_setting(conn, "remote_sync_secret_key")?.unwrap_or_default();
+    let (access_key, secret_key, credentials_encrypted) =
+        decrypt_stored_credentials(&stored_access_key, &stored_secret_key);
+
     Ok(Some(RemoteSyncConfig {
         enabled: get_setting(conn, "remote_sync_enabled")?.as_deref() == Some("true"),
         endpoint: get_setting(conn, "remote_sync_endpoint")?.unwrap_or_default(),
         bucket_name,
         region: get_setting(conn, "remote_sync_region")?.unwrap_or_default(),
         use_path_style: get_setting(conn, "remote_sync_use_path_style")?.as_deref() == Some("true"),
-        access_key: get_setting(conn, "remote_sync_access_key")?.unwrap_or_default(),
-        secret_key: get_setting(conn, "remote_sync_secret_key")?.unwrap_or_default(),
+        access_key,
+        secret_key,
+        credentials_encrypted,
         device_id,
         conditional_writes_verified: get_setting(conn, "remote_sync_conditional_writes_verified")?
             .as_deref()
@@ -116,6 +134,34 @@ pub fn get_remote_sync_config(conn: &Connection) -> rusqlite::Result<Option<Remo
             .map(clamp_sync_interval_hours)
             .unwrap_or(DEFAULT_SYNC_INTERVAL_HOURS),
     }))
+}
+
+/// Decrypts `stored_access_key`/`stored_secret_key` as read from the
+/// `settings` table, returning the plaintext pair plus whether both were
+/// actually encrypted. A decrypt failure on an encrypted value (key gone,
+/// corrupted data — see `credential_vault`'s doc comment) degrades to an
+/// empty string for that field rather than failing the whole config load:
+/// the rest of `RemoteSyncConfig` (interval, enabled, device id, ...) is
+/// still perfectly usable, and an empty credential just means the
+/// Settings screen prompts the user to re-enter it, the same recoverable
+/// state as a never-configured device.
+fn decrypt_stored_credentials(access_key: &str, secret_key: &str) -> (String, String, bool) {
+    let both_tagged =
+        credential_vault::is_encrypted(access_key) && credential_vault::is_encrypted(secret_key);
+
+    let decrypt_one = |value: &str| match credential_vault::decrypt(value) {
+        Ok(plain) => plain,
+        Err(error) => {
+            tracing::warn!(%error, "failed to decrypt stored remote sync credential");
+            String::new()
+        }
+    };
+
+    (
+        decrypt_one(access_key),
+        decrypt_one(secret_key),
+        both_tagged,
+    )
 }
 
 /// Saves every field except `device_id`, which `ensure_device_id` owns
@@ -146,8 +192,10 @@ pub fn save_remote_sync_config(
             "false"
         },
     )?;
-    set_setting(conn, "remote_sync_access_key", &config.access_key)?;
-    set_setting(conn, "remote_sync_secret_key", &config.secret_key)?;
+    let (access_key, secret_key, _) =
+        encrypt_credentials_for_storage(&config.access_key, &config.secret_key);
+    set_setting(conn, "remote_sync_access_key", &access_key)?;
+    set_setting(conn, "remote_sync_secret_key", &secret_key)?;
     set_setting(
         conn,
         "remote_sync_conditional_writes_verified",
@@ -163,6 +211,42 @@ pub fn save_remote_sync_config(
         &clamp_sync_interval_hours(config.sync_interval_hours).to_string(),
     )?;
     Ok(())
+}
+
+/// Encrypts `access_key`/`secret_key` for storage if a platform key store
+/// is reachable right now; otherwise returns them unchanged (today's
+/// plaintext behavior) -- see `credential_vault`'s doc comment for why
+/// this never fails outright. Both fields share one "was a key store
+/// available" outcome: there's only ever one key per device, so either
+/// both get encrypted or neither does, never a mix.
+fn encrypt_credentials_for_storage(access_key: &str, secret_key: &str) -> (String, String, bool) {
+    match (
+        credential_vault::encrypt(access_key),
+        credential_vault::encrypt(secret_key),
+    ) {
+        (Some(access_key), Some(secret_key)) => (access_key, secret_key, true),
+        _ => (access_key.to_string(), secret_key.to_string(), false),
+    }
+}
+
+/// Re-attempts encrypting the currently-stored credentials in place --
+/// the Settings screen's manual "Retry" action, for when a platform key
+/// store wasn't reachable at the time of the last save (e.g. no Secret
+/// Service was running yet) but might be now. A no-op, successfully,
+/// if credentials are already encrypted or there's nothing configured
+/// yet. Returns whether credentials are encrypted after this call.
+pub fn retry_credential_encryption(conn: &Connection) -> rusqlite::Result<bool> {
+    let Some(config) = get_remote_sync_config(conn)? else {
+        return Ok(false);
+    };
+    if config.credentials_encrypted {
+        return Ok(true);
+    }
+    let (access_key, secret_key, encrypted) =
+        encrypt_credentials_for_storage(&config.access_key, &config.secret_key);
+    set_setting(conn, "remote_sync_access_key", &access_key)?;
+    set_setting(conn, "remote_sync_secret_key", &secret_key)?;
+    Ok(encrypted)
 }
 
 /// Status surfaced by the "Sync now" button / settings screen — separate
@@ -214,6 +298,7 @@ mod tests {
             use_path_style: false,
             access_key: "key".to_string(),
             secret_key: "secret".to_string(),
+            credentials_encrypted: false,
             device_id: "will-be-ignored".to_string(),
             conditional_writes_verified: true,
             sync_interval_hours: 6,

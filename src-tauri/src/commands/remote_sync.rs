@@ -119,6 +119,25 @@ pub async fn save_remote_sync_config(
     Ok(config)
 }
 
+/// The Settings screen's manual "Retry" action, shown next to the
+/// "credentials stored unencrypted" warning (see
+/// `RemoteSyncConfig::credentials_encrypted`'s doc comment) -- re-attempts
+/// encrypting the already-saved credentials in place, for when a
+/// platform key store wasn't reachable at the time of the last save but
+/// might be now (e.g. the user just started their desktop's keyring
+/// daemon, or unlocked it). Returns whether credentials are encrypted
+/// after this call, so the dialog can clear the warning immediately
+/// without a separate `get_remote_sync_config` round trip.
+#[tauri::command]
+pub async fn retry_credential_encryption(state: State<'_, AppState>) -> Result<bool, AppError> {
+    let pool = state.pool.clone();
+    tokio::task::spawn_blocking(move || {
+        let conn = pool.get()?;
+        Ok(sync_config::retry_credential_encryption(&conn)?)
+    })
+    .await?
+}
+
 /// Cancels whatever cross-device sync pass is currently running on this
 /// device, if any — a no-op otherwise. Backs the settings screen's
 /// "Cancel" action, shown only while a sync is in progress.

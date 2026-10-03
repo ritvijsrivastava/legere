@@ -109,6 +109,11 @@ impl LinkPayload {
             use_path_style: self.use_path_style,
             access_key: self.access_key,
             secret_key: self.secret_key,
+            // Plaintext straight out of the QR payload, not yet through
+            // `credential_vault` -- `save_remote_sync_config` is what
+            // actually sets this (ignoring whatever's set here), the
+            // first time the receiving device saves this config.
+            credentials_encrypted: false,
             device_id: String::new(),
             conditional_writes_verified: false,
             sync_interval_hours: self.sync_interval_hours,
@@ -234,6 +239,7 @@ mod tests {
             use_path_style: false,
             access_key: "AKIAEXAMPLE".into(),
             secret_key: "super-secret-value".into(),
+            credentials_encrypted: false,
             device_id: "this-devices-own-id".into(),
             conditional_writes_verified: true,
             sync_interval_hours: 6,

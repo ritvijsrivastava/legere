@@ -312,6 +312,15 @@ export function saveRemoteSyncConfig(config: RemoteSyncConfig): Promise<RemoteSy
 	return invoke<RemoteSyncConfig>('save_remote_sync_config', { config });
 }
 
+/** The settings screen's manual "Retry" action next to the "credentials
+ *  stored unencrypted" warning -- re-attempts encrypting the
+ *  already-saved credentials in place, for when a platform key store
+ *  wasn't reachable at the time of the last save but might be now.
+ *  Returns whether credentials are encrypted after this call. */
+export function retryCredentialEncryption(): Promise<boolean> {
+	return invoke<boolean>('retry_credential_encryption');
+}
+
 /** The manual "Sync now" button. `null` if sync isn't configured/enabled. */
 export function remoteSyncNow(): Promise<RemoteSyncOutcome | null> {
 	return invoke<RemoteSyncOutcome | null>('remote_sync_now');

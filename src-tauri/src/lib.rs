@@ -276,6 +276,7 @@ pub fn run() {
             commands::remote_sync::get_remote_sync_status,
             commands::remote_sync::test_remote_sync_connection,
             commands::remote_sync::save_remote_sync_config,
+            commands::remote_sync::retry_credential_encryption,
             commands::remote_sync::remote_sync_now,
             commands::remote_sync::cancel_remote_sync,
             commands::remote_sync::generate_sync_qr,

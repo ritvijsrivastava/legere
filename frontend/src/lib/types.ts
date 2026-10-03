@@ -158,6 +158,14 @@ export interface RemoteSyncConfig {
 	use_path_style: boolean;
 	access_key: string;
 	secret_key: string;
+	/** Whether `access_key`/`secret_key` are currently encrypted at rest on
+	 *  this device (a platform key store -- OS keyring on Linux, Keystore on
+	 *  Android -- was reachable the last time this was saved). Read-only,
+	 *  like `device_id`: the backend always computes this fresh and ignores
+	 *  whatever's sent back in a save. Drives the settings screen's "stored
+	 *  unencrypted" warning and its manual `retry_credential_encryption`
+	 *  retry action. */
+	credentials_encrypted: boolean;
 	/** Generated once by the backend on first save; never edited from the UI. */
 	device_id: string;
 	/** Set by the backend once `test_remote_sync_connection`, or a save

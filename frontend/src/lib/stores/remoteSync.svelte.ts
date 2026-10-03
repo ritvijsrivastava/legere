@@ -64,6 +64,17 @@ class RemoteSyncStore {
 		}
 	}
 
+	/** The settings screen's manual "Retry" action next to the "credentials
+	 *  stored unencrypted" warning - re-attempts encrypting the
+	 *  already-saved credentials in place and updates `config` in place with
+	 *  the result, without a full `refresh()` round trip. A no-op if
+	 *  `config` is unset (nothing saved yet, so nothing to retry). */
+	async retryCredentialEncryption() {
+		if (!this.config) return;
+		const encrypted = await api.retryCredentialEncryption();
+		this.config = { ...this.config, credentials_encrypted: encrypted };
+	}
+
 	/** Requests cancellation of whatever pass is currently running. Doesn't
 	 *  itself flip `busy`/`progress` back — the backend's
 	 *  `remote-sync:cancelled` event (see `lib/events.ts`) does that once
