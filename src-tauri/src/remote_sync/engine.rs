@@ -1805,6 +1805,8 @@ mod tests {
             read_time_min: 3,
             hero_image_path: None,
             extraction_confident: true,
+            capture_failed: false,
+            capture_error: None,
         }
     }
 

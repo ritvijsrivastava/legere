@@ -585,6 +585,8 @@ mod tests {
             read_time_min: 1,
             hero_image_path: None,
             extraction_confident: true,
+            capture_failed: false,
+            capture_error: None,
         };
         let conn = state.pool.get().unwrap();
         queries::insert_captured_article(&conn, "existing", None, "direct", &output, &[]).unwrap();

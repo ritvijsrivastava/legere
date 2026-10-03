@@ -67,6 +67,15 @@ pub struct LocalCaptureOutput {
     /// `false` when extraction fell back to naive extraction — the
     /// readable view may be lower quality for such an article.
     pub extraction_confident: bool,
+    /// `true` when this output didn't come from a real capture at all —
+    /// see [`capture_local_or_link_only`]. Every other field above is a
+    /// placeholder in that case (`content_html`/`excerpt` empty,
+    /// `read_time_min` 0, `hero_image_path` `None`): the row exists only
+    /// to hold `link` and `capture_error`.
+    pub capture_failed: bool,
+    /// The error that made capture fail, shown verbatim in the reader's
+    /// red banner. Always `None` unless `capture_failed` is `true`.
+    pub capture_error: Option<String>,
 }
 
 /// Fast local capture: fetch -> readability extraction -> sanitize ->
@@ -160,7 +169,54 @@ pub async fn capture_local(
         read_time_min: extracted.read_time_min,
         hero_image_path,
         extraction_confident: extracted.extraction_confident,
+        capture_failed: false,
+        capture_error: None,
     })
+}
+
+/// Same pipeline as [`capture_local`], but never fails: a capture error
+/// (dead link, SSRF-blocked host, non-2xx status, unparseable response,
+/// \u2026) is turned into a link-only [`LocalCaptureOutput`] instead of being
+/// propagated to the caller. Every ingestion path (direct link, RSS, CSV
+/// import, Raindrop import) calls this rather than [`capture_local`]
+/// directly, so a page that can't be captured still gets a row \u2014 the user
+/// can open it later, see the error, and follow "open original" instead
+/// of the link just silently never showing up. `url` is used verbatim as
+/// the stored link when it doesn't even parse as a URL (the fallback
+/// value [`crate::urlx`] has nothing to canonicalize); otherwise the same
+/// tracking-stripped/canonicalized form [`capture_local`] would have used.
+pub async fn capture_local_or_link_only(
+    client: &reqwest::Client,
+    data_dir: &Path,
+    id: &str,
+    url: &str,
+) -> LocalCaptureOutput {
+    match capture_local(client, data_dir, id, url).await {
+        Ok(output) => output,
+        Err(err) => {
+            let link = url::Url::parse(url.trim())
+                .map(|parsed| strip_tracking_params(canonicalize(&parsed).as_url()).to_string())
+                .unwrap_or_else(|_| url.trim().to_string());
+            let title = url::Url::parse(url.trim())
+                .ok()
+                .and_then(|parsed| parsed.host_str().map(str::to_string))
+                .unwrap_or_else(|| link.clone());
+
+            LocalCaptureOutput {
+                title,
+                link: link.clone(),
+                final_url: link,
+                excerpt: String::new(),
+                content_html: String::new(),
+                published_at: Some(chrono::Utc::now().to_rfc3339()),
+                read_time_min: 0,
+                hero_image_path: None,
+                extraction_confident: false,
+                capture_failed: true,
+                capture_error: Some(err.to_string()),
+            }
+        }
+    }
 }
 
 #[cfg(test)]
