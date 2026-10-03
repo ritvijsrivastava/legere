@@ -45,6 +45,7 @@ pub struct SyncArticleRow {
     pub measure_override: Option<String>,
     pub leading_override: Option<String>,
     pub theme_override: Option<String>,
+    pub font_override: Option<String>,
     pub updated_at: String,
 }
 
@@ -73,6 +74,7 @@ fn sync_article_from_row(row: &Row) -> rusqlite::Result<SyncArticleRow> {
         measure_override: row.get("measure_override")?,
         leading_override: row.get("leading_override")?,
         theme_override: row.get("theme_override")?,
+        font_override: row.get("font_override")?,
         updated_at: row.get("updated_at")?,
     })
 }
@@ -81,7 +83,7 @@ const ARTICLE_SYNC_COLUMNS: &str = "id, source_id, source_type, title, link, exc
     content_html, hero_image_path, published_at, fetched_at, read_time_min,
     reading_state, favorited, extraction_confident, reading_progress, tags,
     category_id, font_size_override, measure_override, leading_override,
-    theme_override, updated_at";
+    theme_override, font_override, updated_at";
 
 /// Every article currently in the local DB, in sync's wire shape. No
 /// paging (unlike `queries::list_articles_page`) — the manifest diff
@@ -121,9 +123,9 @@ pub fn upsert_synced_article(conn: &Connection, row: &SyncArticleRow) -> rusqlit
             hero_image_path, published_at, fetched_at, read_time_min,
             reading_state, favorited, extraction_confident, reading_progress,
             tags, category_id, font_size_override, measure_override,
-            leading_override, theme_override, updated_at
+            leading_override, theme_override, font_override, updated_at
          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
-                   ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)
+                   ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)
          ON CONFLICT(id) DO UPDATE SET
             source_id = excluded.source_id,
             source_type = excluded.source_type,
@@ -145,6 +147,7 @@ pub fn upsert_synced_article(conn: &Connection, row: &SyncArticleRow) -> rusqlit
             measure_override = excluded.measure_override,
             leading_override = excluded.leading_override,
             theme_override = excluded.theme_override,
+            font_override = excluded.font_override,
             updated_at = excluded.updated_at",
         params![
             row.id,
@@ -168,6 +171,7 @@ pub fn upsert_synced_article(conn: &Connection, row: &SyncArticleRow) -> rusqlit
             row.measure_override,
             row.leading_override,
             row.theme_override,
+            row.font_override,
             row.updated_at,
         ],
     )?;
@@ -459,6 +463,7 @@ mod tests {
             measure_override: None,
             leading_override: None,
             theme_override: None,
+            font_override: None,
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         };
 

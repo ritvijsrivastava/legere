@@ -67,6 +67,19 @@
   --duration-base: 0.18s;
 }
 
+/* Reader-only font-family switch (`Settings.reader_font` /
+   `ReadingOverrides.font`, 'literata' | 'libron'), scoped the same way
+   as the `data-theme` override below: a `data-reading-font='libron'`
+   attribute set on the reader view's root (see reader/[id]/+page.svelte)
+   swaps just `--font-reading` for that subtree, so both the article
+   title and body (both already `var(--font-reading)`) pick it up without
+   each needing its own font-switch logic. Libron is vendored as static
+   WOFF2s and declared via @font-face in app.css, not @fontsource —
+   see static/fonts/libron/README.md. */
+[data-reading-font='libron'] {
+  --font-reading: 'Libron', Georgia, serif;
+}
+
 [data-theme='dark'] {
   --color-bg: #1a1814;
   --color-surface: #24211a;

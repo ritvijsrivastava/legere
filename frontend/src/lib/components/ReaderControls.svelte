@@ -1,30 +1,35 @@
 <script lang="ts">
-	import type { AppTheme, ReaderMeasure, ReaderLeading } from '$lib/types';
+	import type { AppTheme, ReaderMeasure, ReaderLeading, ReaderFont } from '$lib/types';
+	import SelectPill from './SelectPill.svelte';
 
 	let {
 		fontSize,
 		measure,
 		leading,
 		theme,
+		font,
 		hasOverride,
 		onFontSize,
 		onMeasure,
 		onLeading,
 		onTheme,
+		onFont,
 		onReset
 	}: {
 		fontSize: number;
 		measure: ReaderMeasure;
 		leading: ReaderLeading;
 		theme: AppTheme;
+		font: ReaderFont;
 		/** Whether this article currently overrides any of the settings
-		 *  above (font size/width/line height/theme) rather than following
-		 *  the global defaults — shows the "Reset" action below. */
+		 *  above (font size/width/line height/theme/reading font) rather than
+		 *  following the global defaults — shows the "Reset" action below. */
 		hasOverride: boolean;
 		onFontSize: (size: number) => void;
 		onMeasure: (measure: ReaderMeasure) => void;
 		onLeading: (leading: ReaderLeading) => void;
 		onTheme: (theme: AppTheme) => void;
+		onFont: (font: ReaderFont) => void;
 		onReset: () => void;
 	} = $props();
 
@@ -44,6 +49,10 @@
 	const themeOptions: { value: AppTheme; label: string }[] = [
 		{ value: 'light', label: 'Light' },
 		{ value: 'dark', label: 'Dark' }
+	];
+	const fontOptions: { value: ReaderFont; label: string }[] = [
+		{ value: 'literata', label: 'Literata' },
+		{ value: 'libron', label: 'Libron' }
 	];
 
 	function handleClickOutside(e: MouseEvent) {
@@ -123,6 +132,10 @@
 	</div>
 {/snippet}
 
+{#snippet fontSelect()}
+	<SelectPill value={font} options={fontOptions} ariaLabel="Reading font" onChange={onFont} />
+{/snippet}
+
 <svelte:window
 	onclick={handleClickOutside}
 	onkeydown={(e) => {
@@ -162,6 +175,10 @@
 			<div class="aa-row">
 				<span class="aa-label">Theme</span>
 				{@render themeSeg()}
+			</div>
+			<div class="aa-row">
+				<span class="aa-label">Font</span>
+				{@render fontSelect()}
 			</div>
 			{#if hasOverride}
 				<button class="btn btn-ghost reset-btn" onclick={onReset}>

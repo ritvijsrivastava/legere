@@ -777,7 +777,11 @@ Stored article HTML is untrusted input rendered with `{@html}`, so:
 5. **Offline asset rule** — no CDN fonts/icons; everything ships vendored
    (`@fontsource*` packages, inline SVG icons — including the full 1848-icon
    Lucide set backing `CategoryIconPicker`'s search, vendored as local
-   `.svelte` files and lazily code-split per icon rather than fetched).
+   `.svelte` files and lazily code-split per icon rather than fetched;
+   Libron — the second reading-font choice, OFL-licensed, no npm package
+   — as static WOFF2 files under `frontend/static/fonts/libron/` with its
+   own `@font-face` block in `app.css`, see that directory's README.md
+   for provenance/update instructions).
 
 ## Updates
 

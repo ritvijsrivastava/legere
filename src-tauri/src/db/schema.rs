@@ -647,6 +647,14 @@ CREATE TABLE sync_image_blobs (
 );
 ";
 
+// Per-article reading-font override, same `NULL` = "follow the global
+// setting" convention as V10's four override columns — this is the fifth
+// reading-appearance axis, added once `Settings.reader_font` (the global
+// 'literata' | 'libron' choice) existed to pick from.
+const V20: &str = "
+ALTER TABLE articles ADD COLUMN font_override TEXT;
+";
+
 pub fn migrations() -> Migrations<'static> {
     Migrations::new(vec![
         M::up(V1),
@@ -668,6 +676,7 @@ pub fn migrations() -> Migrations<'static> {
         M::up(V17),
         M::up(V18),
         M::up(V19),
+        M::up(V20),
     ])
 }
 

@@ -776,6 +776,7 @@ pub fn get_article(conn: &Connection, id: &str) -> rusqlite::Result<Option<Artic
                     articles.extraction_confident, articles.reading_progress, articles.tags,
                     articles.font_size_override, articles.measure_override,
                     articles.leading_override, articles.theme_override,
+                    articles.font_override,
                     categories.name AS category_name, categories.icon AS category_icon
              FROM {ARTICLE_SUMMARY_FROM} WHERE articles.id = ?1"
         ),
@@ -803,6 +804,7 @@ pub fn get_article(conn: &Connection, id: &str) -> rusqlite::Result<Option<Artic
                     measure: row.get("measure_override")?,
                     leading: row.get("leading_override")?,
                     theme: row.get("theme_override")?,
+                    font: row.get("font_override")?,
                 },
             })
         },
@@ -811,11 +813,11 @@ pub fn get_article(conn: &Connection, id: &str) -> rusqlite::Result<Option<Artic
 }
 
 /// Persists an article's reading-appearance overrides (font size, text
-/// width, line height, theme), replacing all four at once — the reader's
-/// "Aa" popover always sends the article's whole current override set, so
-/// a field left unset by the caller is `None`/NULL, not left untouched.
-/// `None` on all four (the "reset to global defaults" action) is exactly
-/// as valid a call as setting one.
+/// width, line height, theme, reading font), replacing all five at once —
+/// the reader's "Aa" popover always sends the article's whole current
+/// override set, so a field left unset by the caller is `None`/NULL, not
+/// left untouched. `None` on all five (the "reset to global defaults"
+/// action) is exactly as valid a call as setting one.
 pub fn set_reading_overrides(
     conn: &Connection,
     id: &str,
@@ -823,14 +825,16 @@ pub fn set_reading_overrides(
 ) -> rusqlite::Result<()> {
     conn.execute(
         "UPDATE articles
-         SET font_size_override = ?2, measure_override = ?3, leading_override = ?4, theme_override = ?5
+         SET font_size_override = ?2, measure_override = ?3, leading_override = ?4, theme_override = ?5,
+             font_override = ?6
          WHERE id = ?1",
         params![
             id,
             overrides.font_size,
             overrides.measure,
             overrides.leading,
-            overrides.theme
+            overrides.theme,
+            overrides.font
         ],
     )?;
     Ok(())
@@ -1282,6 +1286,7 @@ pub fn get_settings(conn: &Connection) -> rusqlite::Result<Settings> {
             }
             "reader_measure" => settings.reader_measure = value,
             "reader_leading" => settings.reader_leading = value,
+            "reader_font" => settings.reader_font = value,
             "app_theme" => settings.app_theme = value,
             "import_concurrency" => {
                 if let Ok(concurrency) = value.parse::<i64>() {
@@ -1340,6 +1345,11 @@ pub fn update_settings(conn: &Connection, settings: &Settings) -> rusqlite::Resu
         "INSERT INTO settings (key, value) VALUES ('reader_leading', ?1)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value",
         params![settings.reader_leading],
+    )?;
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES ('reader_font', ?1)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![settings.reader_font],
     )?;
     conn.execute(
         "INSERT INTO settings (key, value) VALUES ('app_theme', ?1)

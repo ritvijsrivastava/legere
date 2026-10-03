@@ -8,6 +8,7 @@ const DEFAULT_SETTINGS: Settings = {
 	reader_font_size: 19,
 	reader_measure: 'default',
 	reader_leading: 'default',
+	reader_font: 'literata',
 	app_theme: 'dark',
 	import_concurrency: 5,
 	autosync_interval_hours: 12

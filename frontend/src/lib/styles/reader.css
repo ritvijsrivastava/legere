@@ -7,7 +7,13 @@
 
 .reader-body {
   font-family: var(--font-reading);
-  font-variation-settings: 'wght' 400;
+  /* Plain `font-weight` rather than `font-variation-settings: 'wght'`:
+     Literata Variable's @font-face declares a ranged `font-weight: 200
+     900`, so browsers already map this to its wght axis, and Libron
+     (static per-weight WOFF2 files, no variable axis) only responds to
+     `font-weight` at all — a hardcoded `font-variation-settings` would
+     silently no-op for it. Works for both fonts. */
+  font-weight: 400;
   color: var(--reader-fg, var(--color-text));
 }
 
@@ -22,7 +28,7 @@
 }
 
 .reader-body :global(strong) {
-  font-variation-settings: 'wght' 600;
+  font-weight: 600;
 }
 
 .reader-body :global(h2),

@@ -5,6 +5,7 @@
 	import { importStore } from '$lib/stores/import.svelte';
 	import { articleImportStore } from '$lib/stores/articleImport.svelte';
 	import ChevronRight from '$lib/icons/ChevronRight.svelte';
+	import SelectPill from '$lib/components/SelectPill.svelte';
 	import Download from '$lib/icons/Download.svelte';
 	import Upload from '$lib/icons/Upload.svelte';
 	import Globe from '$lib/icons/Globe.svelte';
@@ -12,7 +13,14 @@
 	import ExportResultCard from '$lib/components/ExportResultCard.svelte';
 	import RemoteSyncDialog from '$lib/components/RemoteSyncDialog.svelte';
 	import { remoteSyncStore } from '$lib/stores/remoteSync.svelte';
-	import type { AppTheme, ExportResult, LibraryView, ReaderMeasure, RemoteSyncConfig } from '$lib/types';
+	import type {
+		AppTheme,
+		ExportResult,
+		LibraryView,
+		ReaderFont,
+		ReaderMeasure,
+		RemoteSyncConfig
+	} from '$lib/types';
 	import { isTauri } from '$lib/platform';
 	import { errorMessage } from '$lib/api';
 	import * as api from '$lib/api';
@@ -252,6 +260,9 @@
 	function setReaderMeasure(measure: ReaderMeasure) {
 		settingsStore.update({ reader_measure: measure });
 	}
+	function setReaderFont(font: ReaderFont) {
+		settingsStore.update({ reader_font: font });
+	}
 	function setReaderFontSize(delta: number) {
 		const next = Math.max(16, Math.min(22, settingsStore.current.reader_font_size + delta));
 		settingsStore.update({ reader_font_size: next });
@@ -271,6 +282,10 @@
 		{ value: 'narrow', label: 'Narrow' },
 		{ value: 'default', label: 'Default' },
 		{ value: 'wide', label: 'Wide' }
+	];
+	const readerFontOptions: { value: ReaderFont; label: string }[] = [
+		{ value: 'literata', label: 'Literata' },
+		{ value: 'libron', label: 'Libron' }
 	];
 </script>
 
@@ -326,6 +341,15 @@
 
 		<h3 class="row-title">Reader appearance</h3>
 		<p class="text-muted section-desc">Override per article from its Aa menu while reading.</p>
+		<div class="row">
+			<span class="row-label">Font</span>
+			<SelectPill
+				value={settingsStore.current.reader_font}
+				options={readerFontOptions}
+				ariaLabel="Reading font"
+				onChange={setReaderFont}
+			/>
+		</div>
 		<div class="row">
 			<span class="row-label">Text width</span>
 			<div class="seg">
@@ -923,6 +947,7 @@
 		gap: 14px;
 		padding: 6px 0;
 	}
+
 	.row-grouped {
 		padding: 7px 0;
 	}

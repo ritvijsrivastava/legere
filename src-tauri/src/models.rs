@@ -69,11 +69,11 @@ pub struct ArticleDetail {
 }
 
 /// Per-article overrides of the global reading-appearance settings
-/// (`Settings::reader_font_size`/`reader_measure`/`reader_leading`/`app_theme`),
+/// (`Settings::reader_font_size`/`reader_measure`/`reader_leading`/`reader_font`/`app_theme`),
 /// one field per axis, `None` meaning "no override, use the global value".
 /// Set via `commands::articles::set_reading_overrides` from the reader's
-/// "Aa" popover; resetting an article clears all four back to `None` in
-/// one call rather than requiring four separate ones.
+/// "Aa" popover; resetting an article clears all five back to `None` in
+/// one call rather than requiring five separate ones.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ReadingOverrides {
     pub font_size: Option<i64>,
@@ -81,6 +81,8 @@ pub struct ReadingOverrides {
     pub leading: Option<String>,
     /// `light` | `dark`, same two values as `Settings::app_theme`.
     pub theme: Option<String>,
+    /// `literata` | `libron`, same two values as `Settings::reader_font`.
+    pub font: Option<String>,
 }
 
 /// Request for a page of [`ArticleSummary`] rows, keyset-paginated on
@@ -194,6 +196,14 @@ pub struct Settings {
     pub reader_font_size: i64,
     pub reader_measure: String,
     pub reader_leading: String,
+    /// `literata` | `libron` — the reader body serif. `literata` is
+    /// `@fontsource-variable/literata`; `libron` is Libron
+    /// (https://github.com/nicoverbruggen/libron), vendored as static
+    /// WOFF2 files under `static/fonts/libron/` since no npm font
+    /// package exists for it (see `frontend/src/app.css`'s `@font-face`
+    /// block). An individual article can override just its own reader
+    /// view via `ReadingOverrides::font`.
+    pub reader_font: String,
     /// `light` | `dark` — the single app-wide color scheme, covering both
     /// the app chrome and the reader. An individual article can override
     /// just its own reader view via `ReadingOverrides::theme`.
@@ -221,6 +231,7 @@ impl Default for Settings {
             reader_font_size: 19,
             reader_measure: "default".into(),
             reader_leading: "default".into(),
+            reader_font: "literata".into(),
             app_theme: "dark".into(),
             import_concurrency: 5,
             autosync_interval_hours: 12,

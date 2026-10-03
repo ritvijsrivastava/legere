@@ -176,9 +176,9 @@ Calm and warm at rest, with a single deep, confident green doing all of the syst
 ## Typography
 
 **Chrome Font:** Inter (with system-ui, sans-serif fallback)
-**Reading Font:** Literata Variable (with Georgia, serif fallback)
+**Reading Font:** Literata Variable (with Georgia, serif fallback) by default, or Libron (with Georgia, serif fallback) — user-selectable, globally in Settings and per article from the reader's "Aa" popover.
 
-**Character:** A plain, confident workhorse sans runs every control, label, and piece of metadata in the app; a warm literary serif — built specifically for long-form on-screen reading — is reserved for the one surface where reading is the whole point. The pairing is a boundary, not a blend: nothing outside the reader view sets in Literata, and nothing inside `.reader-body`/`.reader-title` sets in Inter.
+**Character:** A plain, confident workhorse sans runs every control, label, and piece of metadata in the app; a warm literary serif — built specifically for long-form on-screen reading — is reserved for the one surface where reading is the whole point. The pairing is a boundary, not a blend: nothing outside the reader view sets in a reading font, and nothing inside `.reader-body`/`.reader-title` sets in Inter. Libron (https://github.com/nicoverbruggen/libron, OFL-licensed) is a calmer, more neutral alternative to Literata for the same surface — vendored as static WOFF2 files (`frontend/static/fonts/libron/`) rather than an `@fontsource` package, since none exists for it; both fonts are referenced through the same `--font-reading` token (see `tokens.css`'s `[data-reading-font]` selector), so every reading-surface rule automatically follows whichever is selected.
 
 ### Hierarchy
 - **Display** (600 variable weight, `clamp(28px, 5vw, 38px)`, 1.15 line-height, Literata): the article title on the reader page. The only large-scale serif moment in the system.
@@ -189,7 +189,7 @@ Calm and warm at rest, with a single deep, confident green doing all of the syst
 - **Label** (500, 12px, 0.06em tracked, Inter, often muted): section labels, `h6`, kicker-style metadata.
 
 ### Named Rules
-**The Two-Font Boundary Rule.** Inter is chrome, Literata is reading. A component never mixes them, and a new component defaults to Inter unless it renders article prose.
+**The Two-Font Boundary Rule.** Inter is chrome, the reading font (Literata or Libron) is reading. A component never mixes them, and a new component defaults to Inter unless it renders article prose.
 
 ## Layout
 
@@ -238,6 +238,11 @@ Consistently soft, never sharp and never maximal. Radius scales with the size an
 - **Style:** pill-shaped (999px) container, hairline border, options divided by hairline rules.
 - **Selected state:** Ledger Pine fill, accent-fg text, weight steps up to 600.
 - **Use:** view toggles (cards/list), reader typography (size/width/leading/theme), settings on/off pairs.
+
+### Pill Select (`SelectPill.svelte`)
+- **Use:** a reading-appearance axis with too many/too-long options for a segmented control to hold comfortably — currently just the reader font (Literata/Libron), set globally in Settings and per article from the "Aa" popover.
+- **Style:** a custom button+listbox, not a native `<select>` — a real `<select>`'s open-panel chrome (hover/selected-row color, arrow position) is OS-drawn and only partly reachable from CSS, which left it looking like a foreign control dropped into this theme. The closed trigger matches `.seg-opt`'s pill border/padding/type exactly, so it reads as one more pill in the row; the open panel is Bright Stock, `--radius-md` corners, `--shadow-md`, with the selected row getting the same Ledger-Pine-fill/accent-fg/600-weight treatment as a selected segmented-control option.
+- **Behavior:** click-outside and `Escape` close it, same pattern as the "Aa" popover it lives inside.
 
 ### Cards / Containers
 - **Corner style:** 15px radius, hero image cropped to the same radius at the top.

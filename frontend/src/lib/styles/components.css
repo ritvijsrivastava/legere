@@ -119,6 +119,13 @@
 .seg-opt-disabled { cursor: not-allowed; opacity: 0.5; }
 .seg-opt-disabled:hover { background: none; }
 
+/* `.select-pill` (trigger/menu/option visuals) now lives as scoped
+   styles on `lib/components/SelectPill.svelte` — a real `<select>`'s
+   open-panel chrome (hover/selected-row color, OS-drawn arrow) can't be
+   fully themed from CSS, so the reader-font picker (and anything
+   similar later) uses a custom button+listbox control instead of a
+   class here. */
+
 .card {
   display: flex;
   flex-direction: column;

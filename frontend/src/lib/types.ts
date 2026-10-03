@@ -9,6 +9,10 @@ export type SearchScope = 'all' | 'articles' | 'categories' | 'tags';
 export type ReaderMeasure = 'narrow' | 'default' | 'wide';
 export type ReaderLeading = 'compact' | 'default' | 'airy';
 export type AppTheme = 'light' | 'dark';
+/** 'literata' is the bundled @fontsource-variable serif; 'libron' is the
+ *  vendored OFL serif (static/fonts/libron/) — see tokens.css's
+ *  `data-reading-font` selector for how this swaps `--font-reading`. */
+export type ReaderFont = 'literata' | 'libron';
 
 /** `unread` -> `reading` on opening the reader (whether previously unread
  *  or read). `read` has no writer left in the app (the manual "mark as
@@ -54,14 +58,16 @@ export interface ArticleDetail extends ArticleSummary {
 }
 
 /** Per-article overrides of the global reading-appearance settings
- *  (`reader_font_size`/`reader_measure`/`reader_leading`/`app_theme`), one
- *  field per axis, `null` meaning "no override, use the global value".
- *  Set via `setReadingOverrides` from the reader's "Aa" popover. */
+ *  (`reader_font_size`/`reader_measure`/`reader_leading`/`reader_font`/
+ *  `app_theme`), one field per axis, `null` meaning "no override, use the
+ *  global value". Set via `setReadingOverrides` from the reader's "Aa"
+ *  popover. */
 export interface ReadingOverrides {
 	font_size: number | null;
 	measure: ReaderMeasure | null;
 	leading: ReaderLeading | null;
 	theme: AppTheme | null;
+	font: ReaderFont | null;
 }
 
 export interface Source {
@@ -113,6 +119,7 @@ export interface Settings {
 	reader_font_size: number;
 	reader_measure: ReaderMeasure;
 	reader_leading: ReaderLeading;
+	reader_font: ReaderFont;
 	/** The single app-wide color scheme, covering both the app chrome and
 	 *  the reader. An individual article can override just its own reader
 	 *  view via `ReadingOverrides.theme`. */

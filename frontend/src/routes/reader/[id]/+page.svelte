@@ -4,7 +4,14 @@
 	import { libraryStatsStore } from '$lib/stores/libraryStats.svelte';
 	import { settingsStore } from '$lib/stores/settings.svelte';
 	import * as api from '$lib/api';
-	import type { AppTheme, ArticleDetail, ReaderMeasure, ReaderLeading, ReadingOverrides } from '$lib/types';
+	import type {
+		AppTheme,
+		ArticleDetail,
+		ReaderMeasure,
+		ReaderLeading,
+		ReaderFont,
+		ReadingOverrides
+	} from '$lib/types';
 	import HeroImage from '$lib/components/HeroImage.svelte';
 	import ReaderControls from '$lib/components/ReaderControls.svelte';
 	import TagEditor from '$lib/components/TagEditor.svelte';
@@ -52,6 +59,7 @@
 	let measure = $state<ReaderMeasure>('default');
 	let leading = $state<ReaderLeading>('default');
 	let theme = $state<AppTheme>('dark');
+	let font = $state<ReaderFont>('literata');
 	// Tracks which article's overrides are currently loaded into the four
 	// `$state` values above, so the effect below re-derives them exactly
 	// once per article (not once per whole session, and not on every
@@ -68,6 +76,7 @@
 		measure = article.overrides.measure ?? settingsStore.current.reader_measure;
 		leading = article.overrides.leading ?? settingsStore.current.reader_leading;
 		theme = article.overrides.theme ?? settingsStore.current.app_theme;
+		font = article.overrides.font ?? settingsStore.current.reader_font;
 	});
 
 	let hasOverride = $derived(
@@ -75,7 +84,8 @@
 			(article.overrides.font_size !== null ||
 				article.overrides.measure !== null ||
 				article.overrides.leading !== null ||
-				article.overrides.theme !== null)
+				article.overrides.theme !== null ||
+				article.overrides.font !== null)
 	);
 
 	$effect(() => {
@@ -162,6 +172,10 @@
 		theme = value;
 		persistOverrides({ theme: value });
 	}
+	function setFont(value: ReaderFont) {
+		font = value;
+		persistOverrides({ font: value });
+	}
 	/** Clears every override on the current article, falling back to
 	 *  whatever the global settings are right now. */
 	function resetOverrides() {
@@ -170,7 +184,8 @@
 			font_size: null,
 			measure: null,
 			leading: null,
-			theme: null
+			theme: null,
+			font: null
 		};
 		article = { ...article, overrides };
 		api.setReadingOverrides(article.id, overrides);
@@ -178,6 +193,7 @@
 		measure = settingsStore.current.reader_measure;
 		leading = settingsStore.current.reader_leading;
 		theme = settingsStore.current.app_theme;
+		font = settingsStore.current.reader_font;
 	}
 
 	async function toggleFavorite() {
@@ -239,6 +255,7 @@
 	bind:this={containerEl}
 	class="reader-root"
 	data-theme={theme}
+	data-reading-font={font}
 >
 	<div class="progress-track">
 		<div class="progress-fill" style:width="{Math.round(scrollProgress * 100)}%"></div>
@@ -256,11 +273,13 @@
 					{measure}
 					{leading}
 					{theme}
+					{font}
 					{hasOverride}
 					onFontSize={setFontSize}
 					onMeasure={setMeasure}
 					onLeading={setLeading}
 					onTheme={setTheme}
+					onFont={setFont}
 					onReset={resetOverrides}
 				/>
 				<button
@@ -451,7 +470,7 @@
 	}
 	.reader-title {
 		font-family: var(--font-reading);
-		font-variation-settings: 'wght' 600;
+		font-weight: 600;
 		font-size: clamp(28px, 5vw, 38px);
 		line-height: 1.15;
 		letter-spacing: -0.01em;

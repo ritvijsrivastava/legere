@@ -8,3 +8,40 @@
 @import './lib/styles/tokens.css';
 @import './lib/styles/components.css';
 @import './lib/styles/reader.css';
+
+/* Libron has no npm/@fontsource package, so it's vendored directly as
+   static WOFF2 files (see static/fonts/libron/README.md for where they
+   came from and how to update them) rather than imported like the two
+   families above — still fully offline, just without a package to
+   front it. Only regular/italic/bold/bold-italic exist (no variable
+   axis), so each face gets its own fixed font-weight. Declared after
+   the @imports above — @font-face isn't an @import and CSS requires
+   every @import to precede all other statements in the file. */
+@font-face {
+  font-family: 'Libron';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/libron/Libron-Regular.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Libron';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/libron/Libron-Italic.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Libron';
+  font-style: normal;
+  font-weight: 600 700;
+  font-display: swap;
+  src: url('/fonts/libron/Libron-Bold.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Libron';
+  font-style: italic;
+  font-weight: 600 700;
+  font-display: swap;
+  src: url('/fonts/libron/Libron-BoldItalic.woff2') format('woff2');
+}
