@@ -16,5 +16,6 @@ pub mod client;
 pub mod conflict;
 pub mod engine;
 pub mod lazy_images;
+pub mod link;
 pub mod manifest;
 pub mod orchestrate;

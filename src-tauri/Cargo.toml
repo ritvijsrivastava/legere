@@ -54,6 +54,14 @@ uuid = { version = "1.24.0", features = ["v4"] }
 rusty-s3 = "0.10.2"
 hex = "0.4.3"
 tar = "0.4"
+# Device-link QR handshake (remote_sync::link): AES-256-GCM payload
+# encryption, Argon2id passphrase-based key derivation, a CSPRNG for the
+# numeric passphrase/salt/nonce, and QR rendering for the desktop side.
+aes-gcm = "0.10.3"
+argon2 = "0.5.3"
+rand = "0.8.5"
+qrcode = { version = "0.14.1", default-features = false, features = ["image"] }
+postcard = { version = "1.1.3", features = ["use-std"] }
 
 # tauri-plugin-updater doesn't support mobile targets, so it's kept out of the
 # Android build entirely rather than compiled-but-unused.
