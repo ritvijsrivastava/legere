@@ -166,6 +166,28 @@ Every ingestion path funnels into `capture::capture_local(client, data_dir, id, 
    (now already downscaled/re-encoded by step 4 above, a bonus rather than
    the point of that step).
 
+**Failed captures are stored, not dropped.** Every ingestion path calls
+`capture::capture_local_or_link_only`, an infallible wrapper around the
+six steps above: a dead link, blocked host, non-2xx status, or any other
+`CaptureError` is turned into a link-only `LocalCaptureOutput`
+(`capture_failed = true`, `capture_error = Some(message)`, empty
+`content_html`/`excerpt`, `extraction_confident = false`) instead of
+propagating the error to the caller. The row is inserted like any other
+article — it shows up in the library, and the reader renders
+`capture_error` as a red banner with a link out to the original URL
+(`content_html` is empty, so there's nothing else to render) rather than
+silently never showing up. `recapture_article` (the reader's existing
+"Refresh" action) doubles as the retry path: it's also infallible on
+capture now, so retrying a failed article either clears `capture_failed`
+on success or just updates `capture_error` again on a repeat failure,
+never errors the command itself. RSS entries that fail capture are still
+inserted (and thus marked seen via `UNIQUE(link)`), so a permanently dead
+entry in a feed isn't re-attempted on every autosync cycle forever.
+Raindrop/CSV import rows that fail capture are still saved this way *and*
+kept in `ImportSummary::failed` for the import dialog's existing
+success/duplicate/failed counts and CSV export — failure there means
+"couldn't get a readable copy", not "wasn't saved".
+
 The article's stored `link` is the canonicalized URL (fragment and redundant
 default port dropped, query order preserved byte-for-byte) with tracking
 parameters stripped (`urlx::strip_tracking_params` — a curated blocklist;
@@ -694,7 +716,7 @@ itself failing.
 - **Pool** (`db::pool.rs`) — r2d2 over rusqlite, 4 connections. Init order
   matters: `busy_timeout` first (so WAL initialization on a fresh file waits
   instead of erroring), then `journal_mode = WAL`, then `foreign_keys = ON`.
-- **Migrations** (`db::schema.rs`) — `rusqlite_migration`, currently V19.
+- **Migrations** (`db::schema.rs`) — `rusqlite_migration`, currently V21.
   SQLite can't alter CHECK constraints, so schema-changing migrations use a
   recreate-repopulate-swap dance; foreign keys are toggled off around the
   whole migration (the pragma is a no-op inside a transaction). Each
@@ -712,8 +734,10 @@ itself failing.
   0–1, `tags` JSON array, nullable `category_id`, per-article
   reading-appearance overrides, `content_html` gzip-compressed at rest
   (`db::compression`, see `V14`/`V15` — this alone shrank one real
-  library's stored HTML from roughly 106MB to 18MB), `updated_at`
-  everywhere), `categories` (flat folders, case-insensitively unique names,
+  library's stored HTML from roughly 106MB to 18MB), `capture_failed`/
+  `capture_error` (`V21` — a failed capture's link-only marker and error
+  message, see "The capture pipeline" above), `updated_at` everywhere),
+  `categories` (flat folders, case-insensitively unique names,
   `ON DELETE SET NULL` so deleting a category un-categorizes rather than
   deletes, `icon` — an id into the frontend's icon set (the curated pack in
   `lib/categoryIcons.ts`, or any of the full vendored Lucide set in
