@@ -1,7 +1,7 @@
 {
   "name": "legere",
   "private": true,
-  "version": "0.1.3",
+  "version": "0.1.4",
   "scripts": {
     "tauri": "frontend/node_modules/.bin/tauri",
     "version": "node scripts/sync-version.mjs",
