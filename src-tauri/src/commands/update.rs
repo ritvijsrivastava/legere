@@ -15,15 +15,6 @@ use crate::models::UpdateInfo;
 
 const STORE_FILE: &str = "legere-store.json";
 const DISMISSED_VERSION_KEY: &str = "last_dismissed_version";
-/// Caches the *outcome* of the last `checkForUpdate()` call (timestamp +
-/// result, serialized as a single opaque JSON blob the frontend owns the
-/// shape of — see `lib/update.ts`), so a background check on launch and
-/// every Settings-page visit doesn't re-hit GitHub's API for an answer
-/// that's throttled to at most once a day. Persisted (not just an
-/// in-memory session cache) since the 24h window is meant to survive the
-/// app being closed and reopened, not just one navigation.
-const LAST_UPDATE_CHECK_KEY: &str = "last_update_check";
-
 // Shared with update_android.rs, which talks to the same GitHub API directly
 // (tauri-plugin-updater doesn't support mobile). The repo is public, so
 // these requests go out unauthenticated — subject to GitHub's standard
@@ -57,31 +48,6 @@ pub async fn set_last_dismissed_version(app: AppHandle, version: String) -> Resu
 /// commands below are even registered in `lib.rs`'s `invoke_handler`, so the
 /// frontend can pick its UI from this instead of a separately-set Vite env
 /// var that could drift out of sync with what's actually compiled in.
-/// Reads back whatever `set_last_update_check` last stored, or `None` if
-/// no check has ever completed on this device. Typed as an opaque
-/// `serde_json::Value` deliberately — the cached shape (timestamp +
-/// `UpdateCheckResult`) is a frontend concern (`lib/update.ts`), not
-/// something the backend needs to understand to just round-trip it.
-#[tauri::command]
-pub async fn get_last_update_check(app: AppHandle) -> Result<Option<serde_json::Value>, AppError> {
-    let store = app
-        .store(STORE_FILE)
-        .map_err(|e| AppError::Internal(e.to_string()))?;
-    Ok(store.get(LAST_UPDATE_CHECK_KEY))
-}
-
-#[tauri::command]
-pub async fn set_last_update_check(
-    app: AppHandle,
-    value: serde_json::Value,
-) -> Result<(), AppError> {
-    let store = app
-        .store(STORE_FILE)
-        .map_err(|e| AppError::Internal(e.to_string()))?;
-    store.set(LAST_UPDATE_CHECK_KEY, value);
-    store.save().map_err(|e| AppError::Internal(e.to_string()))
-}
-
 #[tauri::command]
 pub fn update_channel() -> &'static str {
     #[cfg(not(target_os = "android"))]

@@ -3,7 +3,14 @@
    height are user-tunable via the reader's "Aa" popover and applied as
    inline custom properties on `.reader-body` itself (see
    reader/[id]/+page.svelte); this file covers everything else: element
-   spacing, weights, and the serif voice for prose. */
+   spacing, weights, and the serif voice for prose.
+
+   This is a plain global stylesheet (imported by app.css), not a Svelte
+   component's <style> — so selectors are written bare. Svelte's
+   `:global(...)` wrapper is *not* understood here: it ships to the
+   browser verbatim, which makes the whole selector invalid and silently
+   drops the rule. (Every element rule in this file used to be written
+   that way and none of them applied.) */
 
 .reader-body {
   font-family: var(--font-reading);
@@ -15,47 +22,92 @@
      silently no-op for it. Works for both fonts. */
   font-weight: 400;
   color: var(--reader-fg, var(--color-text));
+  /* Running text always wraps — a long URL, an unbroken identifier, or an
+     inline `code` span must never be what sets the page's width. Blocks
+     that are *meant* to be wider than the screen (pre, table) opt back
+     out below and scroll inside themselves instead. */
+  overflow-wrap: anywhere;
+  min-width: 0;
+  max-width: 100%;
 }
 
-.reader-body :global(p) {
+/* Media shrinks to the column instead of widening it. `height: auto`
+   keeps the aspect ratio when an `<img height="…">` attribute would
+   otherwise pin the old height against the shrunk width. */
+.reader-body img,
+.reader-body video,
+.reader-body canvas {
+  max-width: 100%;
+  height: auto;
+}
+/* No `height: auto` on these: an `<svg>`/`<embed>` without a viewBox has
+   no intrinsic ratio to derive it from. */
+.reader-body svg,
+.reader-body embed,
+.reader-body object {
+  max-width: 100%;
+}
+
+/* Wide tables scroll within themselves. `display: block` is what lets
+   `overflow-x` apply to a table without wrapping it in extra markup. */
+.reader-body table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+.reader-body th,
+.reader-body td {
+  padding: 0.35em 0.7em;
+  border: 1px solid var(--reader-divider, var(--color-divider));
+  text-align: left;
+  overflow-wrap: normal;
+}
+
+.reader-body p {
   margin: 0 0 1.3em;
 }
 
-.reader-body :global(a) {
+.reader-body a {
   text-decoration: underline;
   text-decoration-color: color-mix(in srgb, var(--color-accent) 55%, transparent);
   text-underline-offset: 3px;
 }
 
-.reader-body :global(strong) {
+.reader-body strong {
   font-weight: 600;
 }
 
-.reader-body :global(h2),
-.reader-body :global(h3),
-.reader-body :global(h4) {
-  font-family: var(--font-heading);
+.reader-body h1,
+.reader-body h2,
+.reader-body h3,
+.reader-body h4 {
+  /* The reading font, not `--font-heading` (Inter): DESIGN.md's two-font
+     boundary keeps Inter out of the reading surface entirely. */
+  font-family: var(--font-reading);
   font-weight: 600;
   color: var(--reader-fg, var(--color-text));
   letter-spacing: -0.01em;
   margin: 1.6em 0 0.6em;
 }
-.reader-body :global(h2) { font-size: 1.5em; }
-.reader-body :global(h3) { font-size: 1.25em; }
-.reader-body :global(h4) { font-size: 1.1em; }
+.reader-body h1 { font-size: 1.75em; }
+.reader-body h2 { font-size: 1.5em; }
+.reader-body h3 { font-size: 1.25em; }
+.reader-body h4 { font-size: 1.1em; }
 
 /* Some sites wrap their entire heading text in a self-link (e.g. Zola's
    `.zola-anchor` permalink pattern), which would otherwise inherit this
    file's link color/underline and render section headings as oversized,
    accent-colored links. */
-.reader-body :global(h2 a),
-.reader-body :global(h3 a),
-.reader-body :global(h4 a) {
+.reader-body h1 a,
+.reader-body h2 a,
+.reader-body h3 a,
+.reader-body h4 a {
   color: inherit;
   text-decoration: none;
 }
 
-.reader-body :global(blockquote) {
+.reader-body blockquote {
   margin: 1.6em 0;
   padding-left: 1.1em;
   border-left: 2px solid var(--color-accent);
@@ -63,58 +115,62 @@
   font-style: italic;
 }
 
-.reader-body :global(figure) {
+.reader-body figure {
   margin: 1.8em 0;
 }
-.reader-body :global(figure img) {
+.reader-body figure img {
   border-radius: var(--radius-md);
 }
-.reader-body :global(figcaption) {
+.reader-body figcaption {
   margin-top: 8px;
-  font-family: var(--font-body);
+  font-family: var(--font-reading);
   font-size: 0.72em;
   color: var(--reader-muted, var(--color-muted));
   text-align: center;
 }
 
-.reader-body :global(img) {
+.reader-body img {
   border-radius: var(--radius-md);
   margin: 0.4em 0 1.6em;
 }
 
-.reader-body :global(pre) {
+.reader-body pre {
   margin: 1.6em 0;
   padding: var(--space-4);
   overflow-x: auto;
+  max-width: 100%;
+  white-space: pre;
+  overflow-wrap: normal;
   border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--reader-fg, var(--color-text)) 6%, transparent);
   border: 1px solid var(--reader-divider, var(--color-divider));
 }
-.reader-body :global(code) {
+.reader-body code {
   font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
   font-size: 0.85em;
 }
-.reader-body :global(p code),
-.reader-body :global(li code) {
+.reader-body p code,
+.reader-body li code {
   padding: 0.15em 0.4em;
   border-radius: 4px;
   background: color-mix(in srgb, var(--reader-fg, var(--color-text)) 6%, transparent);
 }
-.reader-body :global(pre code) {
+.reader-body pre code {
   padding: 0;
   background: none;
+  overflow-wrap: normal;
 }
 
-.reader-body :global(ul),
-.reader-body :global(ol) {
+.reader-body ul,
+.reader-body ol {
   margin: 0 0 1.3em;
   padding-left: 1.4em;
 }
-.reader-body :global(li) {
+.reader-body li {
   margin-bottom: 0.4em;
 }
 
-.reader-body :global(hr) {
+.reader-body hr {
   margin: 2.2em 0;
   border: none;
   border-top: 1px solid var(--reader-divider, var(--color-divider));

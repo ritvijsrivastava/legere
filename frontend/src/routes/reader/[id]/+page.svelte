@@ -21,6 +21,7 @@
 	import ChevronLeft from '$lib/icons/ChevronLeft.svelte';
 	import ExternalLink from '$lib/icons/ExternalLink.svelte';
 	import FolderMove from '$lib/icons/FolderMove.svelte';
+	import Refresh from '$lib/icons/Refresh.svelte';
 	import Share from '$lib/icons/Share.svelte';
 	import Star from '$lib/icons/Star.svelte';
 	import TriangleAlert from '$lib/icons/TriangleAlert.svelte';
@@ -56,11 +57,11 @@
 	let restoredScrollForId: string | null = null;
 	let saveProgressTimer: ReturnType<typeof setTimeout> | null = null;
 
-	let fontSize = $state(19);
+	let fontSize = $state(16);
 	let measure = $state<ReaderMeasure>('default');
 	let leading = $state<ReaderLeading>('default');
 	let theme = $state<AppTheme>('dark');
-	let font = $state<ReaderFont>('literata');
+	let font = $state<ReaderFont>('libron');
 	// Tracks which article's overrides are currently loaded into the four
 	// `$state` values above, so the effect below re-derives them exactly
 	// once per article (not once per whole session, and not on every
@@ -95,9 +96,26 @@
 		article = null;
 		restoredScrollForId = null;
 		api.openForReading(id).then((detail) => {
+			// Navigated to a different article while this one was loading.
+			if (page.params.id !== id) return;
 			article = detail;
+			// A failed capture gets a fresh attempt on *every* open, not just
+			// the first: the failure is often transient (network down at
+			// share/sync time), and a successful retry swaps the real
+			// article in right here. If it fails again, the banner just
+			// shows the newest error. An article with no content at all is
+			// treated the same even when it isn't flagged failed — rows
+			// synced from a device that predates the synced `capture_failed`
+			// flag arrive as exactly that: empty, unflagged.
+			if (detail.capture_failed || !detail.content_html.trim()) {
+				void recapture({ automatic: true });
+			}
 		});
 	});
+
+	/** Nothing readable stored — either a flagged failed capture or an
+	 *  unflagged empty one (see the retry in the effect above). */
+	let contentMissing = $derived(article !== null && !article.content_html.trim());
 
 	let resolvedContentHtml = $derived(article ? api.resolveContentTokens(article.content_html) : '');
 
@@ -223,15 +241,29 @@
 		}
 	}
 
-	let recapturing = $state(false);
+	// Which article a capture is in flight for — an id rather than a plain
+	// boolean so leaving mid-retry doesn't leave the *next* article's reader
+	// looking busy (or, worse, blocked from retrying itself).
+	let recapturingId = $state<string | null>(null);
+	let recapturing = $derived(article !== null && recapturingId === article.id);
 
-	async function recapture() {
-		if (!article) return;
-		recapturing = true;
+	async function recapture(options?: { automatic?: boolean }) {
+		if (!article || recapturingId === article.id) return;
+		const id = article.id;
+		recapturingId = id;
 		try {
-			article = await api.recaptureArticle(article.id);
+			const detail = await api.recaptureArticle(id);
+			if (article?.id === id) article = detail;
+		} catch (error) {
+			// An automatic retry that errors out (rather than just failing
+			// to capture, which comes back as a normal result) leaves the
+			// existing banner in place; only an explicit "Re-capture"
+			// surfaces the error.
+			if (!options?.automatic) {
+				uiStore.showToast(`Couldn't re-capture: ${api.errorMessage(error)}`);
+			}
 		} finally {
-			recapturing = false;
+			if (recapturingId === id) recapturingId = null;
 		}
 	}
 
@@ -265,7 +297,7 @@
 	<div class="header-row">
 		<button class="btn btn-ghost back-btn" onclick={() => goto(backHref)}>
 			<ChevronLeft />
-			{backLabel}
+			<span class="back-label">{backLabel}</span>
 		</button>
 		{#if article}
 			<div class="controls">
@@ -308,7 +340,7 @@
 				>
 					<FolderMove size={16} />
 				</button>
-				<ArticleOverflowMenu {recapturing} onRecapture={recapture} onDelete={deleteArticle} />
+				<ArticleOverflowMenu {recapturing} onRecapture={() => void recapture()} onDelete={deleteArticle} />
 			</div>
 		{/if}
 	</div>
@@ -353,12 +385,18 @@
 				/>
 			</div>
 
-			{#if article.capture_failed}
+			{#if (article.capture_failed || contentMissing) && recapturing}
+				<div class="capture-retrying text-muted" role="status">
+					<Refresh size={14} spinning />
+					<span>Couldn't save this article earlier — trying again…</span>
+				</div>
+			{:else if article.capture_failed || contentMissing}
 				<div class="capture-error" role="alert">
 					<TriangleAlert size={16} />
 					<div class="capture-error-body">
 						<p class="capture-error-title">Couldn't save a readable copy of this article</p>
-						<p class="capture-error-message">{article.capture_error ?? 'Unknown error'}</p>
+						<p class="capture-error-message">{article.capture_error ??
+							(article.capture_failed ? 'Unknown error' : 'The page had no readable content.')}</p>
 						<a
 							class="capture-error-link"
 							href={article.link}
@@ -499,9 +537,17 @@
 		line-height: 1.15;
 		letter-spacing: -0.01em;
 		margin: 0 0 28px;
+		overflow-wrap: anywhere;
 	}
 	.reader-body {
-		font-size: 19px;
+		font-size: 16px;
+	}
+	.capture-retrying {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		padding: 16px;
+		font-size: 14px;
 	}
 	.capture-error {
 		display: flex;
@@ -551,11 +597,37 @@
 	   (see DESIGN.md) — the reader never picked it up and sat at the full
 	   desktop 36px/56px margins even on a ~360–430px phone, which is the
 	   one surface where every pixel of measure matters most. */
+	.back-btn :global(svg) {
+		flex: none;
+	}
+	.back-label {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
 	@media (max-width: 768px) {
 		.header-row {
 			padding: calc(16px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) 14px
 				calc(16px + env(safe-area-inset-left));
 			margin: 0 0 16px;
+			/* One line, always: back button on the left, the five action
+			   buttons on the right. Wrapping here is what dropped the icon
+			   row under "Library" on phones ~360-370px wide, where the
+			   desktop's 10px control gap overshot the row by a few pixels.
+			   The 6px gap below brings the controls to ~244px; the back
+			   button gives up width (label ellipsizes) before anything
+			   wraps, so a long category name can't push it either. */
+			flex-wrap: nowrap;
+			gap: 10px;
+		}
+		.back-btn {
+			min-width: 0;
+		}
+		.controls {
+			flex: none;
+			flex-wrap: nowrap;
+			gap: 6px;
 		}
 		.reader-page {
 			padding: 0 calc(16px + env(safe-area-inset-right)) 40px calc(16px + env(safe-area-inset-left));

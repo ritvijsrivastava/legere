@@ -3,6 +3,25 @@
    segmented controls, cards, tags, and dialogs instead of re-deriving its
    own chrome. See tokens.css for the palette/type/motion this draws on. */
 
+/* Text that carries arbitrary, un-authored strings — backend error
+   messages (full of long URLs and file paths with no natural break
+   points), failure lists, changelog lines, toasts — always wraps rather
+   than widening its container and, with it, the whole scrolling page.
+   `anywhere` (not `break-word`) also lowers the text's min-content
+   width, so it shrinks correctly inside flex/grid parents too. */
+.error-text,
+.dialog-body-error,
+.failure-title,
+.failure-error,
+.job-status,
+.toast,
+.changelog,
+.changelog-fallback,
+.capture-error-message,
+.row-sublabel {
+  overflow-wrap: anywhere;
+}
+
 .btn {
   display: inline-flex;
   align-items: center;

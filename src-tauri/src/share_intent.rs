@@ -45,7 +45,15 @@ use tauri::Manager;
 
 use crate::capture::fetch::build_client;
 use crate::db;
-use crate::sources::direct_link;
+use crate::sources::direct_link::{self, StoredCapture};
+
+/// How many times a share's capture is retried after a transient failure
+/// (network blip, 5xx) before settling for a link-only row. Nobody is
+/// watching a share-sheet capture to press "re-capture", and a share is
+/// exactly when the process/network was just woken up — so unlike the
+/// in-app paths, this one retries on its own. Worst case adds
+/// 1.5 + 3 + 4.5 = 9s before giving up.
+const SHARE_CAPTURE_RETRIES: u32 = 3;
 
 #[derive(Serialize)]
 struct ShareCaptureResult {
@@ -54,14 +62,20 @@ struct ShareCaptureResult {
     title: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
+    /// Set alongside `ok: true` when the link was stored but its capture
+    /// failed (so only a link-only placeholder row exists) — the worker
+    /// shows this instead of a plain "Saved", which would be a lie.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    capture_error: Option<String>,
 }
 
 impl ShareCaptureResult {
-    fn ok(title: String) -> Self {
+    fn ok(title: String, capture_error: Option<String>) -> Self {
         Self {
             ok: true,
             title: Some(title),
             error: None,
+            capture_error,
         }
     }
 
@@ -70,6 +84,7 @@ impl ShareCaptureResult {
             ok: false,
             title: None,
             error: Some(error.to_string()),
+            capture_error: None,
         }
     }
 
@@ -155,21 +170,30 @@ fn try_capture_via_running_app(url: &str) -> Option<ShareCaptureResult> {
         let app = app.clone();
         tauri::async_runtime::block_on(async move {
             let state = app.state::<crate::state::AppState>();
-            direct_link::capture_and_store(&state.pool, &state.http_client, &state.data_dir, &url)
-                .await
+            direct_link::capture_and_store_with_retries(
+                &state.pool,
+                &state.http_client,
+                &state.data_dir,
+                &url,
+                SHARE_CAPTURE_RETRIES,
+            )
+            .await
         })
     };
     Some(match result {
-        Ok(article) => {
+        Ok(StoredCapture {
+            article,
+            capture_error,
+        }) => {
             crate::events::emit_articles_changed(&app);
-            ShareCaptureResult::ok(article.title)
+            ShareCaptureResult::ok(article.title, capture_error)
         }
         Err(error) => ShareCaptureResult::err(error),
     })
 }
 
 /// Builds a throwaway DB pool + SSRF-guarded HTTP client and runs
-/// `capture::capture_local` via `direct_link::capture_and_store`, blocking
+/// `capture::capture_local` via `direct_link::capture_and_store_with_retries`, blocking
 /// the calling thread on a freshly built single-purpose Tokio runtime.
 /// This only ever runs once per share, so a fresh runtime per call is
 /// simpler than keeping one alive for the rest of the process's life —
@@ -207,8 +231,19 @@ fn run_capture(data_dir: PathBuf, url: String) -> ShareCaptureResult {
         }
 
         let client = build_client();
-        match direct_link::capture_and_store(&pool, &client, &data_dir, &url).await {
-            Ok(article) => ShareCaptureResult::ok(article.title),
+        match direct_link::capture_and_store_with_retries(
+            &pool,
+            &client,
+            &data_dir,
+            &url,
+            SHARE_CAPTURE_RETRIES,
+        )
+        .await
+        {
+            Ok(StoredCapture {
+                article,
+                capture_error,
+            }) => ShareCaptureResult::ok(article.title, capture_error),
             Err(error) => ShareCaptureResult::err(error),
         }
     })

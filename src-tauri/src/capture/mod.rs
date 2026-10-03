@@ -28,6 +28,26 @@ pub enum CaptureError {
     Io(#[from] std::io::Error),
 }
 
+impl CaptureError {
+    /// Whether trying the same capture again a moment later could plausibly
+    /// succeed: a transport-level failure (DNS, connect, TLS, timeout —
+    /// everything that never produced an HTTP response) or a server-side
+    /// "try again" status. A definitive answer from the origin (404, 403,
+    /// a page that sanitizes badly) is not transient — repeating it just
+    /// repeats the same answer.
+    pub fn is_transient(&self) -> bool {
+        match self {
+            CaptureError::Fetch(FetchError::Request(_)) => true,
+            CaptureError::Fetch(FetchError::Status(status)) => {
+                status.is_server_error()
+                    || *status == reqwest::StatusCode::TOO_MANY_REQUESTS
+                    || *status == reqwest::StatusCode::REQUEST_TIMEOUT
+            }
+            _ => false,
+        }
+    }
+}
+
 /// Everything needed to insert a freshly captured article into SQLite. Both
 /// the RSS-poll path and the direct-link-submit path converge on
 /// [`capture_local`] so they share one
@@ -191,31 +211,62 @@ pub async fn capture_local_or_link_only(
     id: &str,
     url: &str,
 ) -> LocalCaptureOutput {
-    match capture_local(client, data_dir, id, url).await {
-        Ok(output) => output,
-        Err(err) => {
-            let link = url::Url::parse(url.trim())
-                .map(|parsed| strip_tracking_params(canonicalize(&parsed).as_url()).to_string())
-                .unwrap_or_else(|_| url.trim().to_string());
-            let title = url::Url::parse(url.trim())
-                .ok()
-                .and_then(|parsed| parsed.host_str().map(str::to_string))
-                .unwrap_or_else(|| link.clone());
+    capture_local_or_link_only_with_retries(client, data_dir, id, url, 0).await
+}
 
-            LocalCaptureOutput {
-                title,
-                link: link.clone(),
-                final_url: link,
-                excerpt: String::new(),
-                content_html: String::new(),
-                published_at: Some(chrono::Utc::now().to_rfc3339()),
-                read_time_min: 0,
-                hero_image_path: None,
-                extraction_confident: false,
-                capture_failed: true,
-                capture_error: Some(err.to_string()),
+/// Same as [`capture_local_or_link_only`], but a *transient* failure (see
+/// [`CaptureError::is_transient`]) is retried up to `retries` more times,
+/// waiting 1.5s, then 3s, then 4.5s... between attempts, before giving up
+/// and falling back to a link-only output. For callers that run exactly
+/// once, unattended, with nobody around to press "re-capture" — the
+/// Android share-intent worker — where a single transient blip (the
+/// worker's process/network having just been woken up, say) would
+/// otherwise leave a permanently failed row behind.
+pub async fn capture_local_or_link_only_with_retries(
+    client: &reqwest::Client,
+    data_dir: &Path,
+    id: &str,
+    url: &str,
+    retries: u32,
+) -> LocalCaptureOutput {
+    let mut attempt = 0;
+    loop {
+        match capture_local(client, data_dir, id, url).await {
+            Ok(output) => return output,
+            Err(err) if err.is_transient() && attempt < retries => {
+                attempt += 1;
+                tracing::warn!(%err, attempt, retries, url, "capture failed transiently, retrying");
+                tokio::time::sleep(std::time::Duration::from_millis(1500 * u64::from(attempt)))
+                    .await;
             }
+            Err(err) => return link_only_output(url, &err),
         }
+    }
+}
+
+/// The placeholder row stored for a capture that failed — see
+/// [`capture_local_or_link_only`].
+fn link_only_output(url: &str, err: &CaptureError) -> LocalCaptureOutput {
+    let link = url::Url::parse(url.trim())
+        .map(|parsed| strip_tracking_params(canonicalize(&parsed).as_url()).to_string())
+        .unwrap_or_else(|_| url.trim().to_string());
+    let title = url::Url::parse(url.trim())
+        .ok()
+        .and_then(|parsed| parsed.host_str().map(str::to_string))
+        .unwrap_or_else(|| link.clone());
+
+    LocalCaptureOutput {
+        title,
+        link: link.clone(),
+        final_url: link,
+        excerpt: String::new(),
+        content_html: String::new(),
+        published_at: Some(chrono::Utc::now().to_rfc3339()),
+        read_time_min: 0,
+        hero_image_path: None,
+        extraction_confident: false,
+        capture_failed: true,
+        capture_error: Some(err.to_string()),
     }
 }
 
@@ -223,6 +274,19 @@ pub async fn capture_local_or_link_only(
 mod tests {
     use super::*;
     use crate::test_support;
+
+    #[test]
+    fn only_transport_failures_and_retryable_statuses_are_transient() {
+        use reqwest::StatusCode;
+        let status = |code| CaptureError::Fetch(FetchError::Status(code));
+
+        assert!(status(StatusCode::BAD_GATEWAY).is_transient());
+        assert!(status(StatusCode::SERVICE_UNAVAILABLE).is_transient());
+        assert!(status(StatusCode::TOO_MANY_REQUESTS).is_transient());
+        assert!(!status(StatusCode::NOT_FOUND).is_transient());
+        assert!(!status(StatusCode::FORBIDDEN).is_transient());
+        assert!(!CaptureError::Io(std::io::Error::other("disk")).is_transient());
+    }
 
     /// Exercises the real local-capture pipeline end-to-end against a
     /// local fixture server (no live network): fetch -> extract ->

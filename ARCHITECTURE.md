@@ -180,9 +180,22 @@ silently never showing up. `recapture_article` (the reader's existing
 "Refresh" action) doubles as the retry path: it's also infallible on
 capture now, so retrying a failed article either clears `capture_failed`
 on success or just updates `capture_error` again on a repeat failure,
-never errors the command itself. RSS entries that fail capture are still
+never errors the command itself. The reader also calls it automatically
+on **every open** of a `capture_failed` article (`reader/[id]/+page.svelte`,
+right after `open_for_reading` returns; an article with *no content* is
+treated the same even if unflagged): a spinner replaces the red banner
+while it runs, then either the real article renders or the banner comes
+back with the newest error. Failures are often transient (network down
+when the link was shared/synced), so a failed row is never treated as
+final. RSS entries that fail capture are still
 inserted (and thus marked seen via `UNIQUE(link)`), so a permanently dead
 entry in a feed isn't re-attempted on every autosync cycle forever.
+`capture_failed`/`capture_error` are part of the synced article row
+(`db::sync_rows::SyncArticleRow`, `#[serde(default)]` for blobs pushed by
+older builds), so a link-only placeholder shared on the phone arrives on
+the desktop still flagged — and a later successful re-capture on either
+device clears the flag on the other. Before this they weren't synced, and
+a failed row showed up elsewhere as a blank article with no banner.
 Raindrop/CSV import rows that fail capture are still saved this way *and*
 kept in `ImportSummary::failed` for the import dialog's existing
 success/duplicate/failed counts and CSV export — failure there means
@@ -343,8 +356,9 @@ share sheet -> ShareActivity (invisible trampoline, never inflates a layout)
   -> share_intent.rs runs capture::capture_local through
      sources::direct_link::capture_and_store, exactly like every other
      ingestion path
-  -> ShareWorker updates the same notification: saved (with title) or
-     failed (with a reason)
+  -> ShareWorker updates the same notification: saved (with title),
+     saved as a link only (with the capture error), or failed (with a
+     reason)
 ```
 
 - **`ShareActivity`** (`gen/android/.../ShareActivity.kt`) declares the
@@ -369,7 +383,21 @@ share sheet -> ShareActivity (invisible trampoline, never inflates a layout)
   ongoing/indeterminate while running (`getForegroundInfo`, which is what
   lets WorkManager legally promote this to a foreground service), replaced
   with a final saved/failed state in `doWork`. Tapping it opens
-  `MainActivity`.
+  `MainActivity`. Its small icon is `res/drawable/ic_stat_legere.xml` (shared with `ImportWorker` and `RemoteSyncWorker`), a
+  flat single-colour vector of the logo (status-bar icons are alpha-masked,
+  so the full-colour launcher mipmap would show as a white square).
+- **A failed capture is not "Saved"** — `capture_local_or_link_only` never
+  fails, so `capture_and_store` returns `Ok` even when only a link-only
+  placeholder row was stored. `direct_link::capture_and_store_with_retries`
+  therefore also returns the `capture_error`, which the JNI result carries
+  as `capture_error` so the notification can say "Saved the link only" with
+  the real reason instead of claiming a saved article.
+- **Automatic retry** — a share runs exactly once, unattended, right after
+  the process/network was woken up, so unlike the in-app paths it retries a
+  *transient* capture failure (`CaptureError::is_transient`: no HTTP
+  response at all, or 5xx/429/408) up to `SHARE_CAPTURE_RETRIES` times with
+  1.5s/3s/4.5s backoff before settling for the link-only row. Definitive
+  answers (404, 403, unparseable page) are not retried.
 - **Why the Rust side can't reuse `AppState`** — a share can be the *only*
   thing that happens in this app process: Android starts the process for
   the `WorkManager` job alone, `MainActivity.onCreate` (and therefore
@@ -907,15 +935,16 @@ All paths compare manifest versions with `semver` and verify sha256
 checksums. The repo is public, so all of these GitHub API/release requests
 go out unauthenticated.
 
-**Check throttling** (`lib/update.ts`'s `checkForUpdateThrottled`,
-backed by `commands::update::get_last_update_check`/
-`set_last_update_check`) — every automatic check (app launch, every
-Settings-page mount — the page is torn down and rebuilt on each visit)
-goes through a 24h cache persisted via `tauri-plugin-store`, not a plain
-`checkForUpdate()`; without it, routine navigation back and forth to
-Settings re-hit the GitHub API on every single visit for an answer that's
-virtually always unchanged. Settings' explicit "Check now" button still
-calls the uncached `checkForUpdate()` directly.
+**No check cache** — `lib/update.ts`'s `checkForUpdate()` always hits the
+network (app launch, every Settings-page mount, "Check now"), same as Jot
+and Tally. An earlier version cached the result for 24h in the store, which
+broke both ends of the flow: after a restart the cached "available" result
+was shown while the backend's in-memory pending update (`pending_update` and
+its Linux/Android equivalents) was empty, so "Download and install" failed
+with "No pending update"; and after installing, the still-cached result was
+never compared against the new installed version, so the update toast came
+back. Every check now re-derives the answer against the installed version
+*and* re-primes the pending slot `installUpdate()` consumes.
 
 ## Frontend
 

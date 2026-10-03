@@ -40,7 +40,7 @@ below.
 - **Share into Legere (Android)** — share a link from any other app; Legere
   never opens, the capture runs in the background via an expedited
   `WorkManager` job, and a notification reports "Saving..." then
-  saved/failed. See ARCHITECTURE.md's "Share intent (Android)" section.
+  saved/link-only/failed. See ARCHITECTURE.md's "Share intent (Android)" section.
 - **True offline reading** — readability extraction (`dom_smoothie`, a Rust
   port of Mozilla's Readability) plus localization of the readable view's own
   images into `content/<id>/`, served into the webview through a custom

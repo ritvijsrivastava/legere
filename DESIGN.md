@@ -45,8 +45,8 @@ typography:
     fontWeight: 400
     lineHeight: 1.55
   reading:
-    fontFamily: "Literata Variable, Georgia, serif"
-    fontSize: "19px"
+    fontFamily: "Libron, Georgia, serif"
+    fontSize: "16px"
     fontWeight: 400
     lineHeight: 1.75
   label:
@@ -176,7 +176,7 @@ Calm and warm at rest, with a single deep, confident green doing all of the syst
 ## Typography
 
 **Chrome Font:** Inter (with system-ui, sans-serif fallback)
-**Reading Font:** Literata Variable (with Georgia, serif fallback) by default, or Libron (with Georgia, serif fallback) — user-selectable, globally in Settings and per article from the reader's "Aa" popover.
+**Reading Font:** Libron (with Georgia, serif fallback) by default, or Literata Variable (with Georgia, serif fallback) — user-selectable, globally in Settings and per article from the reader's "Aa" popover.
 
 **Character:** A plain, confident workhorse sans runs every control, label, and piece of metadata in the app; a warm literary serif — built specifically for long-form on-screen reading — is reserved for the one surface where reading is the whole point. The pairing is a boundary, not a blend: nothing outside the reader view sets in a reading font, and nothing inside `.reader-body`/`.reader-title` sets in Inter. Libron (https://github.com/nicoverbruggen/libron, OFL-licensed) is a calmer, more neutral alternative to Literata for the same surface — vendored as static WOFF2 files (`frontend/static/fonts/libron/`) rather than an `@fontsource` package, since none exists for it; both fonts are referenced through the same `--font-reading` token (see `tokens.css`'s `[data-reading-font]` selector), so every reading-surface rule automatically follows whichever is selected.
 
@@ -185,7 +185,7 @@ Calm and warm at rest, with a single deep, confident green doing all of the syst
 - **Headline** (700, 30px, Inter): page-level `h1` (Library, Settings, Sources...).
 - **Title** (650, 19px, Inter): `h3`-level headings, card titles, dialog titles, button label weight.
 - **Body — chrome** (400, 15px, 1.55 line-height, Inter): default running text, nav labels, descriptions, all non-reading UI copy.
-- **Body — reading** (400, user-tunable 16–22px / default 19px, user-tunable 1.6–1.9 leading / default 1.75, Literata): the article content itself, inside a user-tunable measure (600/680/760px).
+- **Body — reading** (400, user-tunable 16–22px / default 16px, user-tunable 1.6–1.9 leading / default 1.75, Libron by default): the article content itself, inside a user-tunable measure (600/680/760px).
 - **Label** (500, 12px, 0.06em tracked, Inter, often muted): section labels, `h6`, kicker-style metadata.
 
 ### Named Rules

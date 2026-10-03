@@ -668,6 +668,17 @@ ALTER TABLE articles ADD COLUMN capture_failed INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE articles ADD COLUMN capture_error TEXT;
 ";
 
+// New defaults for the reader appearance settings: 16px (was 19) and
+// Libron (was Literata). `update_settings` writes every settings key on
+// any change, so an install's stored values can't be told apart from
+// untouched defaults — rewriting only rows still holding the *old*
+// default moves every such install to the new one, while a value that
+// differs from the old default (a deliberate choice) is left alone.
+const V22: &str = "
+UPDATE settings SET value = '16' WHERE key = 'reader_font_size' AND value = '19';
+UPDATE settings SET value = 'libron' WHERE key = 'reader_font' AND value = 'literata';
+";
+
 pub fn migrations() -> Migrations<'static> {
     Migrations::new(vec![
         M::up(V1),
@@ -691,6 +702,7 @@ pub fn migrations() -> Migrations<'static> {
         M::up(V19),
         M::up(V20),
         M::up(V21),
+        M::up(V22),
     ])
 }
 
@@ -822,8 +834,64 @@ mod tests {
             )
             .unwrap();
         // v1_conn_with_test_data never overrides the V1-seeded default
-        // ('medium'), which maps to '19'.
-        assert_eq!(value, "19");
+        // ('medium'), which V2 maps to '19' — and `migrate` then runs on
+        // to V22, which moves the old 19px default to the new 16px one.
+        assert_eq!(value, "16");
+    }
+
+    fn settings_value(conn: &Connection, key: &str) -> Option<String> {
+        conn.query_row("SELECT value FROM settings WHERE key = ?1", [key], |row| {
+            row.get(0)
+        })
+        .ok()
+    }
+
+    #[test]
+    fn v22_moves_old_reader_defaults_to_the_new_ones() {
+        let mut conn = Connection::open_in_memory().expect("open in-memory db");
+        Migrations::new(vec![M::up(V1), M::up(V2)])
+            .to_latest(&mut conn)
+            .expect("apply V1+V2");
+        conn.execute_batch(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ('reader_font_size', '19');
+             INSERT OR REPLACE INTO settings (key, value) VALUES ('reader_font', 'literata');",
+        )
+        .unwrap();
+
+        migrate(&mut conn).expect("migrate to latest");
+
+        assert_eq!(
+            settings_value(&conn, "reader_font_size").as_deref(),
+            Some("16")
+        );
+        assert_eq!(
+            settings_value(&conn, "reader_font").as_deref(),
+            Some("libron")
+        );
+    }
+
+    #[test]
+    fn v22_leaves_deliberately_chosen_reader_settings_alone() {
+        let mut conn = Connection::open_in_memory().expect("open in-memory db");
+        Migrations::new(vec![M::up(V1), M::up(V2)])
+            .to_latest(&mut conn)
+            .expect("apply V1+V2");
+        conn.execute_batch(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ('reader_font_size', '21');
+             INSERT OR REPLACE INTO settings (key, value) VALUES ('reader_font', 'libron');",
+        )
+        .unwrap();
+
+        migrate(&mut conn).expect("migrate to latest");
+
+        assert_eq!(
+            settings_value(&conn, "reader_font_size").as_deref(),
+            Some("21")
+        );
+        assert_eq!(
+            settings_value(&conn, "reader_font").as_deref(),
+            Some("libron")
+        );
     }
 
     /// Builds a V2-schema connection with three rows covering every

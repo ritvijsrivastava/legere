@@ -8,6 +8,7 @@
     <string name="share_saving_title">"Saving article\u2026"</string>
     <string name="share_no_link_found">"No link found in shared content"</string>
     <string name="share_saved_title">"Saved to Legere"</string>
+    <string name="share_link_only_title">"Saved the link only \u2013 couldn\u2019t capture the article"</string>
     <string name="share_failed_title">"Couldn\u2019t save article"</string>
 
     <!-- Cross-device sync notification (RemoteSyncWorker) -->

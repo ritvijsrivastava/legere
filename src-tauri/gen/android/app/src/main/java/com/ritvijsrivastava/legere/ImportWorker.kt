@@ -161,7 +161,8 @@ class ImportWorker(appContext: Context, params: WorkerParameters) : Worker(appCo
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         return NotificationCompat.Builder(applicationContext, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_sys_download)
+            .setSmallIcon(R.drawable.ic_stat_legere)
+            .setColor(ContextCompat.getColor(applicationContext, R.color.notification_accent))
             .setContentTitle(title)
             .setOngoing(ongoing)
             .setOnlyAlertOnce(true)

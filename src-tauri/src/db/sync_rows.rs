@@ -38,6 +38,15 @@ pub struct SyncArticleRow {
     pub reading_state: String,
     pub favorited: bool,
     pub extraction_confident: bool,
+    /// A link-only placeholder row (capture failed, `content_html` empty) —
+    /// carried over so the receiving device still knows it needs a retry
+    /// and can show the reason. Without it a failed row arrived on the
+    /// other device as an empty article with no banner. `default` because
+    /// blobs pushed by an older build don't have the field.
+    #[serde(default)]
+    pub capture_failed: bool,
+    #[serde(default)]
+    pub capture_error: Option<String>,
     pub reading_progress: f64,
     pub tags: Vec<String>,
     pub category_id: Option<String>,
@@ -67,6 +76,8 @@ fn sync_article_from_row(row: &Row) -> rusqlite::Result<SyncArticleRow> {
         reading_state: row.get("reading_state")?,
         favorited: row.get("favorited")?,
         extraction_confident: row.get("extraction_confident")?,
+        capture_failed: row.get("capture_failed")?,
+        capture_error: row.get("capture_error")?,
         reading_progress: row.get("reading_progress")?,
         tags: parse_tags(tags_raw),
         category_id: row.get("category_id")?,
@@ -83,7 +94,7 @@ const ARTICLE_SYNC_COLUMNS: &str = "id, source_id, source_type, title, link, exc
     content_html, hero_image_path, published_at, fetched_at, read_time_min,
     reading_state, favorited, extraction_confident, reading_progress, tags,
     category_id, font_size_override, measure_override, leading_override,
-    theme_override, font_override, updated_at";
+    theme_override, font_override, updated_at, capture_failed, capture_error";
 
 /// Every article currently in the local DB, in sync's wire shape. No
 /// paging (unlike `queries::list_articles_page`) — the manifest diff
@@ -123,9 +134,10 @@ pub fn upsert_synced_article(conn: &Connection, row: &SyncArticleRow) -> rusqlit
             hero_image_path, published_at, fetched_at, read_time_min,
             reading_state, favorited, extraction_confident, reading_progress,
             tags, category_id, font_size_override, measure_override,
-            leading_override, theme_override, font_override, updated_at
+            leading_override, theme_override, font_override, updated_at,
+            capture_failed, capture_error
          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
-                   ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)
+                   ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)
          ON CONFLICT(id) DO UPDATE SET
             source_id = excluded.source_id,
             source_type = excluded.source_type,
@@ -148,7 +160,9 @@ pub fn upsert_synced_article(conn: &Connection, row: &SyncArticleRow) -> rusqlit
             leading_override = excluded.leading_override,
             theme_override = excluded.theme_override,
             font_override = excluded.font_override,
-            updated_at = excluded.updated_at",
+            updated_at = excluded.updated_at,
+            capture_failed = excluded.capture_failed,
+            capture_error = excluded.capture_error",
         params![
             row.id,
             row.source_id,
@@ -173,6 +187,8 @@ pub fn upsert_synced_article(conn: &Connection, row: &SyncArticleRow) -> rusqlit
             row.theme_override,
             row.font_override,
             row.updated_at,
+            row.capture_failed,
+            row.capture_error,
         ],
     )?;
     Ok(())
@@ -458,6 +474,8 @@ mod tests {
             reading_state: "unread".to_string(),
             favorited: false,
             extraction_confident: true,
+            capture_failed: false,
+            capture_error: None,
             reading_progress: 0.0,
             tags: vec![],
             category_id: None,
@@ -533,5 +551,47 @@ mod tests {
             tombstones[0].deleted_at, "2019-01-01T00:00:00Z",
             "the most recent call must win outright, matching apply_tombstone's backdate-after-delete use"
         );
+    }
+
+    #[test]
+    fn a_failed_capture_keeps_its_failed_flag_and_error_across_sync() {
+        let source = migrated_conn();
+        let mut output = sample_output("https://example.com/dead");
+        output.content_html = String::new();
+        output.extraction_confident = false;
+        output.capture_failed = true;
+        output.capture_error = Some("request failed: dns error".to_string());
+        super::super::queries::insert_captured_article(
+            &source,
+            "art-dead",
+            None,
+            "direct",
+            &output,
+            &[],
+        )
+        .unwrap();
+
+        let row = get_article_for_sync(&source, "art-dead").unwrap().unwrap();
+        assert!(row.capture_failed);
+
+        let target = migrated_conn();
+        upsert_synced_article(&target, &row).unwrap();
+        let pulled = get_article_for_sync(&target, "art-dead").unwrap().unwrap();
+        assert!(pulled.capture_failed);
+        assert_eq!(
+            pulled.capture_error.as_deref(),
+            Some("request failed: dns error")
+        );
+
+        // A later successful re-capture on the other device must clear it
+        // here too, not leave a stale banner over real content.
+        let mut recovered = pulled.clone();
+        recovered.capture_failed = false;
+        recovered.capture_error = None;
+        recovered.content_html = "<p>real</p>".to_string();
+        upsert_synced_article(&target, &recovered).unwrap();
+        let after = get_article_for_sync(&target, "art-dead").unwrap().unwrap();
+        assert!(!after.capture_failed);
+        assert_eq!(after.capture_error, None);
     }
 }

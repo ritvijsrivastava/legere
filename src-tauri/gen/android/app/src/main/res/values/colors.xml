@@ -7,4 +7,6 @@
     <color name="teal_700">#FF018786</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+    <!-- Legere ledger-pine accent (the color-accent token in tokens.css), used to tint every notification small icon. -->
+    <color name="notification_accent">#FF2D6B50</color>
 </resources>

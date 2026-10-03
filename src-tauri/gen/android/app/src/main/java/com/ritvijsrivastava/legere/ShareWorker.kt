@@ -47,7 +47,19 @@ class ShareWorker(appContext: Context, params: WorkerParameters) : Worker(appCon
         val result = runCatching { JSONObject(resultJson) }.getOrNull()
         val succeeded = result?.optBoolean("ok") == true
 
-        val notification = if (succeeded) {
+        // `ok` only means the link was stored. If its capture failed, what's
+        // stored is a link-only placeholder (see `capture_error` in
+        // share_intent.rs) — say so, with the real reason, rather than
+        // claiming a saved article.
+        val captureError = result?.optString("capture_error")?.takeIf { it.isNotBlank() }
+
+        val notification = if (succeeded && captureError != null) {
+            buildNotification(
+                title = applicationContext.getString(R.string.share_link_only_title),
+                text = captureError,
+                ongoing = false,
+            )
+        } else if (succeeded) {
             buildNotification(
                 title = applicationContext.getString(R.string.share_saved_title),
                 text = result?.optString("title")?.takeIf { it.isNotBlank() } ?: url,
@@ -106,13 +118,20 @@ class ShareWorker(appContext: Context, params: WorkerParameters) : Worker(appCon
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         return NotificationCompat.Builder(applicationContext, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_sys_download)
+            .setSmallIcon(R.drawable.ic_stat_legere)
+            .setColor(ContextCompat.getColor(applicationContext, R.color.notification_accent))
             .setContentTitle(title)
             .setOngoing(ongoing)
             .setOnlyAlertOnce(true)
             .setAutoCancel(!ongoing)
             .setContentIntent(contentIntent)
-            .apply { text?.let(::setContentText) }
+            .apply {
+                text?.let {
+                    setContentText(it)
+                    // Errors are long; let the shade show all of it.
+                    setStyle(NotificationCompat.BigTextStyle().bigText(it))
+                }
+            }
             .apply { if (ongoing) setProgress(0, 0, true) }
             .build()
     }

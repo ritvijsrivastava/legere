@@ -16,7 +16,7 @@
 	import CategoryIcon from '$lib/components/CategoryIcon.svelte';
 	import { goto } from '$app/navigation';
 	import { isTauri } from '$lib/platform';
-	import { checkForUpdateThrottled, getLastDismissedVersion, setLastDismissedVersion } from '$lib/update';
+	import { checkForUpdate, getLastDismissedVersion, setLastDismissedVersion } from '$lib/update';
 	import UpdateToast from '$lib/components/UpdateToast.svelte';
 
 	let { children } = $props();
@@ -51,21 +51,11 @@
 	// ── Background update check ──────────────────────────────────────────────
 	let updateAvailable = $state<{ version: string; notes?: string | null } | null>(null);
 
-	/** Fire-and-forget: check for an update without blocking or delaying page load.
-	 *  Uses the throttled (24h, persisted) check since this runs on every app
-	 *  launch — a plain `checkForUpdate()` here would hit GitHub's API on
-	 *  every single launch, for an answer that's virtually always unchanged
-	 *  from the last one.
-	 *
-	 *  Landing directly on Settings isn't special-cased anymore: that page's
-	 *  own on-mount check is now *also* throttled, so both call sites sharing
-	 *  one persisted cache just means whichever one runs first makes the
-	 *  (at most once a day) network call and the other one reads the cache —
-	 *  not two separate GitHub calls. */
+	/** Fire-and-forget: check for an update without blocking or delaying page load. */
 	async function backgroundCheckForUpdate() {
 		if (!isTauri()) return;
 		try {
-			const result = await checkForUpdateThrottled();
+			const result = await checkForUpdate();
 			if (!result.available) return;
 			const dismissed = await getLastDismissedVersion();
 			if (dismissed === result.version) return;

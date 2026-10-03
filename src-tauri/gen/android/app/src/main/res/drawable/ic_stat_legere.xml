@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Status-bar glyph for Legere's notifications (see ShareWorker). Android
+  masks a notification small icon down to its alpha channel and paints it
+  white, so this is the logo's spiral + dot as a flat, single-colour shape
+  (source: src-tauri/icons/source.svg) — the full-colour launcher mipmap
+  would render as a solid white square instead.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="700"
+    android:viewportHeight="700">
+    <group
+        android:translateX="-218.5"
+        android:translateY="-211.5">
+        <path
+            android:pathData="M811.4,359.5 L820.2,403.0 L825.0,445.8 L824.6,487.9 L819.1,528.7 L808.7,567.7 L793.6,604.4 L774.2,638.1 L751.1,668.6 L724.7,695.2 L695.5,717.8 L664.2,736.0 L631.4,749.7 L597.7,758.8 L563.7,763.3 L530.0,763.3 L497.2,758.9 L465.8,750.4 L436.4,738.1 L409.4,722.2 L385.1,703.3 L364.0,681.8 L346.3,658.1 L332.1,632.7 L321.7,606.2 L314.9,579.1 L311.9,551.9 L312.6,525.1 L316.7,499.1 L324.1,474.5 L334.5,451.5 L347.5,430.6 L363.0,412.0 L380.4,395.9 L399.3,382.7 L419.4,372.3 L440.2,364.9 L461.4,360.5 L482.4,359.0 L502.9,360.3 L522.6,364.3 L541.0,370.7 L558.0,379.4 L573.3,389.9 L586.6,402.2 L597.9,415.7 L606.9,430.2 L613.6,445.4 L618.1,460.9 L620.4,476.4 L620.5,491.6 L618.5,506.2 L614.7,519.9 L609.1,532.5 L602.2,543.9 L594.0,553.8"
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="70"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M509.97,553.77a84,84 0 1,0 168,0a84,84 0 1,0 -168,0z" />
+    </group>
+</vector>

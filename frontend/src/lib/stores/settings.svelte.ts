@@ -5,10 +5,10 @@ const DEFAULT_SETTINGS: Settings = {
 	default_font_size: 'medium',
 	default_library_view: 'cards',
 	autosync: true,
-	reader_font_size: 19,
+	reader_font_size: 16,
 	reader_measure: 'default',
 	reader_leading: 'default',
-	reader_font: 'literata',
+	reader_font: 'libron',
 	app_theme: 'dark',
 	import_concurrency: 5,
 	autosync_interval_hours: 12
