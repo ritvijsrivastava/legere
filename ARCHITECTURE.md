@@ -9,6 +9,29 @@ Related reading: [PRODUCT.md](PRODUCT.md) (what the product is and isn't),
 [DESIGN.md](DESIGN.md) (the design system), [docs/RELEASING.md](docs/RELEASING.md)
 (releases and signing).
 
+## Contents
+
+- [Design principles](#design-principles)
+- [Stack and layout](#stack-and-layout)
+- [The capture pipeline](#the-capture-pipeline)
+  - [URL → path mapping (`urlx::local_path_for`)](#url--path-mapping-urlxlocal_path_for)
+  - [SSRF guard (`capture::ssrf`)](#ssrf-guard-capturessrf)
+- [Serving content: the `legere-content://` protocol](#serving-content-the-legere-content-protocol)
+- [Ingestion paths](#ingestion-paths)
+- [Share intent (Android)](#share-intent-android)
+- [RSS autosync and lifecycle](#rss-autosync-and-lifecycle)
+- [Cross-device sync](#cross-device-sync)
+- [Storage and schema](#storage-and-schema)
+- [Garbage collection](#garbage-collection)
+- [Security model](#security-model)
+- [Updates](#updates)
+- [Frontend](#frontend)
+- [Platform notes](#platform-notes)
+  - [Linux desktop](#linux-desktop)
+  - [Android](#android)
+- [Testing approach](#testing-approach)
+- [Historical decisions](#historical-decisions)
+
 ## Design principles
 
 These are the locked decisions everything else follows:

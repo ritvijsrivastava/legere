@@ -2,6 +2,19 @@
 
 <!-- impeccable:product-schema 1 -->
 
+## Contents
+
+- [Platform](#platform)
+- [Users](#users)
+- [Product Purpose](#product-purpose)
+- [Positioning](#positioning)
+- [Operating Context](#operating-context)
+- [Capabilities and Constraints](#capabilities-and-constraints)
+- [Brand Commitments](#brand-commitments)
+- [Evidence on Hand](#evidence-on-hand)
+- [Product Principles](#product-principles)
+- [Accessibility & Inclusion](#accessibility--inclusion)
+
 ## Platform
 
 web

@@ -1,4 +1,8 @@
-# Legere
+<div align="center">
+  <img src="src-tauri/icons/icon-1024.png" width="120" height="120" alt="Legere logo">
+
+  # Legere
+</div>
 
 A local-first, offline-first article reader for desktop and Android. Add an
 RSS feed or paste an article link; Legere extracts a clean, readable version
@@ -13,6 +17,16 @@ Built with Tauri 2 (Rust) + SvelteKit (Svelte 5 runes) + SQLite. No accounts,
 no Legere-run server — cross-device sync is opt-in and syncs directly to
 an S3-compatible bucket you supply yourself; see "Cross-device sync"
 below.
+
+## Contents
+
+- [Features](#features)
+- [Documentation](#documentation)
+- [Development](#development)
+  - [Android](#android)
+  - [Testing](#testing)
+- [Status](#status)
+- [License](#license)
 
 ## Features
 

@@ -9,6 +9,15 @@ Releases are cut by pushing a `v*` tag. `.github/workflows/release.yml` then:
 
 The release stays a draft until every artifact has built successfully, so a broken Android build never leaves a public, half-finished release.
 
+## Contents
+
+- [Desktop updater signing](#desktop-updater-signing)
+  - [Setting up updater signing on a new machine (or for the first time)](#setting-up-updater-signing-on-a-new-machine-or-for-the-first-time)
+- [Android signing](#android-signing)
+  - [The `signingConfigs.release` block](#the-signingconfigsrelease-block)
+  - [Setting up signing on a new machine (or for the first time)](#setting-up-signing-on-a-new-machine-or-for-the-first-time-1)
+- [Required secrets checklist](#required-secrets-checklist)
+
 ## Desktop updater signing
 
 `src-tauri/tauri.conf.json` has `bundle.createUpdaterArtifacts: true` and a real `plugins.updater.pubkey` (generated via `npm run tauri signer generate`, which is safe to commit — it's the *public* half). The matching private key:
@@ -62,7 +71,9 @@ Play Store requires every update to a given `applicationId` (`com.ritvijsrivasta
 
   The workflow decodes these into a fresh `keystore.properties` + `.jks` on the runner at build time (see the `Set up Android signing` step) — nothing signing-related is ever persisted in the repo itself.
 
-### `src-tauri/gen/android/app/build.gradle.kts`'s `signingConfigs.release` block
+### The `signingConfigs.release` block
+
+Lives in `src-tauri/gen/android/app/build.gradle.kts`.
 
 Tauri normally treats `gen/android` as disposable scaffolding you'd regenerate with `tauri android init`. Legere commits it anyway, because `build.gradle.kts` carries a hand-added `signingConfigs.release` block (added following [Tauri's Android signing guide](https://v2.tauri.app/distribute/sign/android/)) that reads `keystore.properties` and applies it to the release build type — without that block, `tauri android build --apk` produces an *unsigned* APK. CI depends on that block existing, so it has to be tracked.
 

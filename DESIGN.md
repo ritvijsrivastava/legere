@@ -128,6 +128,31 @@ Confirmed anti-references: the previous default Tauri/Android template icon and 
 - Pill-shaped segmented controls; soft (not sharp, not maximal) corners on cards and dialogs.
 - One motion signature (`ease-snap` + two durations) reused for every interactive transition.
 
+## Contents
+
+- [Colors](#colors)
+  - [Primary](#primary)
+  - [Neutral](#neutral)
+  - [Named Rules](#named-rules)
+- [Typography](#typography)
+  - [Hierarchy](#hierarchy)
+  - [Named Rules](#named-rules-1)
+- [Layout](#layout)
+- [Elevation & Depth](#elevation--depth)
+  - [Shadow Vocabulary](#shadow-vocabulary)
+  - [Named Rules](#named-rules-2)
+- [Shapes](#shapes)
+- [Components](#components)
+  - [Buttons](#buttons)
+  - [Segmented Controls](#segmented-controls)
+  - [Cards / Containers](#cards--containers)
+  - [Inputs / Fields](#inputs--fields)
+  - [Navigation](#navigation)
+  - [Dialogs](#dialogs)
+  - [Bottom Sheet (mobile)](#bottom-sheet-mobile)
+  - [Gather Mark (signature component)](#gather-mark-signature-component)
+- [Do's and Don'ts](#dos-and-donts)
+
 ## Colors
 
 Calm and warm at rest, with a single deep, confident green doing all of the system's "this is active / this is mine / this matters" signaling.
