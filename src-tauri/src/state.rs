@@ -12,6 +12,18 @@ use crate::db::DbPool;
 pub struct AppState {
     pub pool: DbPool,
     pub http_client: reqwest::Client,
+    /// Plain (not SSRF-guarded) client for the self-update checks/downloads
+    /// in `commands::update`/`update_android`/`update_linux`. Those hit
+    /// hardcoded, first-party URLs (`api.github.com` and wherever it
+    /// redirects release assets to) rather than attacker-influenced page
+    /// content, so `capture::ssrf::ssrf_guarded_client_builder`'s resolver
+    /// doesn't apply — and must not be reused here, since it unconditionally
+    /// refuses to connect to anything that resolves into a private/
+    /// link-local/CGNAT range, which plenty of legitimate networks (VPNs,
+    /// corporate DNS, carrier-grade NAT, emulator host-NAT) route ordinary
+    /// public traffic through before the public IP. Same reasoning
+    /// `remote_sync::client::S3Client` already uses its own plain client for.
+    pub update_http_client: reqwest::Client,
     /// `{app_local_data_dir}/legere` — parent of `media/` and `content/`.
     pub data_dir: PathBuf,
     pub autosync_handle: Mutex<Option<JoinHandle<()>>>,

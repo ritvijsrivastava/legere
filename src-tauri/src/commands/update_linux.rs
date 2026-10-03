@@ -162,7 +162,7 @@ mod imp {
             }
         };
 
-        let client = state.http_client.clone();
+        let client = state.update_http_client.clone();
 
         let release: Release = client
             .get(format!(
@@ -250,7 +250,7 @@ mod imp {
             })?;
 
         let response = state
-            .http_client
+            .update_http_client
             .get(&update.url)
             .header("Accept", "application/octet-stream")
             .header("User-Agent", USER_AGENT)

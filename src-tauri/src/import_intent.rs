@@ -605,6 +605,7 @@ async fn build_standalone_state(data_dir: &std::path::Path) -> Result<AppState, 
     Ok(AppState {
         pool,
         http_client: build_client(),
+        update_http_client: reqwest::Client::new(),
         data_dir: data_dir.to_path_buf(),
         autosync_handle: tokio::sync::Mutex::new(None),
         remote_sync_handle: tokio::sync::Mutex::new(None),

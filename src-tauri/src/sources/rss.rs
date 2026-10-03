@@ -154,6 +154,7 @@ mod tests {
         let state = AppState {
             pool: pool.clone(),
             http_client: test_support::plain_client(),
+            update_http_client: test_support::plain_client(),
             data_dir: data_dir.path().to_path_buf(),
             autosync_handle: Mutex::new(None),
             remote_sync_handle: Mutex::new(None),
@@ -245,6 +246,7 @@ mod tests {
         let state = AppState {
             pool: pool.clone(),
             http_client: test_support::plain_client(),
+            update_http_client: test_support::plain_client(),
             data_dir: data_dir.path().to_path_buf(),
             autosync_handle: Mutex::new(None),
             remote_sync_handle: Mutex::new(None),
@@ -308,6 +310,7 @@ mod tests {
         let state = AppState {
             pool: pool.clone(),
             http_client: test_support::plain_client(),
+            update_http_client: test_support::plain_client(),
             data_dir: data_dir.path().to_path_buf(),
             autosync_handle: Mutex::new(None),
             remote_sync_handle: Mutex::new(None),

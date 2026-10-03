@@ -122,7 +122,7 @@ pub async fn get_release_notes(
     let tag = format!("v{version}");
 
     let response = state
-        .http_client
+        .update_http_client
         .get(format!(
             "https://api.github.com/repos/{OWNER}/{REPO}/releases/tags/{tag}"
         ))

@@ -175,6 +175,7 @@ pub fn run() {
             let state = AppState {
                 pool,
                 http_client: capture::fetch::build_client(),
+                update_http_client: reqwest::Client::new(),
                 data_dir,
                 autosync_handle: Mutex::new(None),
                 remote_sync_handle: Mutex::new(None),

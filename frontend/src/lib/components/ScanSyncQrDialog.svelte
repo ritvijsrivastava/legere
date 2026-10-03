@@ -29,13 +29,40 @@
 	let stream: MediaStream | null = null;
 	let rafHandle = 0;
 
-	function stopCamera() {
+	/** Resolves once every track has actually fired `ended`, not just been
+	 *  told to stop "" Android's WebKit/WebView camera stack releases the
+	 *  hardware asynchronously, and calling `getUserMedia` again before that
+	 *  completes intermittently fails with `NotReadableError`/`TrackStartError`
+	 *  (camera still held by the previous session) rather than succeeding or
+	 *  throwing something scan-dialog code can tell apart "" this raced every
+	 *  "Scan again" after a failed passphrase, since that path stops the
+	 *  camera and immediately restarts it. */
+	function stopCamera(): Promise<void> {
 		cancelAnimationFrame(rafHandle);
-		stream?.getTracks().forEach((track) => track.stop());
+		const tracks = stream?.getTracks() ?? [];
 		stream = null;
+		if (tracks.length === 0) return Promise.resolve();
+		return Promise.all(
+			tracks.map(
+				(track) =>
+					new Promise<void>((resolve) => {
+						if (track.readyState === 'ended') {
+							resolve();
+							return;
+						}
+						track.addEventListener('ended', () => resolve(), { once: true });
+						track.stop();
+					})
+			)
+		).then(() => undefined);
 	}
 
-	async function startCamera() {
+	/** Retries once after a short delay on a camera-acquisition failure ""
+	 *  covers the same hardware-release race as `stopCamera`'s `ended` wait
+	 *  for browsers/WebViews that don't fire `ended` reliably on `stop()`,
+	 *  rather than failing a legitimate rescan outright. A second straight
+	 *  failure is treated as real (permission denied, no camera, etc.). */
+	async function startCamera(isRetry = false) {
 		step = 'scanning';
 		error = '';
 		scannedText = '';
@@ -47,9 +74,15 @@
 			videoEl.srcObject = stream;
 			await videoEl.play();
 			scanFrame();
-		} catch {
+		} catch (e) {
+			if (!isRetry) {
+				await new Promise((resolve) => setTimeout(resolve, 400));
+				await startCamera(true);
+				return;
+			}
 			step = 'camera-error';
-			error = 'Camera access was denied or is unavailable. You can still set up sync manually.';
+			const reason = e instanceof DOMException ? ` (${e.name})` : '';
+			error = `Camera access was denied or is unavailable${reason}. You can still set up sync manually.`;
 		}
 	}
 
@@ -104,9 +137,10 @@
 		}
 	}
 
-	function rescan() {
+	async function rescan() {
 		passphrase = '';
-		startCamera();
+		await stopCamera();
+		await startCamera();
 	}
 
 	$effect(() => {
@@ -115,7 +149,9 @@
 		} else {
 			stopCamera();
 		}
-		return stopCamera;
+		return () => {
+			stopCamera();
+		};
 	});
 
 	function close() {

@@ -193,6 +193,7 @@ mod tests {
         AppState {
             pool,
             http_client: reqwest::Client::new(),
+            update_http_client: reqwest::Client::new(),
             data_dir: data_dir.to_path_buf(),
             autosync_handle: TokioMutex::new(None),
             remote_sync_handle: TokioMutex::new(None),

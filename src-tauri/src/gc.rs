@@ -134,6 +134,7 @@ mod tests {
         AppState {
             pool,
             http_client: reqwest::Client::new(),
+            update_http_client: reqwest::Client::new(),
             data_dir: data_dir.to_path_buf(),
             autosync_handle: Mutex::new(None),
             remote_sync_handle: Mutex::new(None),
