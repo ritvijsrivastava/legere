@@ -4,7 +4,7 @@ members = ["src-tauri", "plugins/tauri-plugin-apk-installer"]
 
 [workspace.package]
 edition = "2024"
-version = "0.1.4"
+version = "0.1.5"
 
 # wry 0.55.x-0.57.0's Android main_pipe.rs unwraps channel sends back to the
 # caller. If the Android UI thread is slow (e.g. device under load) and the
