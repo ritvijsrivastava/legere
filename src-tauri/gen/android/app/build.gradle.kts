@@ -59,6 +59,11 @@ android {
             }
         }
         getByName("release") {
+            // rustls-platform-verifier's revocation pass fetches CRL/OCSP over
+            // plain http://. With cleartext blocked, certs that carry a CRL
+            // endpoint (Let's Encrypt, Google Trust Services) fail validation,
+            // surfacing as "invalid peer certificate: Revoked".
+            manifestPlaceholders["usesCleartextTraffic"] = "true"
             signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = true
             proguardFiles(

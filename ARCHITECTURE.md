@@ -981,6 +981,12 @@ application code, and the workaround stays as cheap hardening.
   never populated in a Tauri app (that's the `NativeActivity` model), so
   `MainActivity.kt` calls a JNI-exported `initTls()` from `onCreate`
   instead — after `System.loadLibrary` has run, before any fetch.
+- **Cleartext traffic is allowed in release builds** (`usesCleartextTraffic`
+  in `app/build.gradle.kts`): `rustls-platform-verifier`'s revocation pass
+  fetches CRL/OCSP over plain `http://`. With cleartext blocked, any cert
+  with a CRL endpoint (Let's Encrypt, Google Trust Services — e.g.
+  GitHub release assets, Cloudflare R2) fails with a misleading "invalid
+  peer certificate: Revoked". Debug already allowed it, which hid this.
 - Android's `TextClassifier` is set to `NO_OP` in `MainActivity.kt`: every
   WebView `<input>` is backed by an `EditText` that otherwise runs on-device
   entity detection per edit. (Hardening; not the fix for the input-freeze
