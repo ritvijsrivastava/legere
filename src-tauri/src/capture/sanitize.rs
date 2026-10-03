@@ -31,8 +31,11 @@ use lol_html::html_content::ContentType;
 use lol_html::{RewriteStrSettings, element, rewrite_str};
 
 /// URL-bearing attributes checked for dangerous (`javascript:`,
-/// `data:text/html`) schemes.
-const DANGEROUS_URL_ATTRIBUTES: [&str; 3] = ["href", "src", "action"];
+/// `data:text/html`) schemes. `xlink:href` covers SVG `<a>`/`<use>`
+/// (foreign content can carry a real `xlink:href` XML-namespace
+/// attribute even inside an HTML parse); `formaction` covers a
+/// `<button>`/`<input type=submit>` overriding its form's own `action`.
+const DANGEROUS_URL_ATTRIBUTES: [&str; 5] = ["href", "src", "action", "xlink:href", "formaction"];
 
 /// Sanitizes `html`, an already-extracted readable-content fragment,
 /// stripping every script-execution vector listed at the module level.
@@ -228,6 +231,24 @@ mod tests {
     }
 
     #[test]
+    fn strips_javascript_xlink_href_but_keeps_normal_xlink_href() {
+        let out = sanitized(
+            r#"<svg><a xlink:href="javascript:alert(1)">bad</a><a xlink:href="https://example.com">good</a></svg>"#,
+        );
+        assert!(!out.contains("javascript:"));
+        assert!(out.contains(r#"xlink:href="https://example.com""#));
+    }
+
+    #[test]
+    fn strips_javascript_formaction_but_keeps_normal_formaction() {
+        let out = sanitized(
+            r#"<button formaction="javascript:alert(1)">bad</button><button formaction="https://example.com">good</button>"#,
+        );
+        assert!(!out.contains("javascript:"));
+        assert!(out.contains(r#"formaction="https://example.com""#));
+    }
+
+    #[test]
     fn replaces_iframe_with_placeholder_link() {
         let out = sanitized(r#"<iframe src="https://embed.example.com/video"></iframe>"#);
         assert!(!out.contains("<iframe"));
@@ -267,6 +288,8 @@ mod tests {
             <meta http-equiv="refresh" content="0;url=javascript:alert(5)">
             <iframe src="javascript:alert(6)"></iframe>
             <form action="javascript:alert(7)"><input></form>
+            <svg><a xlink:href="javascript:alert(8)">x</a></svg>
+            <button formaction="javascript:alert(9)">x</button>
         "#;
         let out = sanitized(adversarial);
         assert!(!out.contains("<script"));
