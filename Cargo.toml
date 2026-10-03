@@ -5,3 +5,16 @@ members = ["src-tauri", "plugins/tauri-plugin-apk-installer"]
 [workspace.package]
 edition = "2024"
 version = "0.1.1"
+
+# wry 0.55.x-0.57.0's Android main_pipe.rs unwraps channel sends back to the
+# caller. If the Android UI thread is slow (e.g. device under load) and the
+# 10s recv_timeout in wry::android::platform_webview_version (and the other
+# main-pipe round trips) elapses first, the receiver is dropped and the
+# later tx.send(...).unwrap() panics, aborting the whole process - this is
+# what caused the app to be stuck on the splash screen / crash-loop on
+# launch. Patched locally to ignore send errors instead of panicking; see
+# vendor/wry-0.57.0-patched/src/android/main_pipe.rs. Remove this patch once
+# upstream fixes https://github.com/tauri-apps/wry (main_pipe.rs tx.send
+# unwraps) in a release tauri depends on.
+[patch.crates-io]
+wry = { path = "vendor/wry-0.57.0-patched" }

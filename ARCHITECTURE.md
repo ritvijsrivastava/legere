@@ -991,6 +991,80 @@ application code, and the workaround stays as cheap hardening.
   (see "Share intent (Android)" above) are also hand-maintained files
   outside `generated/`, not template output.
 
+### wry's Android `main_pipe` channel-send patch
+
+`wry` (tauri's webview backend) proxies calls from the Rust side to the
+Android UI thread through a single `main_pipe`: a channel carrying
+`WebViewMessage`s, each with a `Sender` the UI thread replies on. Through
+at least wry 0.55.1-0.57.0, every reply site in
+`wry::android::main_pipe::MainPipe::recv` (`GetWebViewVersion`, `GetUrl`,
+`CanGoForward`, `CanGoBack`, `GetCookies`, etc.) calls
+`tx.send(result).unwrap()`. The caller side (`platform_webview_version`
+and friends, in `wry::android::mod.rs`) waits on the matching `Receiver`
+with a 10s `recv_timeout` and drops it on timeout. If the Android UI
+thread is still busy past that 10s (e.g. a loaded/throttled device, other
+apps mid-crash-dialog, cold start contention) and replies *after* the
+receiver's already gone, `tx.send(...)` returns `Err` and that `.unwrap()`
+panics on the UI thread, which Android turns into an `abort()` of the
+whole process — this presented as the app being permanently stuck on its
+splash screen (it was actually crash-looping: each relaunch raced the same
+timeout again). Not a Legere bug; a reply-after-timeout race baked into
+upstream wry's Android IPC.
+
+Fixed by vendoring wry (`vendor/wry-0.57.0-patched`, wired in via
+`[patch.crates-io]` in the workspace root `Cargo.toml`) with those seven
+`tx.send(...).unwrap()` call sites changed to `let _ = tx.send(...)`: a
+send failing because the receiver timed out and dropped is an expected,
+harmless race, not a condition worth crashing the process over. Remove
+this patch once upstream ships the same fix in a release tauri's
+`tauri-runtime-wry` depends on (check `main_pipe.rs` in whatever `wry`
+version that pulls in).
+
+### Android Gradle toolchain version pins
+
+`gen/android`'s Gradle/AGP/Kotlin/Java versions are deliberately *not* the
+latest available, for two independent reasons that happen to compound:
+
+- **AGP is capped at the 8.x line (`8.13.2`), not AGP 9.x.** AGP 9.0
+  switched the default DSL to "built-in Kotlin" and dropped support for
+  applying the classic `org.jetbrains.kotlin.android` plugin alongside it
+  ("The org.jetbrains.kotlin.android plugin is not compatible with the
+  new DSL" - see AGP 9.0.0's release notes) - applying both the way
+  `app/build.gradle.kts` and the `tauri-plugin-apk-installer` module do
+  fails with `Cannot add extension with name 'kotlin', as there is an
+  extension already registered with that name.` `buildSrc`'s own `rust`
+  Gradle plugin (`RustPlugin.kt`) also uses
+  `com.android.build.api.dsl.ApplicationExtension`, which is part of the
+  "old" variant API AGP 9's migration notes say gets replaced. Revisit
+  once both of those are migrated.
+- **Kotlin Gradle plugin is capped below 2.2.x (`2.1.21`), not the latest
+  2.4.x.** Kotlin 2.2 turned the old `android { kotlinOptions { jvmTarget
+  = "..." } }` string-based DSL from a deprecation warning into a hard
+  compile error ("Please migrate to the compilerOptions DSL"). Legere's
+  own modules were migrated to the new `kotlin { compilerOptions {
+  jvmTarget.set(JvmTarget.JVM_17) } }` top-level extension, but
+  third-party Tauri plugin crates pulled from the Cargo registry cache
+  (`tauri`'s own `mobile/android`, `tauri-plugin-dialog`,
+  `tauri-plugin-opener`) still use the old DSL in their bundled
+  `android/build.gradle.kts` and aren't ours to patch the way the wry fix
+  above is. Their builds still warn ("Java compiler version 21 has
+  deprecated support for compiling with source/target version 8") but no
+  longer hard-error as long as Kotlin stays below 2.2.
+- **Gradle itself is on the latest 8.x (`8.14.5`), matched to AGP 8.13.2's
+  supported range** - not Gradle 9.x, which AGP 8.x doesn't support.
+  `buildSrc`'s `BuildTask.kt` (the task the `rust` plugin uses to shell
+  out to `npm run tauri android android-studio-script`) was still updated
+  to inject `ExecOperations` rather than calling the now-fully-removed
+  `Project.exec()` convenience directly, since that specific deprecation
+  (unlike the two above) is both a real bug-in-waiting and cheap to fix
+  now rather than re-discovering it later.
+
+NDK is pinned to `30.0.16248370` - the final release of that version line,
+not the `30.0.15729638-rc.2` release candidate the pin previously resolved
+to (`sdkmanager` installs RCs under the same-looking version string as the
+final release; check `sdkmanager --list_installed` output for the `-rc.*`
+suffix, not just the version number, if in doubt).
+
 ## Testing approach
 
 Rust tests run fully offline: `test_support.rs` serves `src-tauri/tests/fixtures/`

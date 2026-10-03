@@ -97,17 +97,21 @@ npx --prefix frontend tauri dev # desktop dev build
 
 ### Android
 
-Prerequisites on `PATH`/in the environment: Android SDK + NDK, a JDK Gradle
-can use (JDK 17 or 21 — **not** a newer default JDK; export `JAVA_HOME`
-per-command rather than changing the system default), and
-[`jq`](https://jqlang.org/) — the Android build shells out to
-`cargo metadata | jq` to locate `rustls-platform-verifier`'s bundled Maven
-repo (see `src-tauri/gen/android/app/build.gradle.kts`).
+Prerequisites on `PATH`/in the environment: Android SDK + NDK (pinned to
+`30.0.16248370` — see `.github/workflows/release.yml`'s
+`ANDROID_NDK_VERSION`; **not** an `-rc.*` build of the same version line,
+which installs under the same-looking version string but is a release
+candidate, not the final NDK release), a JDK Gradle can use (JDK 17 or 21 —
+**not** a newer default JDK; export `JAVA_HOME` per-command rather than
+changing the system default), and [`jq`](https://jqlang.org/) — the
+Android build shells out to `cargo metadata | jq` to locate
+`rustls-platform-verifier`'s bundled Maven repo (see
+`src-tauri/gen/android/app/build.gradle.kts`).
 
 ```sh
 export JAVA_HOME=/path/to/jdk-21
 export ANDROID_HOME=~/Android/Sdk
-export NDK_HOME=~/Android/Sdk/ndk/<version>
+export NDK_HOME=~/Android/Sdk/ndk/30.0.16248370
 npx --prefix frontend tauri android build --debug --target x86_64 --apk
 ```
 
@@ -131,7 +135,7 @@ Install/launch with `adb install -r <apk>` and
 
 Legere's `frontend/` is a sibling of `src-tauri/`, not its parent, which
 breaks a few of Tauri's default Android-project assumptions. The generated
-`gen/android` tree (committed to this repo) has five manual fixes on top of
+`gen/android` tree (committed to this repo) has six manual fixes on top of
 what `tauri android init` produces:
 
 1. **Root `package.json`** — a minimal delegating package so Gradle's
@@ -161,8 +165,19 @@ what `tauri android init` produces:
    call in `MainActivity.onCreate`, and the `remote_sync_*` strings in
    `res/values/strings.xml`. See ARCHITECTURE.md's "Cross-device sync"
    section.
+6. **The Gradle/AGP/Kotlin/Java toolchain versions** —
+   `gradle/wrapper/gradle-wrapper.properties` (Gradle 8.14.5), the AGP and
+   Kotlin Gradle plugin `classpath(...)` versions in `build.gradle.kts`
+   and `buildSrc/build.gradle.kts` (AGP 8.13.2, Kotlin 2.1.21), the
+   `compileOptions`/top-level `kotlin { compilerOptions { ... } }` blocks
+   in `app/build.gradle.kts` targeting Java 17, and the `ExecOperations`
+   injection in `buildSrc`'s `BuildTask.kt` (Gradle 9 removed the
+   deprecated `Project.exec()` convenience this task used to call
+   directly). None of these are tauri-cli defaults — see "Android Gradle
+   toolchain version pins" in ARCHITECTURE.md for why each is capped where
+   it is, not just bumped to latest.
 
-If `gen/android` is ever regenerated from scratch, reapply these five before
+If `gen/android` is ever regenerated from scratch, reapply these six before
 building. (A release build additionally needs the `signingConfigs.release`
 block described in [docs/RELEASING.md](docs/RELEASING.md).)
 

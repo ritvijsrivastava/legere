@@ -1,5 +1,6 @@
 import java.io.FileInputStream
 import java.util.Properties
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     id("com.android.application")
@@ -67,11 +68,22 @@ android {
             )
         }
     }
-    kotlinOptions {
-        jvmTarget = "1.8"
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
     buildFeatures {
         buildConfig = true
+    }
+}
+
+// Kotlin 2.x makes the old `android { kotlinOptions { jvmTarget = "17" } }`
+// string-based DSL a hard compile error ("Please migrate to the
+// compilerOptions DSL") - this top-level `kotlin {}` extension (registered
+// by the org.jetbrains.kotlin.android plugin) is the replacement.
+kotlin {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_17)
     }
 }
 
