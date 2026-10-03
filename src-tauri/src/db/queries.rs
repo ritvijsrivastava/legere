@@ -112,8 +112,9 @@ pub fn insert_captured_article(
             id, source_id, source_type, title, link, excerpt,
             content_html, hero_image_path, published_at, fetched_at,
             read_time_min, favorited,
-            extraction_confident, tags, updated_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 0, ?12, ?13, ?14)",
+            extraction_confident, tags, updated_at,
+            capture_failed, capture_error
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 0, ?12, ?13, ?14, ?15, ?16)",
         params![
             id,
             source_id,
@@ -129,6 +130,8 @@ pub fn insert_captured_article(
             output.extraction_confident,
             tags_to_json(&normalize_tags(tags)),
             now,
+            output.capture_failed,
+            output.capture_error,
         ],
     )? > 0;
     if inserted && let Some(sid) = source_id {
@@ -182,8 +185,9 @@ pub fn insert_imported_article_with_category(
             id, source_id, source_type, title, link, excerpt,
             content_html, hero_image_path, published_at, fetched_at,
             read_time_min, favorited,
-            extraction_confident, tags, updated_at, category_id
-        ) VALUES (?1, NULL, 'direct', ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+            extraction_confident, tags, updated_at, category_id,
+            capture_failed, capture_error
+        ) VALUES (?1, NULL, 'direct', ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
         params![
             id,
             output.title,
@@ -199,6 +203,8 @@ pub fn insert_imported_article_with_category(
             tags_to_json(&normalize_tags(tags)),
             now,
             category_id,
+            output.capture_failed,
+            output.capture_error,
         ],
     )? > 0;
     if !inserted {
@@ -286,7 +292,7 @@ pub fn update_captured_article(
             title = ?2, link = ?3, excerpt = ?4, content_html = ?5,
             hero_image_path = ?6, published_at = ?7, read_time_min = ?8,
             extraction_confident = ?9,
-            updated_at = ?10
+            updated_at = ?10, capture_failed = ?11, capture_error = ?12
          WHERE id = ?1",
         params![
             id,
@@ -299,6 +305,8 @@ pub fn update_captured_article(
             output.read_time_min,
             output.extraction_confident,
             Utc::now().to_rfc3339(),
+            output.capture_failed,
+            output.capture_error,
         ],
     )?;
     Ok(())
@@ -777,6 +785,7 @@ pub fn get_article(conn: &Connection, id: &str) -> rusqlite::Result<Option<Artic
                     articles.font_size_override, articles.measure_override,
                     articles.leading_override, articles.theme_override,
                     articles.font_override,
+                    articles.capture_failed, articles.capture_error,
                     categories.name AS category_name, categories.icon AS category_icon
              FROM {ARTICLE_SUMMARY_FROM} WHERE articles.id = ?1"
         ),
@@ -799,6 +808,8 @@ pub fn get_article(conn: &Connection, id: &str) -> rusqlite::Result<Option<Artic
                 tags: parse_tags(row.get("tags")?),
                 category_name: row.get("category_name")?,
                 category_icon: row.get("category_icon")?,
+                capture_failed: row.get::<_, i64>("capture_failed")? != 0,
+                capture_error: row.get("capture_error")?,
                 overrides: ReadingOverrides {
                     font_size: row.get("font_size_override")?,
                     measure: row.get("measure_override")?,

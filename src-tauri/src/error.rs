@@ -104,7 +104,6 @@ impl From<crate::sources::direct_link::DirectLinkError> for AppError {
     fn from(e: crate::sources::direct_link::DirectLinkError) -> Self {
         use crate::sources::direct_link::DirectLinkError;
         match e {
-            DirectLinkError::Capture(inner) => inner.into(),
             DirectLinkError::Db(inner) => inner.into(),
             DirectLinkError::Pool(inner) => inner.into(),
         }

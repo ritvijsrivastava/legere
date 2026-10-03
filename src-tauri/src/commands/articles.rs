@@ -357,8 +357,17 @@ pub async fn recapture_article(
         .await??
     };
 
-    let output =
-        capture::capture_local(&state.http_client, &state.data_dir, &id, &existing.link).await?;
+    // Infallible on purpose: this command doubles as the retry path for
+    // a `capture_failed` article (see `+page.svelte`'s recapture()), so a
+    // retry that fails again must still round-trip an updated row/error
+    // rather than bouncing the whole command as an `AppError`.
+    let output = capture::capture_local_or_link_only(
+        &state.http_client,
+        &state.data_dir,
+        &id,
+        &existing.link,
+    )
+    .await;
 
     let pool = state.pool.clone();
     let id_for_update = id.clone();

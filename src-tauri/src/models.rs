@@ -66,6 +66,15 @@ pub struct ArticleDetail {
     /// This article's reading-appearance overrides, each `None` where it
     /// instead follows the global `Settings` value — see `ReadingOverrides`.
     pub overrides: ReadingOverrides,
+    /// `true` when capture never produced a readable view at all (dead
+    /// link, blocked host, non-2xx, etc.)
+    /// distinct from `extraction_confident = false`, which still has real
+    /// (if lower quality) content. `content_html`/`excerpt` are empty in
+    /// this case; the reader shows `capture_error` instead with a link
+    /// out to `link`.
+    pub capture_failed: bool,
+    /// The capture error message, `None` unless `capture_failed` is `true`.
+    pub capture_error: Option<String>,
 }
 
 /// Per-article overrides of the global reading-appearance settings

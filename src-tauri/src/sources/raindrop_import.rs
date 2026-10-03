@@ -181,16 +181,12 @@ async fn process_row(
     };
 
     let id = uuid::Uuid::new_v4().to_string();
-    let output = match capture::capture_local(&http_client, &data_dir, &id, &url).await {
-        Ok(output) => output,
-        Err(err) => {
-            return RowOutcome::Failed(ImportFailure {
-                url,
-                title: display_title,
-                error: err.to_string(),
-            });
-        }
-    };
+    // Never fails outright: a row whose link can't be captured still
+    // comes back as a link-only output and is inserted below like any
+    // other row, instead of being dropped. It's still surfaced via
+    // `RowOutcome::Failed` so the import summary keeps showing what
+    // failed to parse (see `ImportSummary::failed`'s doc comment).
+    let output = capture::capture_local_or_link_only(&http_client, &data_dir, &id, &url).await;
 
     let tags = parse_tags(&row.tags);
     let favorited = row.favorite.trim().eq_ignore_ascii_case("true");
@@ -215,6 +211,13 @@ async fn process_row(
         favorited,
         category_id.as_deref(),
     ) {
+        Ok(true) if output.capture_failed => RowOutcome::Failed(ImportFailure {
+            url,
+            title: display_title,
+            error: output
+                .capture_error
+                .unwrap_or_else(|| "capture failed".to_string()),
+        }),
         Ok(true) => RowOutcome::Imported,
         Ok(false) => RowOutcome::SkippedDuplicate,
         Err(err) => RowOutcome::Failed(ImportFailure {
@@ -883,6 +886,20 @@ mod tests {
         assert_eq!(summary.imported, 1);
         assert_eq!(summary.failed.len(), 1);
         assert!(summary.failed[0].url.contains("does-not-exist.html"));
+
+        // The dead link is still saved as a link-only row, not dropped;
+        // it's only reported as a failure above.
+        let conn = state.pool.get().unwrap();
+        let failed_link = strip_tracking_params(
+            canonicalize(&Url::parse(&format!("{base_url}/does-not-exist.html")).unwrap()).as_url(),
+        )
+        .to_string();
+        let saved = queries::get_article_summary_by_link(&conn, &failed_link)
+            .unwrap()
+            .expect("dead link should still be saved as a link-only article");
+        let detail = queries::get_article(&conn, &saved.id).unwrap().unwrap();
+        assert!(detail.capture_failed);
+        assert!(detail.capture_error.is_some());
     }
 
     #[tokio::test]

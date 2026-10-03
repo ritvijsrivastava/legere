@@ -91,24 +91,27 @@ pub async fn sync_rss_source(state: &AppState, source: &Source) -> Result<u32, R
         }
 
         let id = uuid::Uuid::new_v4().to_string();
-        match capture::capture_local(&state.http_client, &state.data_dir, &id, &link).await {
-            Ok(output) => {
-                let conn = state.pool.get()?;
-                let inserted = queries::insert_captured_article(
-                    &conn,
-                    &id,
-                    Some(&source.id),
-                    "rss",
-                    &output,
-                    &tags,
-                )?;
-                if inserted {
-                    new_count += 1;
-                }
-            }
-            Err(err) => {
-                tracing::warn!(source_id = %source.id, %link, error = %err, "failed to capture RSS entry");
-            }
+        // Never fails outright: a dead/unparseable entry still comes back
+        // as a link-only output (`capture_failed = true`) and gets stored,
+        // so it's marked seen (via `UNIQUE(link)`) instead of being
+        // re-attempted on every future poll. See
+        // `capture::capture_local_or_link_only`.
+        let output =
+            capture::capture_local_or_link_only(&state.http_client, &state.data_dir, &id, &link)
+                .await;
+        if output.capture_failed {
+            tracing::warn!(
+                source_id = %source.id,
+                %link,
+                error = ?output.capture_error,
+                "failed to capture RSS entry; stored as link-only"
+            );
+        }
+        let conn = state.pool.get()?;
+        let inserted =
+            queries::insert_captured_article(&conn, &id, Some(&source.id), "rss", &output, &tags)?;
+        if inserted {
+            new_count += 1;
         }
     }
 
@@ -187,6 +190,103 @@ mod tests {
         let articles = queries::list_articles(&conn).expect("list articles");
         assert_eq!(articles.len(), 1);
         assert!(articles.iter().all(|a| a.source_type == "rss"));
+    }
+
+    /// An entry whose link can't be captured (404s here) must still be
+    /// inserted as a link-only article (marking it seen so it isn't
+    /// re-fetched on the next poll) instead of being silently dropped
+    /// and retried forever. Uses its own tiny feed server (rather than
+    /// `test_support::spawn`'s shared fixture feed, whose one entry always
+    /// resolves) with a single entry pointing at a path with no route.
+    #[tokio::test]
+    async fn a_dead_feed_entry_is_still_saved_as_link_only_and_marked_seen() {
+        use axum::Router;
+        use axum::http::header::CONTENT_TYPE;
+        use axum::routing::get;
+
+        let data_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = data_dir.path().join("legere.db");
+        let pool = db::build_pool(&db_path).expect("build pool");
+        {
+            let mut conn = pool.get().expect("get conn");
+            db::schema::migrate(&mut conn).expect("migrate");
+        }
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("local_addr");
+        let base_url = format!("http://localhost:{}", addr.port());
+        let feed_xml = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Dead Entry Feed</title>
+    <link>{base_url}</link>
+    <item>
+      <title>Gone</title>
+      <link>{base_url}/does-not-exist.html</link>
+      <guid>{base_url}/does-not-exist.html</guid>
+    </item>
+  </channel>
+</rss>"#
+        );
+        let app = Router::new().route(
+            "/feed.xml",
+            get(move || {
+                let body = feed_xml.clone();
+                async move { ([(CONTENT_TYPE, "application/rss+xml")], body) }
+            }),
+        );
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("fixture server");
+        });
+
+        let state = AppState {
+            pool: pool.clone(),
+            http_client: test_support::plain_client(),
+            data_dir: data_dir.path().to_path_buf(),
+            autosync_handle: Mutex::new(None),
+            remote_sync_handle: Mutex::new(None),
+            last_foreground_sync: std::sync::Mutex::new(None),
+            import_cancel: Mutex::new(None),
+            article_import_cancel: Mutex::new(None),
+            remote_sync_cancel: Mutex::new(None),
+            capture_jobs: Default::default(),
+            remote_sync_client_cache: Default::default(),
+            pending_update: Default::default(),
+            pending_linux_update: Default::default(),
+        };
+
+        let source = {
+            let conn = pool.get().expect("get conn");
+            queries::insert_rss_source(&conn, "Dead Entry Feed", &format!("{base_url}/feed.xml"))
+                .expect("insert source")
+        };
+
+        let new_count = sync_rss_source(&state, &source)
+            .await
+            .expect("sync should succeed even though the entry's own fetch fails");
+        assert_eq!(
+            new_count, 1,
+            "the link-only row still counts as newly captured"
+        );
+
+        let conn = pool.get().expect("get conn");
+        let articles = queries::list_articles(&conn).expect("list articles");
+        assert_eq!(articles.len(), 1);
+        let detail = queries::get_article(&conn, &articles[0].id)
+            .unwrap()
+            .unwrap();
+        assert!(detail.capture_failed);
+        assert!(detail.capture_error.is_some());
+
+        // A second sync must not re-attempt it: `UNIQUE(link)` already
+        // marked it seen.
+        let second_count = sync_rss_source(&state, &source)
+            .await
+            .expect("second sync should also succeed");
+        assert_eq!(second_count, 0);
     }
 
     /// `add_source` seeds a new source's `name` with its raw feed URL as a

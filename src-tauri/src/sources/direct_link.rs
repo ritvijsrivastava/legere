@@ -2,7 +2,7 @@ use std::path::Path;
 
 use thiserror::Error;
 
-use crate::capture::{self, CaptureError};
+use crate::capture;
 use crate::db::DbPool;
 use crate::db::queries;
 use crate::models::ArticleSummary;
@@ -10,8 +10,6 @@ use crate::state::AppState;
 
 #[derive(Debug, Error)]
 pub enum DirectLinkError {
-    #[error(transparent)]
-    Capture(#[from] CaptureError),
     #[error(transparent)]
     Db(#[from] rusqlite::Error),
     #[error(transparent)]
@@ -42,7 +40,11 @@ pub async fn capture_and_store(
     url: &str,
 ) -> Result<ArticleSummary, DirectLinkError> {
     let id = uuid::Uuid::new_v4().to_string();
-    let output = capture::capture_local(http_client, data_dir, &id, url).await?;
+    // Capture itself never fails this call outright — a dead link still
+    // comes back as a link-only `LocalCaptureOutput` (`capture_failed =
+    // true`) and gets stored like any other article; see
+    // `capture::capture_local_or_link_only`.
+    let output = capture::capture_local_or_link_only(http_client, data_dir, &id, url).await;
 
     let conn = pool.get()?;
     let inserted = queries::insert_captured_article(&conn, &id, None, "direct", &output, &[])?;
