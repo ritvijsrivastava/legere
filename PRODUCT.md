@@ -115,7 +115,7 @@ and is out of scope unless revisited later.)
   keep the plain by-title search only, since they're already scoped to
   one slice of the library.
 - Categories: flat, user-managed folders, managed from the sidebar/library
-  (not Settings). The desktop sidebar's Categories section is collapsible
+  (not Settings). The desktop sidebar itself collapses to an icon rail (toggle or Ctrl/⌘+B, remembered per device; Categories and Tags then open as flyouts). Its Categories section is collapsible
   and shows the virtual Uncategorized entry plus the five busiest real
   categories (by article count), with a "Manage categories" link into
   `/categories`, which lists every category with create/rename/delete/

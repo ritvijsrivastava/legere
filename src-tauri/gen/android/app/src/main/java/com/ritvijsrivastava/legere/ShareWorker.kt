@@ -26,7 +26,9 @@ import org.json.JSONObject
  *
  * Owns one notification (`inputData`'s `KEY_NOTIFICATION_ID`) for the
  * whole job: posted as an ongoing/indeterminate "Saving..." by
- * [getForegroundInfo] when the job starts, replaced with a final
+ * `ShareActivity` the instant the share arrives (and by
+ * [getForegroundInfo] on Android 11, the only version that calls it),
+ * replaced with a final
  * saved/failed state in [doWork] once `NativeCapture.captureSharedUrl`
  * returns.
  */
@@ -85,6 +87,8 @@ class ShareWorker(appContext: Context, params: WorkerParameters) : Worker(appCon
             text = null,
             ongoing = true,
         )
+        // (API 30 only — on Android 12+ expedited work never calls this;
+        // `ShareActivity` posts the same notification itself instead.)
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             ForegroundInfo(notificationId, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         } else {
@@ -92,68 +96,91 @@ class ShareWorker(appContext: Context, params: WorkerParameters) : Worker(appCon
         }
     }
 
-    private fun notifyIfPermitted(id: Int, notification: Notification) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(applicationContext, android.Manifest.permission.POST_NOTIFICATIONS) !=
-            PackageManager.PERMISSION_GRANTED
-        ) {
-            // The user denied the permission prompt (or it was never
-            // asked) \u2014 the capture itself still ran and still succeeded
-            // or failed; there's just no visible confirmation of it.
-            return
-        }
-        val manager = applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        manager.notify(id, notification)
-    }
+    private fun notifyIfPermitted(id: Int, notification: Notification) =
+        notifyIfPermitted(applicationContext, id, notification)
 
-    private fun buildNotification(title: String, text: String?, ongoing: Boolean): Notification {
-        ensureChannel()
-        val openApp = Intent(applicationContext, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-        }
-        val contentIntent = PendingIntent.getActivity(
-            applicationContext,
-            0,
-            openApp,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-        return NotificationCompat.Builder(applicationContext, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_stat_legere)
-            .setColor(ContextCompat.getColor(applicationContext, R.color.notification_accent))
-            .setContentTitle(title)
-            .setOngoing(ongoing)
-            .setOnlyAlertOnce(true)
-            .setAutoCancel(!ongoing)
-            .setContentIntent(contentIntent)
-            .apply {
-                text?.let {
-                    setContentText(it)
-                    // Errors are long; let the shade show all of it.
-                    setStyle(NotificationCompat.BigTextStyle().bigText(it))
-                }
-            }
-            .apply { if (ongoing) setProgress(0, 0, true) }
-            .build()
-    }
-
-    private fun ensureChannel() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-        val manager = applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        if (manager.getNotificationChannel(CHANNEL_ID) != null) return
-        val channel = NotificationChannel(
-            CHANNEL_ID,
-            applicationContext.getString(R.string.share_notification_channel_name),
-            NotificationManager.IMPORTANCE_LOW,
-        ).apply {
-            description = applicationContext.getString(R.string.share_notification_channel_description)
-        }
-        manager.createNotificationChannel(channel)
-    }
+    private fun buildNotification(title: String, text: String?, ongoing: Boolean): Notification =
+        buildNotification(applicationContext, title, text, ongoing)
 
     companion object {
         const val KEY_URL = "url"
         const val KEY_NOTIFICATION_ID = "notification_id"
         const val CHANNEL_ID = "share_capture"
         const val DEFAULT_NOTIFICATION_ID = 1
+
+        /**
+         * How long the "Saving…" notification [ShareActivity] posts may stay
+         * if nothing ever replaces it (process killed, job never ran) —
+         * long enough for any real capture, short enough that a stuck one
+         * clears itself.
+         */
+        const val SAVING_TIMEOUT_MS = 2 * 60 * 1000L
+
+        /**
+         * Posts [notification] unless the user denied POST_NOTIFICATIONS
+         * (Android 13+) — the capture itself still runs and still succeeds
+         * or fails; there's just no visible confirmation of it.
+         */
+        fun notifyIfPermitted(context: Context, id: Int, notification: Notification) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                ContextCompat.checkSelfPermission(context, android.Manifest.permission.POST_NOTIFICATIONS) !=
+                PackageManager.PERMISSION_GRANTED
+            ) {
+                return
+            }
+            val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            manager.notify(id, notification)
+        }
+
+        fun buildNotification(
+            context: Context,
+            title: String,
+            text: String?,
+            ongoing: Boolean,
+            timeoutMs: Long? = null,
+        ): Notification {
+            ensureChannel(context)
+            val openApp = Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+            val contentIntent = PendingIntent.getActivity(
+                context,
+                0,
+                openApp,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            return NotificationCompat.Builder(context, CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_stat_legere)
+                .setColor(ContextCompat.getColor(context, R.color.notification_accent))
+                .setContentTitle(title)
+                .setOngoing(ongoing)
+                .setOnlyAlertOnce(true)
+                .setAutoCancel(!ongoing)
+                .setContentIntent(contentIntent)
+                .apply {
+                    text?.let {
+                        setContentText(it)
+                        // Errors are long; let the shade show all of it.
+                        setStyle(NotificationCompat.BigTextStyle().bigText(it))
+                    }
+                    timeoutMs?.let { setTimeoutAfter(it) }
+                    if (ongoing) setProgress(0, 0, true)
+                }
+                .build()
+        }
+
+        private fun ensureChannel(context: Context) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+            val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            if (manager.getNotificationChannel(CHANNEL_ID) != null) return
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                context.getString(R.string.share_notification_channel_name),
+                NotificationManager.IMPORTANCE_LOW,
+            ).apply {
+                description = context.getString(R.string.share_notification_channel_description)
+            }
+            manager.createNotificationChannel(channel)
+        }
     }
 }

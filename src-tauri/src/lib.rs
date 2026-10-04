@@ -110,6 +110,22 @@ pub fn run() {
     #[cfg(all(target_os = "android", feature = "apk-self-update"))]
     let builder = builder.plugin(tauri_plugin_apk_installer::init());
 
+    // Desktop debug builds (`tauri dev`, `cargo run`) get their own
+    // identifier, and therefore their own data/config/cache/webview
+    // directories (Tauri derives every `app_*_dir` and the webview's
+    // storage from it) — a dev run must never touch the installed app's
+    // library, settings, or sync credentials. Release builds and Android
+    // are untouched.
+    let mut context = tauri::generate_context!();
+    #[cfg(all(debug_assertions, desktop))]
+    {
+        let config = context.config_mut();
+        config.identifier = format!("{}.dev", config.identifier);
+        for window in &mut config.app.windows {
+            window.title = format!("{} (dev)", window.title);
+        }
+    }
+
     builder
         // Serves an article's own localized content images out of its
         // `content/<id>/` directory — see `content_server`'s module docs.
@@ -321,7 +337,7 @@ pub fn run() {
             #[cfg(all(target_os = "android", feature = "apk-self-update"))]
             android_download_and_install,
         ])
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building tauri application")
         .run(|app_handle, event| {
             // Unused on desktop, where autosync's own interval loop keeps

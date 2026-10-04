@@ -20,7 +20,13 @@ use rand::rngs::OsRng;
 
 use super::{KeySource, VaultError};
 
-const SERVICE: &str = "legere";
+/// Debug builds (dev runs, `cargo test`) use their own Secret Service
+/// entry so they never read or create the installed app's key.
+const SERVICE: &str = if cfg!(debug_assertions) {
+    "legere-dev"
+} else {
+    "legere"
+};
 const ACCOUNT: &str = "remote-sync-credential-key";
 
 pub struct LinuxKeySource;

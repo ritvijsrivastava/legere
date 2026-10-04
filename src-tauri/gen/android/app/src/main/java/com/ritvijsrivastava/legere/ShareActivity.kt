@@ -45,11 +45,17 @@ class ShareActivity : ComponentActivity() {
         }
         val url = sharedText?.let(::extractFirstUrl)
         if (url == null) {
-            Toast.makeText(this, getString(R.string.share_no_link_found), Toast.LENGTH_SHORT).show()
+            Toast.makeText(applicationContext, getString(R.string.share_no_link_found), Toast.LENGTH_SHORT).show()
             finish()
             return
         }
         pendingUrl = url
+        // Instant feedback: the capture takes seconds and the share sheet
+        // has already closed, so without this nothing at all confirms the
+        // share was received. Works even if notifications are denied.
+        // `applicationContext`, not `this`: an Activity-bound toast is torn
+        // down with the Activity's window, and this one finishes at once.
+        Toast.makeText(applicationContext, getString(R.string.share_saving_toast), Toast.LENGTH_SHORT).show()
 
         val needsPermissionPrompt = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
@@ -71,6 +77,23 @@ class ShareActivity : ComponentActivity() {
         }
 
         val notificationId = (System.currentTimeMillis() and 0x7fffffff).toInt()
+        // Posted here, not by ShareWorker: on Android 12+ expedited work
+        // never calls `getForegroundInfo`, so the worker's own "Saving…"
+        // notification would never appear. Same id — the worker replaces
+        // this one with the saved/failed result; the timeout clears it if
+        // the job never gets to.
+        ShareWorker.notifyIfPermitted(
+            applicationContext,
+            notificationId,
+            ShareWorker.buildNotification(
+                applicationContext,
+                title = getString(R.string.share_saving_title),
+                text = null,
+                ongoing = true,
+                timeoutMs = ShareWorker.SAVING_TIMEOUT_MS,
+            ),
+        )
+
         val data = Data.Builder()
             .putString(ShareWorker.KEY_URL, url)
             .putInt(ShareWorker.KEY_NOTIFICATION_ID, notificationId)

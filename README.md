@@ -95,6 +95,10 @@ npm install --prefix frontend   # frontend deps
 npx --prefix frontend tauri dev # desktop dev build
 ```
 
+Dev builds use a separate data directory (`~/.local/share/com.ritvijsrivastava.legere.dev/`
+on Linux) and their own settings, so they never touch an installed Legere's
+library or sync setup; they start empty.
+
 ### Android
 
 Prerequisites on `PATH`/in the environment: Android SDK + NDK (pinned to

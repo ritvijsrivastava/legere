@@ -5,6 +5,7 @@
 	import { uiStore } from '$lib/stores/ui.svelte';
 	import { libraryStatsStore } from '$lib/stores/libraryStats.svelte';
 	import { libraryFiltersStore } from '$lib/stores/libraryFilters.svelte';
+	import { sidebarStore } from '$lib/stores/sidebar.svelte';
 	import * as api from '$lib/api';
 	import ArticleCard from './ArticleCard.svelte';
 	import ArticleListRow from './ArticleListRow.svelte';
@@ -643,6 +644,24 @@
 		</div>
 	</div>
 
+	<!-- Desktop only: with the sidebar collapsed, its pinned selected-tags
+	     list is hidden, so an active tag filter would otherwise be invisible.
+	     Mobile already has its own chip row below. -->
+	{#if sidebarStore.collapsed && libraryFiltersStore.tags.length > 0}
+		<div class="desktop-filters">
+			{#each libraryFiltersStore.tags as tag (tag)}
+				<button
+					class="filter-chip"
+					onclick={() => libraryFiltersStore.toggleTag(tag)}
+					aria-label={`Remove ${tag} filter`}
+				>
+					#{tag}
+					<X size={10} />
+				</button>
+			{/each}
+		</div>
+	{/if}
+
 	{#if showCategoryChips || showTagsChip}
 		<div class="mobile-chips">
 			{#if showCategoryChips}
@@ -1036,8 +1055,38 @@
 	.mobile-chips {
 		display: none;
 	}
+	.desktop-filters {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 6px;
+		flex: none;
+		margin: -8px 0 16px;
+		padding: 0 36px;
+	}
+	.filter-chip {
+		display: flex;
+		align-items: center;
+		gap: 5px;
+		font-family: var(--font-body);
+		font-size: 12px;
+		font-weight: 600;
+		padding: 5px 11px;
+		border-radius: 999px;
+		background: color-mix(in srgb, var(--color-accent) 14%, var(--color-surface));
+		color: var(--color-accent);
+		border: none;
+		cursor: pointer;
+		transition: transform var(--duration-fast) var(--ease-snap);
+	}
+	.filter-chip:active {
+		transform: scale(0.96);
+	}
 
 	@media (max-width: 768px) {
+		.desktop-filters {
+			display: none;
+		}
 		.collection-page {
 			padding: calc(20px + env(safe-area-inset-top)) 0 0;
 		}

@@ -84,6 +84,14 @@ content/<id>/      per-article localized images (never evicted)
 media/<id>.jpg     resized hero thumbnails for library cards
 ```
 
+**Dev and release builds never share data.** Desktop debug builds (`tauri dev`,
+`cargo run`) append `.dev` to the bundle identifier at startup (`lib.rs`), so
+Tauri resolves a separate `com.ritvijsrivastava.legere.dev/` directory —
+database, `legere-store.json`, webview `localStorage` — and the window title
+reads "Legere (dev)". Linux debug builds also use their own Secret Service
+entry (`legere-dev`, `credential_vault::linux`). Release builds and Android
+are unchanged; a dev run starts with an empty library and no sync config.
+
 ## The capture pipeline
 
 Every ingestion path funnels into `capture::capture_local(client, data_dir, id, url)`:
@@ -379,10 +387,16 @@ share sheet -> ShareActivity (invisible trampoline, never inflates a layout)
   gets automatic retry/backoff. Chosen over a bare `Service` specifically
   to avoid the OS deprioritizing/killing an image-heavy capture once the
   trampoline Activity is gone.
-- **`ShareWorker`** owns one notification for the job's lifetime —
-  ongoing/indeterminate while running (`getForegroundInfo`, which is what
-  lets WorkManager legally promote this to a foreground service), replaced
-  with a final saved/failed state in `doWork`. Tapping it opens
+- **Instant feedback** — `ShareActivity` shows a "Saving to Legere…" toast
+  the moment the share arrives and posts the ongoing "Saving article…"
+  notification itself (2-minute timeout, so a job that never runs can't leave
+  it stuck). It can't be left to the worker: on Android 12+ expedited work
+  never calls `getForegroundInfo`, so the worker's own copy only ever existed
+  on Android 11 and the first thing a user saw was the final result.
+- **`ShareWorker`** owns that same notification id for the job's lifetime —
+  `getForegroundInfo` (Android 11 only) is what lets WorkManager legally
+  promote the job to a foreground service there; `doWork` replaces the
+  notification with the final saved/failed state. Tapping it opens
   `MainActivity`. Its small icon is `res/drawable/ic_stat_legere.xml` (shared with `ImportWorker` and `RemoteSyncWorker`), a
   flat single-colour vector of the logo (status-bar icons are alpha-masked,
   so the full-colour launcher mipmap would show as a white square).
@@ -951,6 +965,11 @@ back. Every check now re-derives the answer against the installed version
 
 - **Svelte 5 runes** (`$props`, `$state`, `$effect`, `$derived`) throughout;
   stores are `.svelte.ts` modules.
+- **Sidebar collapse** — `stores/sidebar.svelte.ts` holds the desktop
+  sidebar's collapsed flag in `localStorage` (`legere.sidebar.collapsed`,
+  read synchronously so there's no flash); `Shell.svelte` renders either the
+  full sidebar or a 64px rail with flyouts (Categories, Tags, update card).
+  A per-device UI preference, deliberately not in the `settings` table.
 - **Routes** — `/` (library), `/favorites`, `/category/[id]` (its settings
   gear opens `CategorySettingsDialog` to rename/delete/re-icon that one
   category), `/categories` (every category in one list, create/rename/

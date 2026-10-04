@@ -12,6 +12,13 @@
 	import { libraryStatsStore } from '$lib/stores/libraryStats.svelte';
 	import { captureJobsStore } from '$lib/stores/captureJobs.svelte';
 	import { uiStore } from '$lib/stores/ui.svelte';
+	import { sidebarStore } from '$lib/stores/sidebar.svelte';
+	import { libraryFiltersStore } from '$lib/stores/libraryFilters.svelte';
+	import PanelLeftClose from '$lib/icons/lucide/panel-left-close.svelte';
+	import PanelLeftOpen from '$lib/icons/lucide/panel-left-open.svelte';
+	import CircleArrowUp from '$lib/icons/lucide/circle-arrow-up.svelte';
+	import Hash from '$lib/icons/Hash.svelte';
+	import Folder from '$lib/icons/Folder.svelte';
 	import Refresh from '$lib/icons/Refresh.svelte';
 	import CategoryIcon from '$lib/components/CategoryIcon.svelte';
 	import { goto } from '$app/navigation';
@@ -132,7 +139,100 @@
 	// is expanded.
 	let categoriesOpen = $state(true);
 	let tagsOpen = $state(true);
+
+	// ── Collapsed rail ───────────────────────────────────────────────────────
+	// The sidebar can collapse to a 64px icon rail (`sidebarStore`, persisted
+	// per device). Sections that are lists in the full sidebar (Categories,
+	// Tags, the update card) become one icon each that opens a flyout beside
+	// the rail; only one flyout is open at a time.
+	let collapsed = $derived(sidebarStore.collapsed);
+	type Flyout = 'categories' | 'tags' | 'update';
+	let openFlyout = $state<Flyout | null>(null);
+	const modKey =
+		typeof navigator !== 'undefined' && /Mac/.test(navigator.platform) ? '\u2318' : 'Ctrl+';
+
+	function toggleFlyout(flyout: Flyout) {
+		openFlyout = openFlyout === flyout ? null : flyout;
+	}
+
+	function toggleSidebar() {
+		openFlyout = null;
+		sidebarStore.toggle();
+	}
+
+	let onCategoryRoute = $derived(page.url.pathname.startsWith('/category/'));
+	let activeTagCount = $derived(libraryFiltersStore.tags.length);
+
+	// Navigating (e.g. picking a category in the flyout) closes it.
+	$effect(() => {
+		void page.url.pathname;
+		openFlyout = null;
+	});
+
+	$effect(() => {
+		function onPointerDown(event: PointerEvent) {
+			if (openFlyout && !(event.target as Element | null)?.closest?.('.rail-slot')) {
+				openFlyout = null;
+			}
+		}
+		function onKeydown(event: KeyboardEvent) {
+			if (event.key === 'Escape' && openFlyout) {
+				document.querySelector<HTMLElement>('.rail-slot.has-flyout > .rail-item')?.focus();
+				openFlyout = null;
+				return;
+			}
+			if (
+				(event.ctrlKey || event.metaKey) &&
+				!event.altKey &&
+				!event.shiftKey &&
+				event.key.toLowerCase() === 'b' &&
+				!isMobile
+			) {
+				const target = event.target as HTMLElement | null;
+				if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) {
+					return;
+				}
+				event.preventDefault();
+				toggleSidebar();
+			}
+		}
+		window.addEventListener('pointerdown', onPointerDown);
+		window.addEventListener('keydown', onKeydown);
+		return () => {
+			window.removeEventListener('pointerdown', onPointerDown);
+			window.removeEventListener('keydown', onKeydown);
+		};
+	});
 </script>
+
+{#snippet categoryRows()}
+	{#if uncategorized}
+		<a
+			href="/category/{uncategorized.id}"
+			class="row-item"
+			class:active={isActiveCategory(uncategorized.id)}
+		>
+			<CategoryIcon icon={uncategorized.icon} size={13} />
+			<span class="row-label">{uncategorized.name}</span>
+			<span class="nav-count">{uncategorized.article_count}</span>
+		</a>
+	{/if}
+	{#each topCategories as category (category.id)}
+		<a
+			href="/category/{category.id}"
+			class="row-item"
+			class:active={isActiveCategory(category.id)}
+		>
+			<CategoryIcon icon={category.icon} size={13} />
+			<span class="row-label">{category.name}</span>
+			<span class="nav-count">{category.article_count}</span>
+		</a>
+	{/each}
+	<a href="/categories" class="manage-link">
+		<span>Manage categories</span>
+		<span class="nav-count">{categories.length - (uncategorized ? 1 : 0)}</span>
+	</a>
+{/snippet}
 
 {#snippet sidebarNav()}
 	<nav class="nav-list">
@@ -157,32 +257,7 @@
 			<span class="chevron" class:open={categoriesOpen}><ChevronRight size={13} /></span>
 		</button>
 		{#if categoriesOpen}
-			{#if uncategorized}
-				<a
-					href="/category/{uncategorized.id}"
-					class="row-item"
-					class:active={isActiveCategory(uncategorized.id)}
-				>
-					<CategoryIcon icon={uncategorized.icon} size={13} />
-					<span class="row-label">{uncategorized.name}</span>
-					<span class="nav-count">{uncategorized.article_count}</span>
-				</a>
-			{/if}
-			{#each topCategories as category (category.id)}
-				<a
-					href="/category/{category.id}"
-					class="row-item"
-					class:active={isActiveCategory(category.id)}
-				>
-					<CategoryIcon icon={category.icon} size={13} />
-					<span class="row-label">{category.name}</span>
-					<span class="nav-count">{category.article_count}</span>
-				</a>
-			{/each}
-			<a href="/categories" class="manage-link">
-				<span>Manage categories</span>
-				<span class="nav-count">{categories.length - (uncategorized ? 1 : 0)}</span>
-			</a>
+			{@render categoryRows()}
 		{/if}
 	{/if}
 
@@ -203,44 +278,186 @@
 
 <div class="app-root" class:mobile={isMobile}>
 	{#if !isMobile}
-		<div class="sidebar">
-			<div class="brand-row">
-				<div class="brand">
-					<span class="brand-mark"><Logo size={24} /></span>
-					Legere
-				</div>
-			</div>
-			<button onclick={() => uiStore.openAddSource()} class="btn btn-primary btn-block add-source-btn">
-				<Plus size={15} />
-				Add source
-			</button>
-			{#if captureJobsStore.jobs.length > 0}
-				<button
-					class="activity-btn"
-					class:activity-btn-failed={captureJobsStore.failedCount > 0}
-					onclick={() => uiStore.openCaptureJobs()}
-				>
-					{#if captureJobsStore.runningCount > 0}
-						<Refresh size={13} spinning />
+		<div class="sidebar" class:collapsed>
+			{#if collapsed}
+				<div class="rail">
+					<span class="brand-mark rail-mark"><Logo size={24} /></span>
+					<button
+						class="rail-item"
+						data-tip="Expand sidebar  {modKey}B"
+						aria-label="Expand sidebar"
+						aria-expanded="false"
+						onclick={toggleSidebar}
+					>
+						<PanelLeftOpen size={18} />
+					</button>
+					<button
+						class="btn btn-primary btn-icon rail-add"
+						data-tip="Add source"
+						aria-label="Add source"
+						onclick={() => uiStore.openAddSource()}
+					>
+						<Plus size={18} />
+					</button>
+					{#if captureJobsStore.jobs.length > 0}
+						{@const activityLabel =
+							captureJobsStore.failedCount > 0
+								? `${captureJobsStore.failedCount} failed to add`
+								: 'Adding\u2026'}
+						<button
+							class="rail-item rail-activity"
+							class:rail-activity-failed={captureJobsStore.failedCount > 0}
+							data-tip={activityLabel}
+							aria-label={activityLabel}
+							onclick={() => uiStore.openCaptureJobs()}
+						>
+							<Refresh size={16} spinning={captureJobsStore.runningCount > 0} />
+							{#if captureJobsStore.failedCount > 0}<span class="rail-dot rail-dot-danger"></span>{/if}
+						</button>
 					{/if}
-					<span class="row-label">
-						{captureJobsStore.failedCount > 0
-							? `${captureJobsStore.failedCount} failed to add`
-							: 'Adding…'}
-					</span>
-				</button>
-			{/if}
-			{@render sidebarNav()}
 
-			<div class="sidebar-spacer"></div>
-			{#if showUpdatePrompt && updateAvailable}
-				<UpdateToast
-					version={updateAvailable.version}
-					notes={updateAvailable.notes}
-					variant="inline"
-					onUpdate={() => goto('/settings')}
-					onDismiss={dismissUpdate}
-				/>
+					<nav class="rail-group" aria-label="Main">
+						{#each navItems as item (item.href)}
+							{@const tip = item.count ? `${item.label} \u00b7 ${item.count()}` : item.label}
+							<a
+								href={item.href}
+								class="rail-item"
+								class:active={isActive(item.href)}
+								data-tip={tip}
+								aria-label={tip}
+							>
+								<item.Icon size={18} />
+							</a>
+						{/each}
+					</nav>
+
+					{#if categories.length > 0 || tags.length > 0}<div class="rail-divider"></div>{/if}
+
+					{#if categories.length > 0}
+						<div class="rail-slot" class:has-flyout={openFlyout === 'categories'}>
+							<button
+								class="rail-item"
+								class:active={onCategoryRoute}
+								class:open={openFlyout === 'categories'}
+								data-tip="Categories"
+								aria-label="Categories"
+								aria-haspopup="true"
+								aria-expanded={openFlyout === 'categories'}
+								onclick={() => toggleFlyout('categories')}
+							>
+								<Folder size={18} />
+							</button>
+							{#if openFlyout === 'categories'}
+								<div class="flyout" role="group" aria-label="Categories">
+									<div class="flyout-title section-label">Categories</div>
+									{@render categoryRows()}
+								</div>
+							{/if}
+						</div>
+					{/if}
+
+					{#if tags.length > 0}
+						<div class="rail-slot" class:has-flyout={openFlyout === 'tags'}>
+							<button
+								class="rail-item"
+								class:active={activeTagCount > 0}
+								class:open={openFlyout === 'tags'}
+								data-tip={activeTagCount > 0 ? `Tags \u00b7 ${activeTagCount} selected` : 'Tags'}
+								aria-label={activeTagCount > 0 ? `Tags, ${activeTagCount} selected` : 'Tags'}
+								aria-haspopup="true"
+								aria-expanded={openFlyout === 'tags'}
+								onclick={() => toggleFlyout('tags')}
+							>
+								<Hash size={18} />
+								{#if activeTagCount > 0}<span class="rail-badge">{activeTagCount}</span>{/if}
+							</button>
+							{#if openFlyout === 'tags'}
+								<div class="flyout" role="group" aria-label="Tags">
+									<div class="flyout-title section-label">Tags</div>
+									<TagBrowser maxVisible={12} />
+								</div>
+							{/if}
+						</div>
+					{/if}
+
+					<div class="sidebar-spacer"></div>
+
+					{#if showUpdatePrompt && updateAvailable}
+						<div class="rail-slot" class:has-flyout={openFlyout === 'update'}>
+							<button
+								class="rail-item"
+								class:open={openFlyout === 'update'}
+								data-tip="Update available \u2014 v{updateAvailable.version}"
+								aria-label="Update available, version {updateAvailable.version}"
+								aria-haspopup="true"
+								aria-expanded={openFlyout === 'update'}
+								onclick={() => toggleFlyout('update')}
+							>
+								<CircleArrowUp size={18} />
+								<span class="rail-dot"></span>
+							</button>
+							{#if openFlyout === 'update'}
+								<div class="flyout flyout-flush flyout-bottom" role="group" aria-label="Update available">
+									<UpdateToast
+										version={updateAvailable.version}
+										notes={updateAvailable.notes}
+										variant="inline"
+										onUpdate={() => goto('/settings')}
+										onDismiss={dismissUpdate}
+									/>
+								</div>
+							{/if}
+						</div>
+					{/if}
+				</div>
+			{:else}
+				<div class="brand-row">
+					<div class="brand">
+						<span class="brand-mark"><Logo size={24} /></span>
+						Legere
+					</div>
+					<button
+						class="icon-toggle"
+						title="Collapse sidebar ({modKey}B)"
+						aria-label="Collapse sidebar"
+						aria-expanded="true"
+						onclick={toggleSidebar}
+					>
+						<PanelLeftClose size={16} />
+					</button>
+				</div>
+				<button onclick={() => uiStore.openAddSource()} class="btn btn-primary btn-block add-source-btn">
+					<Plus size={15} />
+					Add source
+				</button>
+				{#if captureJobsStore.jobs.length > 0}
+					<button
+						class="activity-btn"
+						class:activity-btn-failed={captureJobsStore.failedCount > 0}
+						onclick={() => uiStore.openCaptureJobs()}
+					>
+						{#if captureJobsStore.runningCount > 0}
+							<Refresh size={13} spinning />
+						{/if}
+						<span class="row-label">
+							{captureJobsStore.failedCount > 0
+								? `${captureJobsStore.failedCount} failed to add`
+								: 'Adding\u2026'}
+						</span>
+					</button>
+				{/if}
+				{@render sidebarNav()}
+
+				<div class="sidebar-spacer"></div>
+				{#if showUpdatePrompt && updateAvailable}
+					<UpdateToast
+						version={updateAvailable.version}
+						notes={updateAvailable.notes}
+						variant="inline"
+						onUpdate={() => goto('/settings')}
+						onDismiss={dismissUpdate}
+					/>
+				{/if}
 			{/if}
 		</div>
 	{/if}
@@ -327,6 +544,34 @@
 		display: none;
 		width: 0;
 		height: 0;
+	}
+	.sidebar > :global(*) {
+		animation: sidebar-fade var(--duration-base) var(--ease-snap);
+	}
+	@keyframes sidebar-fade {
+		from {
+			opacity: 0;
+		}
+	}
+	.icon-toggle {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 28px;
+		height: 28px;
+		flex: none;
+		background: transparent;
+		border: none;
+		border-radius: 8px;
+		color: var(--color-muted);
+		cursor: pointer;
+		transition:
+			background var(--duration-fast) var(--ease-snap),
+			color var(--duration-fast) var(--ease-snap);
+	}
+	.icon-toggle:hover {
+		background: var(--color-surface);
+		color: var(--color-text);
 	}
 	.brand-row {
 		display: flex;
@@ -490,6 +735,185 @@
 	}
 	.activity-btn :global(svg) {
 		flex: none;
+	}
+
+	/* ── Collapsed rail ─────────────────────────────────────────────────────
+	   Icons only; flyouts and tooltips extend past the rail's edge, so it
+	   stops clipping (it never needs to scroll at this density) and sits
+	   above the content column. */
+	.sidebar.collapsed {
+		width: 64px;
+		padding: 20px 12px;
+		overflow: visible;
+		position: relative;
+		z-index: 30;
+	}
+	.rail {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 4px;
+		flex: 1;
+		min-height: 0;
+	}
+	.rail-mark {
+		margin: 2px 0 10px;
+	}
+	.rail-group {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 2px;
+		margin-top: 10px;
+	}
+	.rail-divider {
+		width: 24px;
+		height: 1px;
+		background: var(--color-divider);
+		margin: 8px 0;
+	}
+	.rail-slot {
+		position: relative;
+		display: flex;
+	}
+	.rail-item {
+		position: relative;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 40px;
+		height: 40px;
+		flex: none;
+		background: transparent;
+		color: var(--color-text);
+		border: none;
+		border-radius: 10px;
+		cursor: pointer;
+		text-decoration: none;
+		transition:
+			background var(--duration-fast) var(--ease-snap),
+			color var(--duration-fast) var(--ease-snap),
+			transform var(--duration-fast) var(--ease-snap);
+	}
+	.rail-item:hover,
+	.rail-item.open {
+		background: var(--color-surface);
+	}
+	.rail-item:active {
+		transform: scale(0.96);
+	}
+	.rail-item.active {
+		background: var(--color-surface);
+		color: var(--color-accent);
+	}
+	/* "Add source" keeps the shared .btn-primary chrome; only its box is
+	   widened to the rail's 40px target (layout-only, see DESIGN.md). */
+	.rail-add {
+		width: 40px;
+		height: 40px;
+		margin-top: 2px;
+	}
+	.rail-activity {
+		color: var(--color-muted);
+	}
+	.rail-activity-failed {
+		color: var(--color-danger);
+	}
+	.rail-badge {
+		position: absolute;
+		top: 3px;
+		right: 2px;
+		min-width: 15px;
+		height: 15px;
+		padding: 0 4px;
+		border-radius: 999px;
+		background: var(--color-accent);
+		color: var(--color-accent-fg);
+		font-size: 10px;
+		font-weight: 600;
+		line-height: 15px;
+		text-align: center;
+	}
+	.rail-dot {
+		position: absolute;
+		top: 8px;
+		right: 8px;
+		width: 7px;
+		height: 7px;
+		border-radius: 50%;
+		background: var(--color-accent);
+		box-shadow: 0 0 0 2px var(--color-bg);
+	}
+	.rail-dot-danger {
+		background: var(--color-danger);
+	}
+
+	/* Tooltips: native `title` takes ~1s and is unstyled in WebKitGTK, so
+	   the rail draws its own — delayed on hover (so sweeping the mouse down
+	   the rail doesn't strobe), immediate on keyboard focus. */
+	.rail [data-tip]::after {
+		content: attr(data-tip);
+		position: absolute;
+		left: calc(100% + 12px);
+		top: 50%;
+		transform: translateY(-50%);
+		padding: 5px 10px;
+		border-radius: var(--radius-md);
+		background: var(--color-surface-raised);
+		color: var(--color-text);
+		box-shadow: var(--shadow-md);
+		font-family: var(--font-body);
+		font-size: 12px;
+		font-weight: 500;
+		white-space: nowrap;
+		pointer-events: none;
+		opacity: 0;
+		z-index: 50;
+	}
+	.rail [data-tip]:not(.open):hover::after {
+		opacity: 1;
+		transition: opacity var(--duration-fast) var(--ease-snap) 0.35s;
+	}
+	.rail [data-tip]:not(.open):focus-visible::after {
+		opacity: 1;
+		transition: opacity var(--duration-fast) var(--ease-snap);
+	}
+
+	.flyout {
+		position: absolute;
+		left: calc(100% + 16px);
+		top: -4px;
+		width: 272px;
+		max-height: min(72vh, 540px);
+		overflow-y: auto;
+		padding: 12px;
+		background: var(--color-surface-raised);
+		border-radius: var(--radius-lg);
+		box-shadow: var(--shadow-md);
+		z-index: 40;
+		animation: flyout-in var(--duration-base) var(--ease-snap);
+	}
+	.flyout-bottom {
+		top: auto;
+		bottom: -4px;
+	}
+	/* The update card is already a surface of its own — it *is* the flyout
+	   here, so no card nested in a card. */
+	.flyout-flush {
+		padding: 0;
+		background: var(--color-surface);
+	}
+	.flyout-flush :global(.update-toast) {
+		margin-top: 0;
+	}
+	.flyout-title {
+		padding: 0 4px 8px;
+	}
+	@keyframes flyout-in {
+		from {
+			opacity: 0;
+			transform: translateX(-6px);
+		}
 	}
 
 	.content {
