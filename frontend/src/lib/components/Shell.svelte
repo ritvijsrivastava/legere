@@ -18,6 +18,7 @@
 	import PanelLeftOpen from '$lib/icons/lucide/panel-left-open.svelte';
 	import CircleArrowUp from '$lib/icons/lucide/circle-arrow-up.svelte';
 	import Hash from '$lib/icons/Hash.svelte';
+	import Search from '$lib/icons/Search.svelte';
 	import Folder from '$lib/icons/Folder.svelte';
 	import Refresh from '$lib/icons/Refresh.svelte';
 	import CategoryIcon from '$lib/components/CategoryIcon.svelte';
@@ -137,6 +138,14 @@
 	// narrow logic for tags lives in the shared `TagBrowser` (also used by
 	// the mobile Tags sheet); this component only owns whether each section
 	// is expanded.
+	// Search reaches past the busiest-5 cap: a non-empty query matches every
+	// category (Uncategorized included); empty shows the capped default.
+	let categorySearch = $state('');
+	let visibleCategories = $derived.by(() => {
+		const query = categorySearch.trim().toLowerCase();
+		if (!query) return [...(uncategorized ? [uncategorized] : []), ...topCategories];
+		return categories.filter((c) => c.name.toLowerCase().includes(query));
+	});
 	let categoriesOpen = $state(true);
 	let tagsOpen = $state(true);
 
@@ -206,18 +215,20 @@
 </script>
 
 {#snippet categoryRows()}
-	{#if uncategorized}
-		<a
-			href="/category/{uncategorized.id}"
-			class="row-item"
-			class:active={isActiveCategory(uncategorized.id)}
-		>
-			<CategoryIcon icon={uncategorized.icon} size={13} />
-			<span class="row-label">{uncategorized.name}</span>
-			<span class="nav-count">{uncategorized.article_count}</span>
-		</a>
-	{/if}
-	{#each topCategories as category (category.id)}
+	<div class="cat-search">
+		<Search size={13} />
+		<input
+			type="text"
+			placeholder="Search categories..."
+			aria-label="Search categories"
+			bind:value={categorySearch}
+			spellcheck="false"
+			autocomplete="off"
+			autocorrect="off"
+			autocapitalize="off"
+		/>
+	</div>
+	{#each visibleCategories as category (category.id)}
 		<a
 			href="/category/{category.id}"
 			class="row-item"
@@ -228,6 +239,9 @@
 			<span class="nav-count">{category.article_count}</span>
 		</a>
 	{/each}
+	{#if visibleCategories.length === 0}
+		<div class="cat-empty">No categories match</div>
+	{/if}
 	<a href="/categories" class="manage-link">
 		<span>Manage categories</span>
 		<span class="nav-count">{categories.length - (uncategorized ? 1 : 0)}</span>
@@ -697,6 +711,33 @@
 	.manage-link:hover {
 		background: var(--color-surface);
 		color: var(--color-accent);
+	}
+
+	/* Same field as `TagBrowser`'s `.tag-search` — Categories and Tags
+	   searches should read as one control. */
+	.cat-search {
+		display: flex;
+		align-items: center;
+		gap: 7px;
+		background: var(--color-surface);
+		border-radius: 10px;
+		padding: 7px 10px;
+		margin: 0 0 10px;
+		color: var(--color-muted);
+	}
+	.cat-search input {
+		border: none;
+		background: transparent;
+		outline: none;
+		font: inherit;
+		font-size: 12.5px;
+		width: 100%;
+		color: var(--color-text);
+	}
+	.cat-empty {
+		padding: 8px 10px;
+		font-size: 12px;
+		color: var(--color-muted);
 	}
 
 	.sidebar-spacer {

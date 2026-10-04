@@ -116,7 +116,8 @@ and is out of scope unless revisited later.)
   one slice of the library.
 - Categories: flat, user-managed folders, managed from the sidebar/library
   (not Settings). The desktop sidebar itself collapses to an icon rail (toggle or Ctrl/⌘+B, remembered per device; Categories and Tags then open as flyouts). Its Categories section is collapsible
-  and shows the virtual Uncategorized entry plus the five busiest real
+  and has its own name search (matching every category, not just the
+  busiest five), and shows the virtual Uncategorized entry plus the five busiest real
   categories (by article count), with a "Manage categories" link into
   `/categories`, which lists every category with create/rename/delete/
   re-icon. Uncategorized is always first; clicking any of them opens its
